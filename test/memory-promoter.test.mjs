@@ -13,7 +13,9 @@ import {
   evaluatePromotionPolicy,
   mapToSharedSubject,
   createBackoff,
+  createPromoter,
 } from '../bin/memory-promoter.mjs';
+import { eventStreamRetention } from '../lib/local-event-log.mjs';
 
 // ── Fixtures ─────────────────────────────────────────────
 
@@ -182,5 +184,41 @@ describe('createBackoff', () => {
     b.reset();
     assert.equal(b.failures, 0);
     assert.equal(b.getDelay(), 100);
+  });
+});
+
+// ── createPromoter delivery ──────────────────────────────
+
+describe('createPromoter delivery', () => {
+  it('reads with explicit acks and naks a failed shared publish with a delay', async () => {
+    const added = [];
+    const log = [];
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(makeEvent({ entity_type: 'task', event_type: 'kanban.created' }))),
+      info: { deliveryCount: 1 },
+      ack: () => log.push('ack'),
+      nak: (delay) => log.push(['nak', delay]),
+    };
+    const nc = {
+      jetstreamManager: async () => ({
+        streams: { info: async (name) => ({ config: { name, ...eventStreamRetention() }, state: { messages: 0, bytes: 0 } }) },
+        consumers: {
+          info: async () => { throw Object.assign(new Error('consumer not found'), { api_error: { err_code: 10014 } }); },
+          add: async (stream, cfg) => { added.push({ stream, ...cfg }); },
+        },
+      }),
+      jetstream: () => ({
+        publish: async () => { throw new Error('no responders available'); },
+        consumers: { get: async () => ({ consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() { yield msg; } }) }) },
+      }),
+    };
+    const promoter = await createPromoter(nc, 'node-a', { policy: DEFAULT_POLICY, onError: () => {}, log: () => {} });
+    while (log.length === 0) await new Promise((r) => setTimeout(r, 2));
+    await promoter.stop();
+    assert.equal(added.length, 1);
+    assert.equal(added[0].ack_policy, 'explicit');
+    assert.equal(added[0].max_deliver, 5);
+    assert.deepEqual(log, [['nak', 5000]], 'an undelayed nak on an explicit consumer redelivers in a hot loop');
+    assert.equal(promoter.stats.errors, 1);
   });
 });

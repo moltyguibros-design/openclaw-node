@@ -127,7 +127,7 @@ describe('createSubscriber consumer identity', () => {
       jetstreamManager: async () => ({
         streams: { info: async () => SHARED_INFO },
         consumers: {
-          info: async () => { throw new Error('consumer not found'); },
+          info: async () => { throw Object.assign(new Error('consumer not found'), { api_error: { err_code: 10014 } }); },
           add: async (_stream, cfg) => { added = cfg; },
         },
       }),
@@ -156,7 +156,7 @@ describe('createSubscriber projection', () => {
     return {
       jetstreamManager: async () => ({
         streams: { info: async () => SHARED_INFO },
-        consumers: { info: async () => ({}), add: async () => {} },
+        consumers: { info: async () => ({ config: { ack_policy: 'explicit' } }), add: async () => {} },
       }),
       jetstream: () => ({
         consumers: {

@@ -21,7 +21,7 @@
 
 import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
-import { ensureSharedStream, SHARED_STREAM_NAME, SHARED_CONSUMER_MAX_DELIVER } from '../lib/shared-event-stream.mjs';
+import { ensureExplicitAckConsumer, ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
 import { settleFederationMessage } from '../lib/federation-resilience.mjs';
 import { canonicalNodeId } from '../lib/local-event-log.mjs';
 
@@ -127,6 +127,7 @@ export function evaluateIngestionPolicy(event, nodeId, parsed) {
  *   or rejection naks with a delay.
  * @param {function} [opts.onSkip] - Callback(event, result) on skipped event
  * @param {function} [opts.onError] - Callback(context, err) on errors
+ * @param {function} [opts.log] - Receives consumer migration notices (default console.log)
  * @returns {Promise<{ stop: function, stats: object }>}
  */
 export async function createSubscriber(nc, nodeId, opts = {}) {
@@ -157,7 +158,7 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
       else process.stderr.write(warn + '\n');
     }
   } catch { /* toString may fail on bound/native fns — ignore */ }
-  const { StringCodec, AckPolicy, DeliverPolicy } = _require('nats');
+  const { StringCodec, DeliverPolicy } = _require('nats');
   const sc = StringCodec();
 
   // Ensure shared stream exists (degraded mode if unreachable)
@@ -183,17 +184,10 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
 
   const consumerName = `subscriber-${canonicalNodeId(nodeId)}`;
 
-  // Ensure durable consumer on shared stream
-  try {
-    await jsm.consumers.info(SHARED_STREAM_NAME, consumerName);
-  } catch {
-    await jsm.consumers.add(SHARED_STREAM_NAME, {
-      durable_name: consumerName,
-      ack_policy: AckPolicy.Explicit,
-      deliver_policy: DeliverPolicy.New,
-      max_deliver: SHARED_CONSUMER_MAX_DELIVER,
-    });
-  }
+  await ensureExplicitAckConsumer(jsm, SHARED_STREAM_NAME, {
+    durable_name: consumerName,
+    deliver_policy: DeliverPolicy.New,
+  }, opts.log ?? console.log);
 
   const stats = { ingested: 0, skipped: 0, errors: 0 };
   let running = true;

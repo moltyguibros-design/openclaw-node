@@ -24,7 +24,8 @@ import crypto from 'node:crypto';
 import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
 import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
-import { ensureSharedStream } from '../lib/shared-event-stream.mjs';
+import { ensureExplicitAckConsumer, ensureSharedStream } from '../lib/shared-event-stream.mjs';
+import { settleFederationMessage } from '../lib/federation-resilience.mjs';
 import { canonicalNodeId, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
@@ -219,6 +220,7 @@ export function createBackoff(opts = {}) {
  * @param {function} [opts.onPromote] - Callback on successful promotion
  * @param {function} [opts.onQueueForReview] - Callback on queue_for_review
  * @param {function} [opts.onError] - Callback on publish errors
+ * @param {function} [opts.log] - Receives consumer migration notices (default console.log)
  * @returns {Promise<{ stop: function, backoff: object, policy: object, stats: object }>}
  */
 export async function createPromoter(nc, nodeId, opts = {}) {
@@ -245,17 +247,12 @@ export async function createPromoter(nc, nodeId, opts = {}) {
   const streamName = localEventStreamName(canonicalId);
   const consumerName = `promoter-${canonicalId}`;
 
-  // Ensure durable consumer on local stream
-  try {
-    await jsm.consumers.info(streamName, consumerName);
-  } catch {
-    // A legacy stream on `local.>` also holds other nodes' events.
-    await jsm.consumers.add(streamName, {
-      durable_name: consumerName,
-      deliver_policy: 'new',
-      filter_subject: `${localEventSubjectPrefix(canonicalId)}.>`,
-    });
-  }
+  // A legacy stream on `local.>` also holds other nodes' events.
+  await ensureExplicitAckConsumer(jsm, streamName, {
+    durable_name: consumerName,
+    deliver_policy: 'new',
+    filter_subject: `${localEventSubjectPrefix(canonicalId)}.>`,
+  }, opts.log ?? console.log);
 
   const stats = { promoted: 0, queued: 0, errors: 0 };
   let running = true;
@@ -318,8 +315,7 @@ export async function createPromoter(nc, nodeId, opts = {}) {
           backoff.recordFailure();
           stats.errors++;
           if (opts.onError) opts.onError('publish', err);
-          // NAK for redelivery
-          msg.nak();
+          settleFederationMessage(msg, { failed: true });
           continue;
         }
       } else if (result.decision === 'queue_for_review') {

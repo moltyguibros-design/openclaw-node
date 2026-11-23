@@ -1342,6 +1342,7 @@ async function initFederationSubsystems(nc) {
           }
         },
         onError: (ctx, err) => log(`[federation] subscriber error in ${ctx}: ${err.message}`),
+        log: (m) => log(`[federation] ${m}`),
       });
       log(`[federation] subscriber started in STUB mode — events will be ACKED WITHOUT PROJECTION`);
     } else {

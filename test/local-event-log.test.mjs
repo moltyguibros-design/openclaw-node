@@ -286,9 +286,9 @@ describe('local event consumers read only their node\'s subjects', () => {
     await watcher.stop();
     const promoter = await createPromoter(nc, 'Daedalus.local');
     await promoter.stop();
-    assert.deepEqual(added.map(({ stream, durable_name, filter_subject }) => ({ stream, durable_name, filter_subject })), [
-      { stream: 'local-events-daedalus', durable_name: 'watcher-daedalus', filter_subject: 'local.daedalus.>' },
-      { stream: 'local-events-daedalus', durable_name: 'promoter-daedalus', filter_subject: 'local.daedalus.>' },
+    assert.deepEqual(added.map(({ stream, durable_name, filter_subject, ack_policy, max_deliver }) => ({ stream, durable_name, filter_subject, ack_policy, max_deliver })), [
+      { stream: 'local-events-daedalus', durable_name: 'watcher-daedalus', filter_subject: 'local.daedalus.>', ack_policy: 'explicit', max_deliver: 5 },
+      { stream: 'local-events-daedalus', durable_name: 'promoter-daedalus', filter_subject: 'local.daedalus.>', ack_policy: 'explicit', max_deliver: 5 },
     ]);
   });
 });
