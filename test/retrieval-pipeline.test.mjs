@@ -386,13 +386,26 @@ describe('themeEntitySearch', () => {
     assert.ok(sessionIds.has('session-004'));
   });
 
-  it('handles theme labels containing FTS operator characters', () => {
+  it('matches theme labels that are not valid FTS syntax on their own', () => {
     const now = new Date().toISOString();
     eDb.prepare(`INSERT INTO themes (label, first_seen, last_seen) VALUES (?, ?, ?)`)
-      .run('mesh AND "security"', now, now);
-    // Label is phrase-quoted into the MATCH — must not throw as FTS syntax
-    assert.doesNotThrow(() =>
-      themeEntitySearch(eDb, kDb, 'thoughts on mesh AND "security" hardening', 10));
+      .run('mesh AND', now, now);
+    eDb.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run('session-005', 'Harden the mesh and rotate keys', 'keys leak', 0.8, now);
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    insert.run('session-005', 0, 'user', 'Harden the mesh?', 'Harden the mesh?');
+    insert.run('session-005', 1, 'assistant', 'Rotating keys now.', 'Rotating keys now.');
+    const errors = [];
+    setChannelErrorSink((channel) => errors.push(channel));
+    try {
+      const results = themeEntitySearch(eDb, kDb, 'thoughts on mesh AND hardening', 10);
+      assert.deepEqual(errors, []);
+      assert.deepEqual(results.map(r => `${r.session_id}:${r.turn_index}`), ['session-005:1', 'session-005:0']);
+    } finally {
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
   });
 
   it('respects decision privacy on the theme path when respectPrivacy is set', () => {
