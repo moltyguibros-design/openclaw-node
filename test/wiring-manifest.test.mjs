@@ -19,7 +19,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -163,6 +163,28 @@ describe('isInvoked self-test', () => {
     assert.ok(src.includes('await reconcileKeptBranches();'));
     assert.equal(isInvoked(src.replace('await reconcileKeptBranches();', ''), 'reconcileKeptBranches'), false);
   });
+});
+
+describe('every mesh.collab.* subject the task daemon serves has a sender', () => {
+  const DAEMON = 'bin/mesh-task-daemon.js';
+  const SELF = 'test/wiring-manifest.test.mjs';
+  const daemonSrc = readFileSync(join(REPO_ROOT, DAEMON), 'utf8');
+  const subjects = [...daemonSrc.matchAll(/^\s*'(mesh\.collab\.[a-z.]+)':/gm)].map((m) => m[1]);
+  const senders = ['bin', 'lib', 'mission-control/src', 'test']
+    .flatMap((dir) => readdirSync(join(REPO_ROOT, dir), { recursive: true }).map((f) => join(dir, f)))
+    .filter((f) => /\.(c|m)?js$|\.tsx?$/.test(f) && f !== DAEMON && f !== SELF)
+    .map((f) => ({ f, src: readFileSync(join(REPO_ROOT, f), 'utf8') }));
+
+  it('the handler map serves collab subjects', () => {
+    assert.ok(subjects.includes('mesh.collab.join'), subjects.join(', '));
+  });
+
+  for (const subject of subjects) {
+    it(`${subject} has a sender outside the daemon`, () => {
+      const literal = new RegExp(`${subject.replace(/\./g, '\\.')}['"\`]`);
+      assert.ok(senders.some(({ src }) => literal.test(src)), `${subject} is served but nothing sends it`);
+    });
+  }
 });
 
 describe('production wiring manifest', () => {

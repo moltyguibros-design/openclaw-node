@@ -142,7 +142,7 @@ cooperative/collaborative.
 **Implementation status:** code believed-good, dormant behind stale unit paths (D5); revival in step 1.2.
 
 ```
-TASK SUBMITTED (mesh.collab.create)
+TASK SUBMITTED (mesh.tasks.submit; session auto-created)
   │
   ▼ RECRUITING — 3 nodes join; roles stored once at close
   │   worker_node_id, reviewerA_node_id, reviewerB_node_id (lib/mesh-collab.js createSession() circling block)
@@ -496,7 +496,7 @@ flag) — the review is defence-in-depth, not the primary control.
 ## 7. Subject namespace
 
 ```
-mesh.collab.*          — existing worker collab layer (create/join/reflect/gate/status/find)
+mesh.collab.*          — existing worker collab layer (join/reflect/gate/status/find)
 mesh.tasks.*           — existing task kanban (submit/claim/complete/fail/heartbeat/…)
 mesh.plans.*           — existing subtask layer (create/approve/subtask.update)
 mesh.mgmt.*            — NEW (step 4.1) management layer (submit/decompose.vote/dispatch/assemble/verify.vote/deliver)

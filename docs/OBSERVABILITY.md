@@ -39,7 +39,7 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | System Layer | Tier 1 | Tier 2 | Tier 3 | Total |
 |-------------|--------|--------|--------|-------|
 | Task Lifecycle Protocol | 16 | 38 | 10 | 64 |
-| Collaboration Protocol | 16 | 13 | 1 | 30 |
+| Collaboration Protocol | 15 | 13 | 1 | 29 |
 | Plan Pipeline Protocol | 10 | 8 | 0 | 18 |
 | Mesh Network Layer | 5 | 19 | 7 | 31 |
 | Agent Execution Layer | 5 | 4 | 0 | 9 |
@@ -52,9 +52,9 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | Communication | 1 | 4 | 1 | 6 |
 | Deployment & Provisioning | 2 | 15 | 4 | 21 |
 | LLM Provider Abstraction | 1 | 1 | 0 | 2 |
-| **Total** | **69** | **185** | **47** | **301** |
+| **Total** | **68** | **185** | **47** | **300** |
 
-> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~301**.
+> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~300**.
 
 ---
 
@@ -125,7 +125,6 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
-| `handleCollabCreate` | mesh-task-daemon | 1 | Creates a new collaboration session — logs session type (circling, sequential), participating nodes, and task binding. |
 | `handleCollabJoin` | mesh-task-daemon | 1 | Node joins an existing collab session — tracks participant count growth and join timing for scheduling analysis. |
 | `handleCollabRecruiting` | mesh-task-daemon | 2 | Handles recruiting phase for collaboration — logs which nodes were invited and their response status. |
 | `handleCollabLeave` | mesh-task-daemon | 2 | Node leaves a collab session — important for understanding session attrition and triggering quorum checks. |

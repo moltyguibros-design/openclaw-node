@@ -212,7 +212,6 @@ Many core functions (especially in `mesh-collab.js`, `rule-loader.js`, `role-loa
 | `handleCancel` | Missing task_id (488), not found (491) |
 | `handleTaskApprove` | Missing task_id (512), not found (515) |
 | `handleTaskReject` | Missing task_id (532), not found (535) |
-| `handleCollabCreate` | Missing task_id (707), not found (710), no spec (711), exists (715) |
 | `handleCollabJoin` | Missing params (742), join failed (745) |
 | `handleCollabStatus` | Missing session_id (810), not found (814) |
 | `handleCollabFind` | Missing task_id (826) |

@@ -25,7 +25,7 @@
  *   mesh.tasks.cancel        — cancel a task (request/reply)
  *   mesh.tasks.update        — signed operator edit of a live task's editable fields (request/reply)
  *   mesh.tasks.approve / reject / merged — review gate and merge report (request/reply)
- *   mesh.collab.*            — create, join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
+ *   mesh.collab.*            — join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
  *   mesh.plans.*             — create, get, list, approve, abort, subtask.update
  *
  * Enforcement loops run every 30s: proposal processing, budget check, lease reaping + stall detection.
@@ -1074,43 +1074,6 @@ function publishCollabEvent(eventType, session) {
 }
 
 // ── Collab Subject Handlers ─────────────────────────
-
-/**
- * mesh.collab.create — Create a collab session for a collaborative task.
- * Expects: { task_id }
- * Called automatically when a task with collaboration spec is submitted.
- */
-async function handleCollabCreate(msg) {
-  const { task_id } = parseRequest(msg);
-  if (!task_id) return respondError(msg, 'task_id is required');
-
-  const task = await store.get(task_id);
-  if (!task) return respondError(msg, `Task ${task_id} not found`);
-  if (!task.collaboration) return respondError(msg, `Task ${task_id} has no collaboration spec`);
-
-  // Check for existing session
-  const existing = await collabStore.findByTaskId(task_id);
-  if (existing) return respondError(msg, `Session already exists for task ${task_id}: ${existing.session_id}`);
-
-  const session = createSession(task_id, task.collaboration);
-  await collabStore.put(session);
-
-  log(`COLLAB CREATE ${session.session_id} for task ${task_id} (mode: ${session.mode}, min: ${session.min_nodes}, max: ${session.max_nodes || '∞'})`);
-  publishCollabEvent('created', session);
-
-  // Broadcast recruit signal
-  log(`RECRUIT: broadcasting for session ${session.session_id}`);
-  nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
-    session_id: session.session_id,
-    task_id: task_id,
-    mode: session.mode,
-    min_nodes: session.min_nodes,
-    max_nodes: session.max_nodes,
-    task_title: task.title,
-  })));
-
-  respond(msg, session);
-}
 
 /**
  * Refuse a collab mutation whose node_id did not present the member token it
@@ -3050,7 +3013,6 @@ handleCancel = tracer.wrapAsync('handleCancel', handleCancel, { tier: 1, categor
 handleUpdate = tracer.wrapAsync('handleUpdate', handleUpdate, { tier: 1, category: 'state_transition' });
 handleTaskApprove = tracer.wrapAsync('handleTaskApprove', handleTaskApprove, { tier: 1, category: 'state_transition' });
 handleTaskReject = tracer.wrapAsync('handleTaskReject', handleTaskReject, { tier: 1, category: 'state_transition' });
-handleCollabCreate = tracer.wrapAsync('handleCollabCreate', handleCollabCreate, { tier: 1, category: 'state_transition' });
 handleCollabJoin = tracer.wrapAsync('handleCollabJoin', handleCollabJoin, { tier: 1, category: 'state_transition' });
 handleCollabReflect = tracer.wrapAsync('handleCollabReflect', handleCollabReflect, { tier: 1, category: 'state_transition' });
 detectStalls = tracer.wrapAsync('detectStalls', detectStalls, { tier: 1, category: 'state_transition' });
@@ -3155,7 +3117,6 @@ async function main() {
     'mesh.tasks.reject':    handleTaskReject,
     'mesh.tasks.merged':    handleTaskMerged,
     // Collab handlers
-    'mesh.collab.create':   handleCollabCreate,
     'mesh.collab.join':     handleCollabJoin,
     'mesh.collab.leave':    handleCollabLeave,
     'mesh.collab.status':   handleCollabStatus,
