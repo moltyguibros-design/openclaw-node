@@ -38,6 +38,10 @@ while [ $# -gt 0 ]; do
 done
 [ "${OPENCLAW_LLM_AUTO:-0}" = "1" ] && [ "$MODE" = ask ] && MODE=yes
 
+# For set_env_key. Run standalone DRY_RUN is unset, and run() reads empty as true.
+DRY_RUN="${DRY_RUN:-false}"
+. "$(dirname "$0")/helpers.sh"
+
 if ! declare -f ok >/dev/null 2>&1; then
   _G='\033[0;32m'; _Y='\033[1;33m'; _R='\033[0;31m'; _B='\033[1m'; _N='\033[0m'
   ok()   { echo -e "${_G}[+]${_N} $*"; }
@@ -132,9 +136,8 @@ fi
 record_endpoint() {
   # $1 = base URL, $2 = model tag. No download: the model lives on the server.
   if [ -f "$ENV_FILE" ]; then
-    if grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then sed -i.bak "s|^LLM_BASE_URL=.*|LLM_BASE_URL=$1|" "$ENV_FILE"; else echo "LLM_BASE_URL=$1" >> "$ENV_FILE"; fi
-    if grep -q '^LLM_MODEL=' "$ENV_FILE"; then sed -i.bak "s|^LLM_MODEL=.*|LLM_MODEL=$2|" "$ENV_FILE"; else echo "LLM_MODEL=$2" >> "$ENV_FILE"; fi
-    rm -f "$ENV_FILE.bak"
+    set_env_key LLM_BASE_URL "$1"
+    set_env_key LLM_MODEL "$2"
     ok "LLM_BASE_URL=$1 LLM_MODEL=$2 recorded in $ENV_FILE"
   else
     warn "$ENV_FILE not found — endpoint not recorded"
@@ -292,11 +295,7 @@ fi
 
 # ---------- record the choice ----------
 if [ -f "$ENV_FILE" ]; then
-  if grep -q '^LLM_MODEL=' "$ENV_FILE"; then
-    sed -i.bak "s|^LLM_MODEL=.*$|LLM_MODEL=$CHOICE|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-  else
-    echo "LLM_MODEL=$CHOICE" >> "$ENV_FILE"
-  fi
+  set_env_key LLM_MODEL "$CHOICE"
   ok "LLM_MODEL=$CHOICE recorded in $ENV_FILE"
 else
   warn "$ENV_FILE not found — LLM_MODEL not recorded"

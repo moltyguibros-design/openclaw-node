@@ -273,12 +273,7 @@ if [ -n "$CLUSTER_PEERS" ]; then
               "OPENCLAW_NATS_CLUSTER_PEERS=$CLUSTER_PEERS" "OPENCLAW_NATS_CLUSTER_BIND=$CLUSTER_BIND" \
               "OPENCLAW_NATS=nats://$CLUSTER_BIND:4222"; do
       export "$kv"
-      key="${kv%%=*}"
-      if grep -q "^$key=" "$ENV_FILE" 2>/dev/null; then
-        run sed -i.bak "s|^$key=.*|$kv|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
-      else
-        echo "$kv" >> "$ENV_FILE"
-      fi
+      set_env_key "${kv%%=*}" "${kv#*=}"
     done
     info "Rendered cluster nats.conf (binds $CLUSTER_BIND, credentialed routes → $CLUSTER_PEERS) · KV replica target R=$KV_REPLICAS · OPENCLAW_NATS → nats://$CLUSTER_BIND:4222"
     warn "Start nats-server on ALL machines (cluster must form) BEFORE the daemons, so R=$KV_REPLICAS streams can be created."
@@ -333,11 +328,7 @@ merge_trusted_key() {
     *",${key},"*) merged="$current" ;;
     *) merged="${current:+${current},}${key}" ;;
   esac
-  if grep -q "^${var}=" "$ENV_FILE" 2>/dev/null; then
-    run sed -i.bak "s|^${var}=.*|${var}=${merged}|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
-  else
-    echo "${var}=${merged}" >> "$ENV_FILE"
-  fi
+  set_env_key "$var" "$merged"
   export "${var}=${merged}"
 }
 

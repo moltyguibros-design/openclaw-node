@@ -203,6 +203,15 @@ test('wave 2 summary names the model once', () => {
   assert.match(retry.out, /Wave 2 complete — model: unchanged$/m);
 });
 
+// record_endpoint rewrote the key through sed, where '&' expands to the matched line.
+test('wave 2 records an endpoint URL with & literally', () => {
+  const m = machine({ STUB_VMM: '0' });
+  writeFileSync(m.envFile, 'LLM_BASE_URL=http://old\nLLM_MODEL=qwen3:8b\n');
+  const r = wave2(m, ['--endpoint', 'https://gw.example/v1?key=a&org=b', '--model', 'm1']);
+  assert.equal(r.status, 0, r.out + r.stderr);
+  assert.equal(readFileSync(m.envFile, 'utf8'), 'LLM_BASE_URL=https://gw.example/v1?key=a&org=b\nLLM_MODEL=m1\n');
+});
+
 test('the install wiring: config.sh bridges before rendering; only a local URL starts or pulls ollama', () => {
   const config = readFileSync(join(ROOT, 'scripts/install/config.sh'), 'utf8');
   const bridge = config.indexOf('bridge_llm_to_host');

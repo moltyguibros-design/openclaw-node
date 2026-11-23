@@ -192,7 +192,7 @@ test('systemd units keep a spaced checkout path and a spaced key list whole', (t
   const envFile = join(tmp, 'openclaw.env');
   writeFileSync(envFile, 'OPENCLAW_DEPLOY_TRUSTED_KEYS=k1, k2\n');
   const merge = moduleSrc['config.sh'].match(/^merge_trusted_key\(\) \{\n[\s\S]*?\n\}\n/m)[0];
-  const m = spawnSync('bash', ['-c', `set -euo pipefail\nrun() { "$@"; }\n${merge}merge_trusted_key OPENCLAW_DEPLOY_TRUSTED_KEYS k2`],
+  const m = spawnSync('bash', ['-c', `set -euo pipefail\nDRY_RUN=false\nsource "${join(ROOT, 'scripts/install/helpers.sh')}"\n${merge}merge_trusted_key OPENCLAW_DEPLOY_TRUSTED_KEYS k2`],
     { encoding: 'utf8', env: { PATH: process.env.PATH, ENV_FILE: envFile } });
   assert.equal(m.status, 0, m.stderr);
   assert.equal(readFileSync(envFile, 'utf8'), 'OPENCLAW_DEPLOY_TRUSTED_KEYS=k1,k2\n');
@@ -204,6 +204,32 @@ test('systemd units keep a spaced checkout path and a spaced key list whole', (t
   for (const f of Object.keys(rendered)) {
     const v = spawnSync('systemd-analyze', ['verify', `--root=${join(tmp, 'root')}`, f], { cwd: unitDir, encoding: 'utf8' });
     assert.doesNotMatch(v.stderr, /Invalid environment assignment|My is not executable|Failed to resolve|Ignoring/, `${f}: ${v.stderr}`);
+  }
+});
+
+// set_env_key put the value into a sed replacement: '&' wrote the old line into the new
+// value, '|' made sed fail, and llm-setup/config.sh carried their own copies of it.
+test('set_env_key writes values literally and keeps the env file private', () => {
+  const dir = tmpDir('oc-set-env-key-');
+  const file = join(dir, 'openclaw.env');
+  writeFileSync(file, 'A=1\nLLM_BASE_URL=old\nZ=2\n', { mode: 0o600 });
+  const inode = statSync(file).ino;
+  const setKey = (value, dryRun = 'false') => spawnSync('bash', ['-c', `set -euo pipefail\nDRY_RUN=${dryRun}\nsource "${join(ROOT, 'scripts/install/helpers.sh')}"\nset_env_key LLM_BASE_URL "$V" "$F"`],
+    { encoding: 'utf8', env: { PATH: process.env.PATH, V: value, F: file } });
+  for (const value of ['http://h:11434/?a=1&b=2', 'a|b', 'c\\d', '']) {
+    const r = setKey(value);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(file, 'utf8'), `A=1\nLLM_BASE_URL=${value}\nZ=2\n`);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(statSync(file).ino, inode);
+  }
+  const r = setKey('dry', 'true');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\[dry-run\]/);
+  assert.equal(readFileSync(file, 'utf8'), 'A=1\nLLM_BASE_URL=\nZ=2\n');
+  assert.deepEqual(readdirSync(dir), ['openclaw.env']);
+  for (const [f, src] of [['llm-setup.sh', readFileSync(join(ROOT, 'scripts/install/llm-setup.sh'), 'utf8')], ['config.sh', moduleSrc['config.sh']]]) {
+    assert.doesNotMatch(src, /sed -i[^\n]*\^(LLM_|OPENCLAW_|\$\{?var|\$key)/, `${f} rewrites env keys with sed`);
   }
 });
 
@@ -798,6 +824,7 @@ test('config.sh saves the cluster peers and bind, and a flagless --update re-ren
   const conf = join(root, 'config', 'nats.conf');
   const exported = ['OPENCLAW_NATS', 'OPENCLAW_KV_REPLICAS', 'OPENCLAW_NATS_CLUSTER_PEERS', 'OPENCLAW_NATS_CLUSTER_BIND'];
   const run = (flags) => spawnSync('bash', ['-c', `set -euo pipefail
+source "${join(ROOT, 'scripts/install/helpers.sh')}"
 step() { :; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; error() { echo "ERR $*" >&2; }
 run() { "$@"; }; generate_config() { echo "GEN $(basename "$2")"; }
 while IFS='=' read -r k v; do export "$k=$v"; done < "$ENV_FILE"
@@ -881,7 +908,8 @@ test('config.sh seeds trust allowlists with the raw base64 identity pubkey and m
 
   const script = `
     set -euo pipefail
-    run() { "$@"; }
+    DRY_RUN=false
+    source "${join(ROOT, 'scripts/install/helpers.sh')}"
     ${helpers}
     SELF="$(identity_pubkey_base64)"
     merge_trusted_key OPENCLAW_DEPLOY_TRUSTED_KEYS "$SELF"

@@ -43,15 +43,20 @@ DRY_RUN_ERRORS=0
 # --dry-run was rewriting MEMORY.md, active-tasks.md, .env.local and the
 # notification config on real installs. Dry-run prints and discards.
 # set_env_key VAR VALUE [FILE] — set or replace one KEY=value line in an env
-# file (default $ENV_FILE). Idempotent; honours --dry-run through run().
+# file (default $ENV_FILE). Idempotent; honours --dry-run. The value reaches awk
+# through ENVIRON: in a sed replacement '&' and '|' were special. Written back with
+# cat, not mv, so the secrets file keeps its 600 mode and owner.
 set_env_key() {
-  local var="$1" value="$2" file="${3:-$ENV_FILE}"
-  if grep -q "^${var}=" "$file" 2>/dev/null; then
-    run sed -i.bak "s|^${var}=.*|${var}=${value}|" "$file" && run rm -f "$file.bak"
-  elif [ "${DRY_RUN:-false}" = true ]; then
+  local var="$1" value="$2" file="${3:-$ENV_FILE}" tmp
+  if [ "${DRY_RUN:-false}" = true ]; then
     echo "  [dry-run] would set ${var}=${value} in ${file}"
+  elif grep -q "^${var}=" "$file" 2>/dev/null; then
+    tmp="$(mktemp "${file}.XXXXXX")"
+    V="$value" awk -v k="$var" 'index($0, k "=") == 1 && !done { print k "=" ENVIRON["V"]; done = 1; next } 1' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
   else
-    echo "${var}=${value}" >> "$file"
+    printf '%s=%s\n' "$var" "$value" >> "$file"
   fi
 }
 
