@@ -78,7 +78,7 @@ recreates what it needs on next tick.
 ### `.tmp/daemon-throttle.json`
 
 - **Owner:** `memory-daemon.mjs` → Phase 2 throttle state
-- **Format:** JSON. Tracks last-run timestamps for throttled jobs (recap, maintenance, obsidian-sync, trust-health, session-import, clawvault, hyperagent).
+- **Format:** JSON. Tracks last-run timestamps for throttled jobs (recap, maintenance, obsidian-sync, trust-health, session-import, synthesis, knowledge-index, graph-cache, hyperagent).
 - **Lifetime:** Overwritten on each Phase 2 tick. Persists across daemon restarts for throttle continuity.
 - **Consumers:** `memory-daemon.mjs` — reads to determine which Phase 2 jobs are due.
 

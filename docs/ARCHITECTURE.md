@@ -27,7 +27,7 @@ OpenClaw's memory system is a **platform-level service** independent of any fron
 │  │    ├─ detect_activity() — JSONL mtime via registry           │  │
 │  │    ├─ Phase 0: session bootstrap (ENDED→BOOT)               │  │
 │  │    │    ├─ session-recap --file <last ended session>         │  │
-│  │    │    ├─ clawvault wake + observe + doctor                 │  │
+│  │    │    ├─ clawvault wake + doctor                           │  │
 │  │    │    ├─ memory-maintenance --force                        │  │
 │  │    │    ├─ compile-boot --all                                │  │
 │  │    │    └─ subagent-audit (previous session)                 │  │
@@ -35,7 +35,7 @@ OpenClaw's memory system is a **platform-level service** independent of any fron
 │  │    └─ Phase 2: throttled background work                    │  │
 │  │         ├─ session-recap (every 10min)                      │  │
 │  │         ├─ memory-maintenance (every 30min)                 │  │
-│  │         ├─ clawvault observe/reflect/archive (10-30min)     │  │
+│  │         ├─ flush + synthesis of each active session (30min) │  │
 │  │         ├─ subagent-audit --health-check (every 30min)      │  │
 │  │         └─ obsidian-sync (every 30min, after stage 1)       │  │
 │  └─────────────────────────────────────────────────────────────┘  │
@@ -192,7 +192,6 @@ memory-daemon detects new session via JSONL mtime
   Phase 0 Bootstrap:
   → session-recap --file <the last session that ended> (capture what it did)
   → clawvault-local wake (restore active context)
-  → clawvault-local observe --cron (scan recent entries)
   → clawvault-local doctor (verify vault integrity)
   → memory-maintenance --force (catch up on any stale maintenance)
   → compile-boot --all (ensure boot artifacts are fresh)
@@ -208,11 +207,19 @@ Phase 2 — Throttled Background Work:
   Stage 1 (parallel):
     Every 10min: session-recap (rolling 2-session digest)
     Every 30min: memory-maintenance (archival, predictions, stale tasks)
-    Every 10-30min: clawvault observe/reflect/archive (vault lifecycle)
+    Every 30min: pre-compression flush + synthesis of each active session
     Every 30min: subagent-audit --health-check (trust registry)
   Stage 2 (after stage 1):
     Every 30min: obsidian-sync (push workspace → vault, hash-based)
 ```
+
+The daemon's own extraction is the session-compression path: the flushes
+(interval, idle, end of session, on request) turn each transcript into
+MEMORY.md facts, the extraction store and vault notes. ClawVault keeps
+checkpoints and handoffs only; its observe/reflect/archive cycle reads
+`agents/<id>/sessions/*.jsonl`, which current OpenClaw no longer writes
+(live transcripts are rows in `openclaw-agent.sqlite`), so the daemon does not
+run it.
 
 ### Session End (ACTIVE → IDLE → ENDED, per transcript)
 ```
@@ -220,8 +227,9 @@ Each transcript written concurrently is its own session with its own timers
 (lib/session-tracker.mjs); a second session starting never ends the first.
 
 Idle timeout (15min no JSONL writes) → IDLE
+  → pre-compression flush of that transcript
   → session-recap --file <that transcript>
-  → clawvault-local observe (capture final activity)
+  → clawvault-local checkpoint --working-on idle
 IDLE timeout (5min) → ENDED
   → end-of-session flush, archive and subagent-audit of that transcript
   → MEMORY.md snapshot released only when no other session is live
@@ -487,4 +495,3 @@ Daemon v2 deployment (bash → Node.js): **COMPLETE**. 6 bugs fixed, all modules
 
 ### Known Issues (non-blocking)
 - ClawVault wake intermittently fails (exit 1) — vault service startup timing
-- ClawVault observe can timeout at 60s — large vault scans; daemon continues gracefully

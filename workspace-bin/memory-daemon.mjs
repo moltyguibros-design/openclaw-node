@@ -642,16 +642,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  subagent-audit failed: ${e.message}`); }
   }
 
-  // 7. ClawVault observe — compress recent sessions into observational memory
-  if (fs.existsSync(clawvault)) {
-    try {
-      await runSubprocess(clawvault, ['observe', '--cron'], 60000);
-      log('  clawvault observe done');
-    } catch (e) { log(`  clawvault observe failed: ${e.message}`); }
-    stampThrottle('lastClawvaultObserve');
-  }
-
-  // 8. ClawVault doctor — vault health check + auto-fix
+  // 7. ClawVault doctor — vault health check + auto-fix
   if (fs.existsSync(clawvault)) {
     try {
       await runSubprocess(clawvault, ['doctor', '--fix'], 30000);
@@ -659,7 +650,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  clawvault doctor failed: ${e.message}`); }
   }
 
-  // 9. Freeze MEMORY.md snapshot for deterministic prompt content. A session
+  // 8. Freeze MEMORY.md snapshot for deterministic prompt content. A session
   // that boots beside a live one keeps the snapshot that one is reading.
   if (!othersLive) {
     try {
@@ -670,7 +661,7 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
   }
 
-  // 10. Import changed sessions into SQLite archive (memory worker)
+  // 9. Import changed sessions into SQLite archive (memory worker)
   try {
     const imported = await runImportDirInWorker(loadTranscriptSources());
     if (imported.length > 0) log(`  session-store: imported ${imported.length} sessions`);
@@ -778,7 +769,6 @@ function runPhase1StatusSync(config, status, { newSession = false } = {}) {
 const THROTTLE_STATE_FILE = path.join(STATE_DIR, 'daemon-throttle.json');
 const THROTTLE_DEFAULTS = Object.freeze({
   lastRecap: 0, lastMaintenance: 0, lastObsidianSync: 0, lastTrustHealth: 0,
-  lastClawvaultReflect: 0, lastClawvaultArchive: 0, lastClawvaultObserve: 0,
   lastSessionImport: 0, lastHyperagentReflect: 0, lastSynthesis: 0,
   lastKnowledgeIndex: 0, lastGraphCacheRefresh: 0,
 });
@@ -870,7 +860,7 @@ async function runPhase2ThrottledWork(config, sessions) {
   const now = Date.now();
   const throttle = loadThrottleState();
 
-  // Stage 1: Parallel — recap, maintenance, trust-health, ClawVault observe/reflect/archive
+  // Stage 1: Parallel — recap, maintenance, trust-health, session import, indexing, synthesis
   // These produce data. They run before Obsidian sync so fresh data gets pushed.
   const stage1 = [];
 
@@ -967,39 +957,6 @@ async function runPhase2ThrottledWork(config, sessions) {
     );
   }
 
-  const clawvault = path.join(WORKSPACE, config.clawvaultBin);
-  if (fs.existsSync(clawvault)) {
-    // ClawVault observe — incremental session compression (every 10min)
-    if (now - throttle.lastClawvaultObserve >= config.intervals.sessionRecapMs) {
-      throttle.lastClawvaultObserve = now;
-      stage1.push(
-        runSubprocess(clawvault, ['observe', '--cron'], 60000)
-          .then(() => log('  Phase 2: clawvault observe done'))
-          .catch(e => log(`  Phase 2: clawvault observe failed: ${e.message}`))
-      );
-    }
-
-    // ClawVault reflect — promote stable observations to reflections (every 30min)
-    if (now - throttle.lastClawvaultReflect >= config.intervals.maintenanceMs) {
-      throttle.lastClawvaultReflect = now;
-      stage1.push(
-        runSubprocess(clawvault, ['reflect'], 60000)
-          .then(() => log('  Phase 2: clawvault reflect done'))
-          .catch(e => log(`  Phase 2: clawvault reflect failed: ${e.message}`))
-      );
-    }
-
-    // ClawVault archive — move old observations to ledger (every 30min)
-    if (now - throttle.lastClawvaultArchive >= config.intervals.maintenanceMs) {
-      throttle.lastClawvaultArchive = now;
-      stage1.push(
-        runSubprocess(clawvault, ['archive'], 30000)
-          .then(() => log('  Phase 2: clawvault archive done'))
-          .catch(e => log(`  Phase 2: clawvault archive failed: ${e.message}`))
-      );
-    }
-  }
-
   // 30-min interval synthesis of every active session (D2, step 4.5)
   const activeTranscripts = sessionTranscripts(sessions, [STATES.ACTIVE]);
   if (activeTranscripts.length > 0 && now - throttle.lastSynthesis >= config.intervals.synthesisMs) {
@@ -1081,7 +1038,7 @@ async function runNodeVaultMaintenance(config) {
   const now = Date.now();
   const throttle = loadThrottleState();
 
-  // Stage 2: Obsidian sync — runs AFTER stage 1 so fresh ClawVault data,
+  // Stage 2: Obsidian sync — runs AFTER stage 1 so fresh synthesis notes,
   // trust-registry updates, and recaps are all picked up and pushed to vault.
   if (now - throttle.lastObsidianSync >= config.intervals.obsidianSyncMs) {
     throttle.lastObsidianSync = now;
@@ -1128,9 +1085,9 @@ async function handleTransitions(transitions, config) {
       booted.push(t.sessionId);
     }
 
-    // ACTIVE → IDLE: Observe + recap + checkpoint + pre-compression flush
+    // ACTIVE → IDLE: Pre-compression flush + recap + checkpoint
     if (t.from === STATES.ACTIVE && t.to === STATES.IDLE) {
-      log('Entering idle — running observe + recap + checkpoint + flush');
+      log('Entering idle — running flush + recap + checkpoint');
       const recap = path.join(WORKSPACE, 'bin/session-recap');
       const clawvault = path.join(WORKSPACE, config.clawvaultBin);
 
@@ -1172,11 +1129,10 @@ async function handleTransitions(transitions, config) {
         tasks.push(runSubprocess('node', [recap, '--file', currentJsonl], 30000).catch(() => {}));
       }
       if (fs.existsSync(clawvault)) {
-        tasks.push(runSubprocess(clawvault, ['observe', '--cron'], 60000).catch(() => {}));
         tasks.push(runSubprocess(clawvault, ['checkpoint', '--working-on', 'idle'], 15000).catch(() => {}));
       }
       await Promise.allSettled(tasks);
-      stampThrottle('lastRecap', 'lastClawvaultObserve');
+      stampThrottle('lastRecap');
     }
 
     // IDLE → ENDED: Full cleanup pipeline
@@ -1238,30 +1194,21 @@ async function handleTransitions(transitions, config) {
         log('  memory-budget: snapshot released');
       }
 
-      // 1. ClawVault: final observe + reflect + archive → persist all learnings
-      if (fs.existsSync(clawvault)) {
-        await runSubprocess(clawvault, ['observe', '--cron'], 60000).catch(() => {});
-        await runSubprocess(clawvault, ['reflect'], 60000).catch(() => {});
-        await runSubprocess(clawvault, ['archive'], 30000).catch(() => {});
-        log('  clawvault observe+reflect+archive done');
-        stampThrottle('lastClawvaultObserve', 'lastClawvaultReflect', 'lastClawvaultArchive');
-      }
-
-      // 2. Sub-agent audit — extract trust data from this session
+      // 1. Sub-agent audit — extract trust data from this session
       // (R17, repair 4.4: same ended-session targeting as the flush above)
       if (fs.existsSync(subagentAudit) && currentJsonl) {
         await runSubprocess('node', [subagentAudit, currentJsonl], 30000).catch(() => {});
         log('  subagent-audit (end-of-session) done');
       }
 
-      // 3. Final Obsidian sync — push all changes including new ClawVault data
+      // 2. Final Obsidian sync — push all changes
       if (fs.existsSync(obsSync)) {
         await runSubprocess('node', [obsSync], 60000).catch(() => {});
         log('  final obsidian-sync done');
         stampThrottle('lastObsidianSync');
       }
 
-      // 4. ClawVault sleep — handoff + clean exit
+      // 3. ClawVault sleep — handoff + clean exit
       if (fs.existsSync(clawvault)) {
         await runSubprocess(clawvault, ['sleep', 'session ended'], 15000).catch(() => {});
         log('  clawvault sleep done');
