@@ -516,6 +516,8 @@ async function recordHyperagentTask(task, { outcome, iterations, startedAt, note
         collaboration_mode: task.collaboration?.mode ?? null,
         provider: providerName,
         model,
+        // One row per run: a claim's lease, else (a recruit holds none) its collab session.
+        run_key: task.lease_token || sessionId || task.collab_session_id || null,
       });
       log(`HyperAgent telemetry: id=${row.id} outcome=${row.outcome} iterations=${row.iterations}`);
     } finally {

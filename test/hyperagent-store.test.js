@@ -519,6 +519,35 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(first.domain, 'code-review');
   }));
 
+  it('with a run key, one row per run: a repeat of a run dedups, a re-run of the task is recorded', async () => withFreshStore((fresh) => {
+    const entry = {
+      node_id: 'node-a', soul_id: 'soul-a', task_id: 'task-r', domain: 'testing', run_id: 'cohort-1',
+      logical_task_id: 'task-r', outcome: 'failure', iterations: 2, run_key: 'lease-1',
+      meta_notes: 'First run of a task that review later rejected and the node redid.',
+    };
+    const first = fresh.logTelemetry(entry);
+    assert.equal(first.run_key, 'lease-1');
+    assert.equal(fresh.logTelemetry({ ...entry, outcome: 'success' }).id, first.id, 'the same run twice is one row');
+    const redo = fresh.logTelemetry({ ...entry, run_key: 'lease-2', outcome: 'success', iterations: 1 });
+    assert.notEqual(redo.id, first.id);
+    assert.equal(redo.outcome, 'success');
+    assert.equal(fresh.getTelemetry({ last: 20 }).length, 2);
+    const cohort = fresh.cohortReport('cohort-1');
+    assert.equal(cohort.totals.rows, 2);
+    assert.equal(cohort.totals.logical_tasks, 1, 'two runs of one task are still one logical task');
+  }));
+
+  it('a row from before run keys keeps first-wins for keyless writes and does not block a keyed run', async () => withFreshStore((fresh) => {
+    const entry = {
+      node_id: 'node-a', soul_id: 'soul-a', task_id: 'task-old', domain: 'testing', outcome: 'success', iterations: 1,
+      meta_notes: 'A row written without a run key, as every row was before the column existed.',
+    };
+    const legacy = fresh.logTelemetry(entry);
+    assert.equal(legacy.run_key, null);
+    assert.equal(fresh.logTelemetry({ ...entry, outcome: 'failure' }).id, legacy.id);
+    assert.notEqual(fresh.logTelemetry({ ...entry, run_key: 'lease-9' }).id, legacy.id);
+  }));
+
   it('creates independent reflection windows for each node and soul', async () => withFreshStore((fresh) => {
     for (const soul_id of ['alpha', 'beta']) {
       for (let i = 0; i < 5; i++) {
