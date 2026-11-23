@@ -254,6 +254,30 @@ describe('routeDelegation', () => {
     assert.equal(result.mode, DELEGATION_MODE.LOCAL);
     assert.ok(result.reason.includes('Default fallback'));
   });
+
+  // Substring matching read 'approved' as 'approve', 'explore' as 'lore', 'untrusted' as 'trust'.
+  it('matches routing keywords as whole words, not inside other words', () => {
+    const explore = routeDelegation({ title: 'Explore caching options for the API', budget_minutes: 20 });
+    assert.notEqual(explore.soul_id, 'lore-writer', explore.reason);
+    const untrusted = routeDelegation({ title: 'Fix the untrusted input parser', budget_minutes: 20 });
+    assert.notEqual(untrusted.soul_id, 'identity-architect', untrusted.reason);
+    const approved = routeDelegation({ title: 'Implement', description: 'Write the implementation following the approved architecture.', budget_minutes: 45 });
+    assert.notEqual(approved.mode, DELEGATION_MODE.HUMAN, approved.reason);
+    const proxyish = routeDelegation({ title: 'Tune the approximate search', budget_minutes: 20 });
+    assert.notEqual(proxyish.mode, DELEGATION_MODE.COLLAB_MESH, proxyish.reason);
+    assert.equal(routeDelegation({ title: 'Approve the contract changes', budget_minutes: 10 }).mode, DELEGATION_MODE.HUMAN);
+    assert.equal(routeDelegation({ title: 'Plan the proxy upgrade', budget_minutes: 20 }).mode, DELEGATION_MODE.COLLAB_MESH);
+  });
+
+  it('team-feature routes its implement step to the mesh, not to a human', () => {
+    const path = require('node:path');
+    const { loadTemplate, instantiateTemplate } = require('../lib/plan-templates');
+    const template = loadTemplate(path.join(__dirname, '..', 'config', 'plan-templates', 'team-feature.yaml'));
+    const plan = instantiateTemplate(template, 'billing export', { parent_task_id: 'T-parent' });
+    const implement = plan.subtasks.find((s) => s.subtask_id === 'implement');
+    assert.ok(implement, 'team-feature has an implement subtask');
+    assert.notEqual(implement.delegation.mode, DELEGATION_MODE.HUMAN, implement.delegation.reason);
+  });
 });
 
 // ── autoRoutePlan ─��
