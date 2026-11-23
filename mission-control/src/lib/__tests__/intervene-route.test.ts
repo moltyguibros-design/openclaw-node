@@ -112,10 +112,25 @@ describe("operator interventions change nothing unless the task daemon accepts",
   });
 
   it("force_converge: an accepted complete marks the session converged and the row done", async () => {
+    h.request.mockImplementation(daemonSays({ ok: true, data: { task_id: "T", status: "completed" } }));
     const res = await intervene({ action: "force_converge", sessionId: "S" });
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, action: "force_converged" });
     expect(JSON.parse(h.put.mock.calls[0][1] as string).status).toBe("converged");
     expect(await taskStatus()).toBe("done");
+  });
+
+  it("force_converge: a task the daemon parked in pending_review goes to Review with the approve command", async () => {
+    h.request.mockImplementation(daemonSays({ ok: true, data: { task_id: "T", status: "pending_review" } }));
+    const res = await intervene({ action: "force_converge", sessionId: "S" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, action: "force_converged", pendingReview: true });
+    const { getRawDb } = await import("@/lib/db");
+    expect(getRawDb().prepare("SELECT status, kanban_column, next_action FROM tasks WHERE id = 'T'").get()).toEqual({
+      status: "waiting-user",
+      kanban_column: "review",
+      next_action: "mesh tasks approve T",
+    });
   });
 
   it("remove_node: a refused or unreachable leave changes nothing (no direct-KV fallback)", async () => {

@@ -379,7 +379,8 @@ async function handleComplete(msg) {
   // Determine if this task requires human review before completing.
   // requires_review logic:
   //   - explicit true/false on task → honor it
-  //   - null (default) → auto-compute:
+  //   - null (default), signed operator force-complete → no
+  //   - null (default), owner completion → auto-compute:
   //     * mode: human → always (by definition)
   //     * mode: soul → always (creative/strategic work, no mechanical verification)
   //     * collab_mesh without metric → yes (peer review without mechanical check)
@@ -397,7 +398,12 @@ async function handleComplete(msg) {
 
   let needsReview = existingTask.requires_review;
   let reviewReason = needsReview ? 'explicit_requires_review' : null;
-  if (needsReview === null || needsReview === undefined) {
+  if ((needsReview === null || needsReview === undefined) && via === 'operator') {
+    // MC's "force converge" is a signed operator decision: it is the human
+    // review the auto-computed gate would ask for.
+    needsReview = false;
+    reviewReason = 'operator_force_complete';
+  } else if (needsReview === null || needsReview === undefined) {
     const mode = existingTask.collaboration ? 'collab_mesh' : (existingTask.tags?.includes('soul') ? 'soul' : 'solo_mesh');
     const hasMetric = !!existingTask.metric;
 

@@ -135,6 +135,10 @@ export async function POST(request: NextRequest) {
         if (!complete.ok) {
           return NextResponse.json({ error: complete.error }, { status: complete.status });
         }
+        // The daemon decides whether the parent task completes or waits for
+        // review (an explicit requires_review, or a failed role validation).
+        const pendingReview =
+          (complete.reply.data as { status?: string } | undefined)?.status === "pending_review";
 
         // Inject synthetic reflections for nodes that haven't submitted
         const currentRound =
@@ -185,13 +189,26 @@ export async function POST(request: NextRequest) {
         try {
           const db = getDb();
           db.update(tasks)
-            .set({ status: "done", kanbanColumn: "done", updatedAt: now })
+            .set(
+              pendingReview
+                ? {
+                    status: "waiting-user",
+                    kanbanColumn: "review",
+                    nextAction: `mesh tasks approve ${session.task_id}`,
+                    updatedAt: now,
+                  }
+                : { status: "done", kanbanColumn: "done", updatedAt: now }
+            )
             .where(eq(tasks.id, session.task_id))
             .run();
           syncTasksToMarkdown(db);
         } catch { /* best-effort */ }
 
-        return NextResponse.json({ ok: true, action: "force_converged" });
+        return NextResponse.json(
+          pendingReview
+            ? { ok: true, action: "force_converged", pendingReview: true }
+            : { ok: true, action: "force_converged" }
+        );
       }
 
       case "remove_node": {
