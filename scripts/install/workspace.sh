@@ -234,8 +234,18 @@ info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/d
 # The rsync never deletes: a skill quarantined or removed from the repo stays
 # installed, and agents keep following it, until retired-files.txt archives it.
 retire_shipped_files skills "$WORKSPACE/skills"
-# Deleted from the repo: it installed moltbook-interact around the scanner gate.
-run rm -f "$WORKSPACE/skills/moltbook-interact/INSTALL.md"
+# Files deleted from inside shipped skills, which the rsync never removes: an INSTALL.md
+# that installed around the scanner gate, stale docs, and package.json files with no
+# dependencies that made the npm loop below re-run on every --update (npm wrote the
+# clawddocs lock there).
+for f in moltbook-interact/INSTALL.md clawddocs/package.json clawddocs/package-lock.json \
+  clawddocs/snippets/common-configs.md crypto-price/ARCHITECTURE.md \
+  fast-browser-use/package.json fast-browser-use/package-lock.json fast-browser-use/CODEBUDDY.md \
+  fast-browser-use/test_auth.json fast-browser-use/test_state.json \
+  openclaw-skill-scanner/report-template.md; do
+  run rm -f "$WORKSPACE/skills/$f"
+done
+run rmdir "$WORKSPACE/skills/clawddocs/snippets" 2>/dev/null || true
 
 # Install skill-specific dependencies (npm/pip where needed)
 if $SANDBOX; then

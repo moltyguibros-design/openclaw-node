@@ -624,12 +624,50 @@ test('every quarantined or deleted skill is archived out of an installed workspa
   rmSync(root, { recursive: true, force: true });
 });
 
-test('an --update drops the skill install docs the repo deleted, which installed around the scanner gate', () => {
+// The skills rsync never deletes, so files removed from inside a shipped skill stayed
+// installed: moltbook-interact's INSTALL.md installed around the scanner gate, and a stale
+// package.json with no dependencies re-ran npm in its skill on every --update.
+test('an --update removes the files the repo deleted from inside shipped skills, before the npm loop', (t) => {
+  if (spawnSync('rsync', ['--version']).status !== 0) {
+    t.skip('rsync not on PATH');
+    return;
+  }
+  const deleted = [
+    'moltbook-interact/INSTALL.md', 'clawddocs/package.json', 'clawddocs/package-lock.json',
+    'clawddocs/snippets/common-configs.md', 'crypto-price/ARCHITECTURE.md',
+    'fast-browser-use/package.json', 'fast-browser-use/package-lock.json', 'fast-browser-use/CODEBUDDY.md',
+    'fast-browser-use/test_auth.json', 'fast-browser-use/test_state.json', 'openclaw-skill-scanner/report-template.md',
+  ];
+  for (const rel of deleted) assert.equal(existsSync(join(ROOT, 'skills', rel)), false, `${rel} still ships`);
   const src = moduleSrc['workspace.sh'];
-  const rsync = src.indexOf('"$REPO_DIR/skills/" "$WORKSPACE/skills/"');
-  const drop = src.indexOf('run rm -f "$WORKSPACE/skills/moltbook-interact/INSTALL.md"');
-  assert.ok(rsync >= 0 && drop > rsync, 'workspace.sh removes the installed moltbook-interact/INSTALL.md after the skills rsync');
-  assert.equal(existsSync(join(ROOT, 'skills/moltbook-interact/INSTALL.md')), false);
+  const start = src.indexOf('run rsync -av --exclude=\'/dist/\'');
+  const end = src.indexOf('\ndone\nfi\n', start);
+  assert.ok(start >= 0 && end > start, 'skills step parsed');
+  const block = src.slice(start, end + '\ndone\nfi\n'.length);
+
+  const dir = tmpDir('oc-skill-files-');
+  const skills = join(dir, 'workspace', 'skills');
+  for (const rel of deleted) {
+    mkdirSync(dirname(join(skills, rel)), { recursive: true });
+    writeFileSync(join(skills, rel), '{}\n');
+  }
+  const bin = join(dir, 'bin');
+  const log = join(dir, 'calls.log');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho "npm $(basename "$PWD")" >> "${log}"\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'pip3'), `#!/bin/sh\necho "pip3 $*" >> "${log}"\n`, { mode: 0o755 });
+  for (const pass of [1, 2]) {
+    const r = spawnSync('bash', ['-ec', `run() { "$@"; }; info() { :; }; warn() { :; }; retire_shipped_files() { :; }\n${block}`], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SANDBOX: 'false', REPO_DIR: ROOT, WORKSPACE: join(dir, 'workspace') },
+    });
+    assert.equal(r.status, 0, `pass ${pass}: ${r.stderr}`);
+  }
+  for (const rel of deleted) assert.equal(existsSync(join(skills, rel)), false, rel);
+  assert.equal(existsSync(join(skills, 'clawddocs/snippets')), false);
+  const calls = readFileSync(log, 'utf8');
+  assert.match(calls, /^pip3 .*\/crypto-price\/+requirements\.txt$/m, 'the dependency loop ran');
+  assert.doesNotMatch(calls, /^npm (clawddocs|fast-browser-use)$/m, calls);
 });
 
 test('installer links scoped packages into both deployed parent trees', () => {
