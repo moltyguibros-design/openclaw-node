@@ -6,14 +6,14 @@
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 
 // Built-ins only: an operator's ~/.openclaw/mesh-providers.json must not leak into PROVIDERS.
-process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-providers-home-'));
+process.env.HOME = tmpDir('llm-providers-home-');
 for (const k of ['CLAUDE_PATH', 'OPENAI_PATH', 'GEMINI_PATH', 'DEEPSEEK_PATH', 'KIMI_PATH', 'MINIMAX_PATH', 'OLLAMA_PATH', 'AIDER_PATH']) delete process.env[k];
 const { resolveProvider, resolveModel, PROVIDERS } = require('../lib/llm-providers');
 
