@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createGateTracker, createGapDetector } from '../bin/fed-run-driver.mjs';
+import { createGateTracker, createGapDetector, soloArmResult } from '../bin/fed-run-driver.mjs';
 
 describe('createGateTracker — RUN_RULES clause 2, >=90s between gate observations', () => {
   it('does NOT forfeit on consecutive 45s polls (the run-1 pair-4 P0)', () => {
@@ -44,5 +44,23 @@ describe('createGapDetector — host-suspension gaps are INFRA_INVALID, not forf
     d.check(t0 + 45_000);
     const gap = d.check(t0 + 45_000 + 100 * 60_000);
     assert.equal(gap, 100 * 60_000, 'the run-1 pair-5 100-minute freeze is detected');
+  });
+});
+
+describe('soloArmResult — every terminal task status ends the solo arm', () => {
+  it('completed is a delivered solo arm', () => {
+    assert.deepEqual(soloArmResult('completed'), { ok: true });
+  });
+
+  it('failed, cancelled, released and rejected end the arm with their own status as the reason', () => {
+    for (const status of ['failed', 'cancelled', 'released', 'rejected']) {
+      assert.deepEqual(soloArmResult(status), { ok: false, reason: `solo task ${status}` }, status);
+    }
+  });
+
+  it('non-terminal statuses keep the arm polling', () => {
+    for (const status of ['queued', 'claimed', 'running', 'pending_review']) {
+      assert.equal(soloArmResult(status), null, status);
+    }
   });
 });
