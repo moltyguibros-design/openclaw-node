@@ -978,7 +978,7 @@ The system has two layers:
 
 **Layer 1 — KV Mirror (read visibility):** Every MC instance watches NATS KV bucket `MESH_TASKS` in real-time. When the lead creates, updates, or completes a task, all connected MC instances see the change within milliseconds. Worker nodes display these tasks as read-only cards in the Kanban.
 
-**Layer 2 — Sync Engine (write participation):** Any node submits a task through `POST /api/mesh/tasks`; MC sends it to the task daemon as `mesh.tasks.submit`, and the daemon validates it and creates it `queued` (see Data Flow below). Worker nodes can *propose* new tasks to the mesh. Proposals land in the KV bucket with `status: proposed`. The lead's task daemon validates proposals within its 30-second enforcement loop and transitions them to `queued` (accepted) or `rejected`. Once queued, any node with the `claim` capability can execute the task.
+**Layer 2 — Sync Engine (write participation):** Any node submits a task through `POST /api/mesh/tasks`; MC sends it to the task daemon as `mesh.tasks.submit`, and the daemon validates it and creates it `queued` (see Data Flow below). Once queued, any node with the `claim` capability can execute the task.
 
 ```
                      NATS KV: MESH_TASKS
@@ -1034,7 +1034,6 @@ The system enforces explicit authority boundaries:
 | Create local task | Lead only | Direct SQLite + KV write |
 | Submit mesh task | Any node | daemon `mesh.tasks.submit` (MC `POST /api/mesh/tasks`) |
 | Edit a live mesh task | Signed operator | daemon `mesh.tasks.update` (MC `PATCH /api/mesh/tasks/:id`) |
-| Accept/reject proposal | Lead only | Daemon enforcement loop |
 | Claim a queued task | Any node | CAS on KV (daemon RPC; Phase 3 for MC) |
 | Complete a task | Task owner only | CAS with `origin` check (daemon-side; Phase 3) |
 | Approve (mark done) | Human's node only | daemon `mesh.tasks.approve` (not an MC route) |
@@ -1060,9 +1059,9 @@ mission-control/
 │   ├── mesh-kv-sync.test.ts      # get/list, watcher, merge
 │   └── mocks/mock-kv.ts          # Shared MockKV for all KV tests
 bin/
-└── mesh-task-daemon.js            # Proposal processing (30s enforcement loop)
+└── mesh-task-daemon.js            # mesh.tasks.* RPCs, the only MESH_TASKS writer
 lib/
-└── mesh-tasks.js                  # PROPOSED + REJECTED task statuses
+└── mesh-tasks.js                  # task schema, statuses, CAS store
 test/
 ├── mesh-tasks-status.test.js      # unit tests (status enum, defaults)
 └── distributed-mc.test.js         # RPC, lifecycle, IDs, events (needs NATS + daemon)
@@ -1127,7 +1126,7 @@ This is Phase 1+2 of a 4-phase rollout:
 | Phase | What Changes | Status |
 |-------|-------------|--------|
 | **1: KV Mirror** | Workers get read-only MC dashboards via KV watch | Done |
-| **2: Sync Engine** | Workers can propose tasks, lead validates | Done |
+| **2: Sync Engine** | Any node submits tasks through the task daemon | Done |
 | 3: Distributed Claiming | Any node can claim and execute queued tasks via CAS | Planned |
 | 4: Full Sovereignty | No central daemon, each node schedules independently | Planned |
 

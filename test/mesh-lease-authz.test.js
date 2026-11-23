@@ -247,35 +247,6 @@ describe('F1: a forged submit cannot touch a plan', () => {
     });
   }
 
-  it('a KV proposal carrying plan fields is rejected; a plain one is still queued', async () => {
-    const h = harness();
-    const planId = await approvedPlan(h);
-    const before = await planState(h, planId);
-    await h.store.put({ ...createTask({ task_id: 'PROP-FORGED', title: 'proposed' }), status: 'proposed', origin: 'worker-x', plan_id: planId, subtask_id: 'P-S2' });
-    await h.store.put({ ...createTask({ task_id: 'PROP-PLAIN', title: 'proposed' }), status: 'proposed', origin: 'worker-x' });
-
-    await daemon.__test.processProposals();
-
-    const forged = await h.store.get('PROP-FORGED');
-    assert.equal(forged.status, 'rejected');
-    assert.match(forged.result.summary, /plan_id/);
-    assert.equal((await h.store.get('PROP-PLAIN')).status, 'queued');
-    assert.deepEqual(await planState(h, planId), before);
-  });
-
-  it('a KV proposal with a refused metric is rejected; an allowed one is still queued', async () => {
-    const h = harness();
-    await h.store.put({ ...createTask({ task_id: 'PROP-BADMETRIC', title: 'p', metric: 'curl http://evil' }), status: 'proposed', origin: 'worker-x' });
-    await h.store.put({ ...createTask({ task_id: 'PROP-OKMETRIC', title: 'p', metric: 'npm test' }), status: 'proposed', origin: 'worker-x' });
-
-    await daemon.__test.processProposals();
-
-    const bad = await h.store.get('PROP-BADMETRIC');
-    assert.equal(bad.status, 'rejected');
-    assert.match(bad.result.summary, /Metric refused/);
-    assert.equal((await h.store.get('PROP-OKMETRIC')).status, 'queued');
-  });
-
   it("the daemon's own dispatch still links the subtask and advances the plan", async () => {
     const h = harness();
     const planId = await approvedPlan(h);

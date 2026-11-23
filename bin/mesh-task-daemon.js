@@ -28,7 +28,7 @@
  *   mesh.collab.*            — join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
  *   mesh.plans.*             — create, get, list, approve, abort, subtask.update
  *
- * Enforcement loops run every 30s: proposal processing, budget check, lease reaping + stall detection.
+ * Enforcement loops run every 30s: budget check, lease reaping + stall detection.
  *
  * Usage:
  *   node mesh-task-daemon.js          # foreground
@@ -168,7 +168,7 @@ function publishEvent(eventType, task) {
 // gate, so a submitter setting them could complete, fail or abort another plan's
 // subtask, or wave its own work past review (review 2026-09-15 F1). Only
 // advancePlanWave sets them, plus escalateTask, which copies them from
-// a task the daemon dispatched. A bus submit or KV proposal carrying them is refused.
+// a task the daemon dispatched. A bus submit carrying them is refused.
 const DAEMON_OWNED_TASK_FIELDS = ['plan_id', 'subtask_id', 'requires_review'];
 
 function daemonOwnedFieldsIn(task) {
@@ -194,9 +194,8 @@ async function handleSubmit(msg) {
     return respondError(msg, `Submit refused: ${owned.join(', ')} can only be set by the daemon`);
   }
 
-  // Server-side metric gate, fail-closed (processProposals applies it to KV
-  // proposals). Plan subtasks, escalations and Mission Control's lead-side KV
-  // write are not gated here; the worker's evaluateMetric re-check covers them.
+  // Server-side metric gate, fail-closed. Plan subtasks and escalations are not
+  // gated here; the worker's evaluateMetric re-check covers them.
   if (params.metric) {
     const check = validateMetricCommand(params.metric);
     if (!check.allowed) {
@@ -970,52 +969,6 @@ async function detectStalls() {
         threshold_minutes: STALL_MINUTES,
       });
     }
-  }
-}
-
-/**
- * Process proposed tasks — worker nodes write tasks with status "proposed"
- * directly to KV. The lead daemon validates and transitions them.
- */
-async function processProposals() {
-  const proposed = await store.list({ status: TASK_STATUS.PROPOSED });
-  for (const task of proposed) {
-    // Basic validation: must have title and origin
-    if (!task.title || !task.origin) {
-      task.status = TASK_STATUS.REJECTED;
-      task.result = { success: false, summary: 'Missing required fields (title, origin)' };
-      await store.put(task);
-      log(`REJECTED ${task.task_id}: missing required fields`);
-      publishEvent('rejected', task);
-      continue;
-    }
-    const owned = daemonOwnedFieldsIn(task);
-    if (owned.length) {
-      task.status = TASK_STATUS.REJECTED;
-      task.result = { success: false, summary: `Proposal sets daemon-owned ${owned.join(', ')}` };
-      await store.put(task);
-      log(`REJECTED proposal ${task.task_id} from ${task.origin}: sets daemon-owned ${owned.join(', ')}`);
-      publishEvent('rejected', task);
-      continue;
-    }
-
-    if (task.metric) {
-      const check = validateMetricCommand(task.metric);
-      if (!check.allowed) {
-        task.status = TASK_STATUS.REJECTED;
-        task.result = { success: false, summary: `Metric refused: ${check.reason}` };
-        await store.put(task);
-        log(`REJECTED proposal ${task.task_id} from ${task.origin}: metric refused — ${check.reason}`);
-        publishEvent('rejected', task);
-        continue;
-      }
-    }
-
-    // Accept: transition to queued
-    task.status = TASK_STATUS.QUEUED;
-    await store.put(task);
-    log(`ACCEPTED proposal ${task.task_id} from ${task.origin}: "${task.title}"`);
-    publishEvent('submitted', task);
   }
 }
 
@@ -3063,7 +3016,6 @@ handleCollabJoin = tracer.wrapAsync('handleCollabJoin', handleCollabJoin, { tier
 handleCollabReflect = tracer.wrapAsync('handleCollabReflect', handleCollabReflect, { tier: 1, category: 'state_transition' });
 detectStalls = tracer.wrapAsync('detectStalls', detectStalls, { tier: 1, category: 'state_transition' });
 enforceBudgets = tracer.wrapAsync('enforceBudgets', enforceBudgets, { tier: 1, category: 'state_transition' });
-processProposals = tracer.wrapAsync('processProposals', processProposals, { tier: 1, category: 'state_transition' });
 
 // Tier 1 — state_transition (handlers)
 handleAttempt = tracer.wrapAsync('handleAttempt', handleAttempt, { tier: 1, category: 'state_transition' });
@@ -3199,9 +3151,6 @@ async function main() {
   }
 
   // Start enforcement loops
-  const proposalTimer = setInterval(async () => {
-    try { await processProposals(); } catch (err) { log(`processProposals error: ${err.message}`); }
-  }, BUDGET_CHECK_INTERVAL);
   const budgetTimer = setInterval(async () => {
     try { await enforceBudgets(); } catch (err) { log(`enforceBudgets error: ${err.message}`); }
   }, BUDGET_CHECK_INTERVAL);
@@ -3215,7 +3164,6 @@ async function main() {
   const collabRoundSweepTimer = setInterval(sweepCollabRoundTimeouts, 60000); // every 60s (P1 #4)
   const pruneTimer = setInterval(pruneTerminalTasks, 3600000); // hourly (P4-5)
   pruneTerminalTasks();
-  log(`Proposal processing: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Budget enforcement: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Stall detection: every ${BUDGET_CHECK_INTERVAL / 1000}s (threshold: ${STALL_MINUTES}m)`);
   log(`Collab recruiting check: every 5s`);
@@ -3231,7 +3179,6 @@ async function main() {
     shuttingDown = true;
     log('Shutting down...');
     log('Clearing timers...');
-    clearInterval(proposalTimer);
     clearInterval(budgetTimer);
     clearInterval(stallTimer);
     clearInterval(recruitTimer);
@@ -3318,7 +3265,6 @@ if (require.main === module) {
     handlePlanAbort: (msg) => handlePlanAbort(msg),
     handlePlanGet: (msg) => handlePlanGet(msg),
     handlePlanSubtaskUpdate: (msg) => handlePlanSubtaskUpdate(msg),
-    processProposals: () => processProposals(),
     detectStalls: () => detectStalls(),
     enforceBudgets: () => enforceBudgets(),
   };

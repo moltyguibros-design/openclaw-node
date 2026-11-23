@@ -25,8 +25,6 @@ describe("TASK_STATUS enum", () => {
       "failed",
       "released",
       "cancelled",
-      "proposed",
-      "rejected",
     ];
     for (const s of expected) {
       const key = Object.keys(TASK_STATUS).find(
@@ -46,12 +44,31 @@ describe("TASK_STATUS enum", () => {
       "failed",
       "released",
       "cancelled",
-      "proposed",
-      "rejected",
     ]);
     for (const [key, val] of Object.entries(TASK_STATUS)) {
       assert.ok(known.has(val), `Unexpected status: ${key}=${val}`);
     }
+  });
+});
+
+// The KV proposal intake (status "proposed", accepted or "rejected" by a 30 s full
+// MESH_TASKS scan) had no producer: tasks enter through mesh.tasks.submit only.
+describe("no KV proposal intake", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const root = path.join(__dirname, "..");
+  const read = (f) => fs.readFileSync(path.join(root, f), "utf8");
+
+  it("has no proposed or rejected task status, and the daemon no proposal loop", () => {
+    assert.equal(Object.values(TASK_STATUS).includes("proposed"), false);
+    assert.equal(Object.values(TASK_STATUS).includes("rejected"), false);
+    const daemon = read("bin/mesh-task-daemon.js");
+    assert.doesNotMatch(daemon, /processProposals|proposalTimer|TASK_STATUS\.(PROPOSED|REJECTED)/);
+    assert.doesNotMatch(read("lib/mesh-tasks.js"), /PROPOSED|REJECTED|processProposals/);
+  });
+
+  it("the README no longer advertises proposing a task through the KV bucket", () => {
+    assert.doesNotMatch(read("README.md"), /status: proposed|PROPOSED \+ REJECTED|Proposal processing|propose (new )?tasks/i);
   });
 });
 

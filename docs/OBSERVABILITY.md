@@ -183,7 +183,6 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 | `sweepCirclingStepTimeouts` | mesh-task-daemon | 2 | Periodic sweep for timed-out circling steps — batch timeout enforcement. |
 | `advanceCirclingStep` | CollabStore | 2 | Moves to next step in circling sequence — tracks step progression through the strategy. |
 | `parseCirclingReflection` | circling-parser | 2 | Parses structured reflection from circling agents — validates reflection format and extracts quality signals. |
-| `processProposals` | mesh-task-daemon | 2 | Processes improvement proposals from circling — logs proposal acceptance rate and applied changes. |
 
 ---
 
