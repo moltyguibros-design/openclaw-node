@@ -270,6 +270,13 @@ describe('createLocalEventLog retention', () => {
     assert.equal(logs.length, 1);
     assert.ok(logs[0].endsWith(`; trimmed the oldest 1000 of its ${MIB_256 + 1000} bytes`), logs[0]);
   });
+
+  it('only a permissions violation on the update is tolerated; any other update error surfaces', async () => {
+    const { nc, jsm, streams } = mockJetStream();
+    streams.set('local-events-daedalus', unlimited('local-events-daedalus'));
+    jsm.streams.update = async () => { throw Object.assign(new Error('TIMEOUT'), { code: 'TIMEOUT' }); };
+    await assert.rejects(createLocalEventLog(nc, 'daedalus', { log: () => {} }), /TIMEOUT/);
+  });
 });
 
 describe('local event consumers read only their node\'s subjects', () => {

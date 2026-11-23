@@ -16,10 +16,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { connect, nkeys, nkeyAuthenticator } from 'nats';
+import { connect, nkeys, nkeyAuthenticator, StorageType } from 'nats';
 import { natsServerBin, freePort, startNatsServer, writeServerConfig } from './helpers/nats-server.mjs';
 import { renderAuthorization } from '../bin/nats-auth-render.mjs';
 import { getOrCreateIdentity } from '../lib/node-identity.mjs';
+import { buildMemoryEvent, createLocalEventLog, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
+import { ensureSharedStream, SHARED_STREAM_NAME, SHARED_SUBJECTS } from '../lib/shared-event-stream.mjs';
+import { createMemoryWatcher } from '../lib/memory-watcher.mjs';
 
 const require = createRequire(import.meta.url);
 const { identityToNkey, nkeyAuthenticatorFor } = require('../lib/nats-nkey.js');
@@ -121,6 +124,32 @@ describe('nkey auth on a real nats-server', { skip: SKIP }, () => {
     const leadJsm = await leadNc.jetstreamManager();
     assert.equal((await leadJsm.streams.purge(stream)).success, true, 'the allow-all lead keeps its maintenance path (pruneTerminal purgeDeletes)');
     await leadNc.close();
+  });
+
+  // The worker deny on STREAM.UPDATE also refuses the retention update a
+  // worker's memory daemon makes on its own pre-retention streams.
+  it('a worker on pre-retention event streams keeps its local event log and watcher, logging the lead command', async () => {
+    const nc = await connect({ servers: url(), authenticator: nkeyAuthenticatorFor(path.join(dir, 'worker')), timeout: 3000 });
+    const jsm = await nc.jetstreamManager();
+    await jsm.streams.add({ name: localEventStreamName('w1'), subjects: [`${localEventSubjectPrefix('w1')}.>`], storage: StorageType.File, num_replicas: 1 });
+    await jsm.streams.add({ name: SHARED_STREAM_NAME, subjects: SHARED_SUBJECTS, storage: StorageType.File, num_replicas: 1 });
+    const logs = [];
+    const eventLog = await createLocalEventLog(nc, 'w1', { log: (m) => logs.push(m) });
+    const watcher = await createMemoryWatcher(nc, 'w1', { outputPath: path.join(dir, 'watcher-w1.jsonl'), log: () => {} });
+    try {
+      await eventLog.publishLocal(buildMemoryEvent('memory.session_started', 'sess-w1', 'session',
+        { session_id: 'sess-w1', start_time: new Date().toISOString(), session_type: 'daemon' }, 'w1'));
+      assert.equal((await jsm.streams.info(localEventStreamName('w1'))).state.messages, 1);
+      await ensureSharedStream(nc, { log: (m) => logs.push(m) });
+    } finally {
+      await watcher.stop();
+    }
+    assert.deepEqual(logs, [
+      'local-events-w1 has no retention limit and this connection may not update streams; from a lead: nats stream edit local-events-w1 --max-age 720h --max-bytes 268435456 --discard old',
+      'OPENCLAW_SHARED has no retention limit and this connection may not update streams; from a lead: nats stream edit OPENCLAW_SHARED --max-age 720h --max-bytes 268435456 --discard old',
+    ]);
+    assert.equal((await jsm.streams.info(localEventStreamName('w1'))).config.max_age, 0, 'the worker changed no stream');
+    await nc.close();
   });
 
   it('the legacy user works until the render drops it and the server reloads', async () => {
