@@ -9,7 +9,7 @@
  *
  * Phases:
  *   0. Session-start bootstrap (once per new session)
- *      - Freezes MEMORY.md snapshot (memory-budget)
+ *      - Opens the node memory session (memory-budget session events)
  *      - Imports sessions into SQLite archive (session-store)
  *   1. Status sync (every tick when active, ~5ms)
  *   2. Throttled background work (recap 10min, maintenance 30min,
@@ -17,7 +17,7 @@
  *
  * v3 additions (Hermes-inspired):
  *   - Pre-compression memory flush (durable fact extraction before context loss)
- *   - MEMORY.md character budget with frozen session snapshots
+ *   - MEMORY.md character budget
  *   - SQLite session archive with FTS5 for episodic recall
  *
  * Install: install.sh (scripts/install/services.sh renders the launchd/systemd unit)
@@ -308,7 +308,7 @@ function _detectActivity(sources, activityWindowMs) {
 const detectActivity = tracer.wrap('detectActivity', _detectActivity, { tier: 2, category: 'compute' });
 
 // ============================================================
-// MEMORY BUDGET (Hermes-inspired frozen snapshot)
+// MEMORY BUDGET (character cap + node memory session events)
 // ============================================================
 
 let memoryBudget = null;
@@ -559,17 +559,6 @@ function initMemoryBudget(config) {
     eventLog: liveEventLog,
     nodeId: NODE_ID,
   });
-
-  memoryBudget.on('add', ({ entry, pctUsed, charsRemaining }) => {
-    log(`  [memory] +added (${pctUsed}% used, ${charsRemaining} chars free)`);
-  });
-  memoryBudget.on('warning', ({ pctUsed, message }) => {
-    log(`  [memory] WARNING: ${message}`);
-  });
-  memoryBudget.on('trim', ({ removed }) => {
-    log(`  [memory] trimmed: ${removed.slice(0, 60)}...`);
-  });
-
   return memoryBudget;
 }
 
@@ -650,13 +639,12 @@ async function runPhase0Bootstrap(sessionId, config, { othersLive = false, previ
     } catch (e) { log(`  clawvault doctor failed: ${e.message}`); }
   }
 
-  // 7. Freeze MEMORY.md snapshot for deterministic prompt content
+  // 7. Open the node memory session (memory.session_started)
   try {
     const budget = initMemoryBudget(config);
     budget.startSession();
-    const stats = budget.getStats();
-    log(`  memory-budget frozen ${stats.meterDisplay}`);
-  } catch (e) { log(`  memory-budget freeze failed: ${e.message}`); }
+    log(`  memory session started, MEMORY.md ${budget.getStats().meterDisplay}`);
+  } catch (e) { log(`  memory session start failed: ${e.message}`); }
 
   // 8. Import changed sessions into SQLite archive (memory worker)
   try {
@@ -960,9 +948,6 @@ async function runPhase2ThrottledWork(config, sessions) {
               sessionId,
               synthesisLabel: 'interval',
             });
-            if (memoryBudget && (result.added > 0 || result.merged > 0)) {
-              memoryBudget.reload();
-            }
           } catch (e) { log(`  Phase 2: interval synthesis of ${sessionId.slice(0, 8)} failed: ${e.message}`); emitErrorEvent('extract', e, sessionId); }
         }
       })()
@@ -1008,10 +993,6 @@ async function runRequestedFlush(sessions, config) {
             sessionId,
             synthesisLabel: 'manual',
           });
-          if (memoryBudget && (result.added > 0 || result.merged > 0)) {
-            memoryBudget.reload();
-            log('  memory-budget: snapshot reloaded after nats-triggered flush');
-          }
         }
       } catch (e) { log(`  nats-triggered flush of ${sessionId.slice(0, 8)} failed: ${e.message}`); emitErrorEvent('extract', e, sessionId); }
     }
@@ -1100,10 +1081,6 @@ async function handleTransitions(transitions, config) {
               sessionId: path.basename(currentJsonl, '.jsonl'),
               synthesisLabel: 'idle',
             });
-            if (memoryBudget && (result.added > 0 || result.merged > 0)) {
-              memoryBudget.reload();
-              log('  memory-budget: snapshot reloaded after flush');
-            }
           }
         } catch (e) { log(`  pre-compression flush failed: ${e.message}`); emitErrorEvent('extract', e, path.basename(currentJsonl, '.jsonl')); }
       }
@@ -1148,10 +1125,6 @@ async function handleTransitions(transitions, config) {
           }
           if (result.added > 0 || result.merged > 0) {
             log(`  end-of-session flush [${result.mode || 'regex'}]: ${result.added} added, ${result.merged} merged`);
-            if (memoryBudget) {
-              memoryBudget.reload();
-              log('  memory-budget: snapshot reloaded after end-of-session flush');
-            }
           }
         } catch (e) { log(`  end-of-session flush failed: ${e.message}`); emitErrorEvent('extract', e, path.basename(currentJsonl, '.jsonl')); }
       }
@@ -1171,10 +1144,10 @@ async function handleTransitions(transitions, config) {
         } catch (e) { log(`  session-store archive failed: ${e.message}`); emitErrorEvent('ingest', e); }
       }
 
-      // 0c. Release frozen MEMORY.md snapshot (shared by every live session)
+      // 0c. The last live session ends the node memory session (memory.session_ended)
       if (memoryBudget && !t.othersLive) {
         memoryBudget.endSession();
-        log('  memory-budget: snapshot released');
+        log('  memory session ended');
       }
 
       // 1. Final Obsidian sync — push all changes

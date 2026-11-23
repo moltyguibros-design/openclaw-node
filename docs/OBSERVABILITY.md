@@ -371,9 +371,6 @@ The dashboard page is a trace log that polls `/api/observability/events` every 3
 |----------|--------|------|------------|
 | `startSession` | memory-budget | 1 | Initializes a new memory budget session — logs budget limits and session binding. |
 | `endSession` | memory-budget | 1 | Closes a memory budget session — logs total consumption and whether budget was exceeded. |
-| `addEntry` | memory-budget | 2 | Adds an entry to the memory budget — tracks incremental consumption for budget forecasting. |
-| `getRendered` | memory-budget | 2 | Retrieves rendered memory content — logged to track render frequency and output size. |
-| `reload` | memory-budget | 2 | Reloads memory budget from disk — logged to detect stale budget state after crashes. |
 | `getStats` | memory-budget | 3 | Returns budget usage statistics — high-frequency read; dev-mode logging. |
 | `getMeterDisplay` | memory-budget | 3 | Formats budget meter for display — utility; logged in dev. |
 

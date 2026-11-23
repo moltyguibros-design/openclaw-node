@@ -1,8 +1,7 @@
 /**
  * memory-budget.test.mjs — Unit tests for lib/memory-budget.mjs
  *
- * Tests MemoryBudget: freeze/thaw lifecycle, character budget enforcement,
- * event emission, trimming, and stats.
+ * Tests MemoryBudget: the session lifecycle, its events, the budget and stats.
  *
  * Run: node --test test/memory-budget.test.mjs
  */
@@ -13,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { MemoryBudget, createBudget } from '../lib/memory-budget.mjs';
+import { repo, daemonFixture, transcript, runDaemon, daemonLog, removeFixture } from './helpers/memory-daemon-harness.mjs';
 import { extractFacts, mergeFacts, cleanParentheticalChains, stripSupersedes, truncateAtWord } from '../lib/pre-compression-flush.mjs';
 
 let tmpDir;
@@ -47,41 +47,6 @@ describe('MemoryBudget', () => {
     assert.equal(frozen, '# Memory\n- entry one\n');
   });
 
-  it('getRendered returns frozen content even after disk changes', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, 'original');
-
-    const mb = new MemoryBudget(filePath);
-    mb.startSession();
-
-    // Modify file on disk
-    fs.writeFileSync(filePath, 'modified on disk');
-
-    // Rendered should still be the frozen version
-    assert.equal(mb.getRendered(), 'original');
-  });
-
-  it('getRendered returns live content when not frozen', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, 'live content');
-
-    const mb = new MemoryBudget(filePath);
-    assert.equal(mb.getRendered(), 'live content');
-  });
-
-  it('reload updates frozen content from disk', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, 'v1');
-
-    const mb = new MemoryBudget(filePath);
-    mb.startSession();
-    assert.equal(mb.getRendered(), 'v1');
-
-    fs.writeFileSync(filePath, 'v2');
-    mb.reload();
-    assert.equal(mb.getRendered(), 'v2');
-  });
-
   it('endSession clears frozen state', () => {
     const filePath = path.join(tmpDir, 'MEMORY.md');
     fs.writeFileSync(filePath, 'content');
@@ -105,111 +70,6 @@ describe('MemoryBudget', () => {
     assert.ok(event);
     assert.equal(event.charCount, '# Mem\n- line\n'.length);
     assert.equal(event.lineCount, 3);
-  });
-
-  it('emits reload event on reload', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, 'reloaded');
-
-    const mb = new MemoryBudget(filePath);
-    mb.startSession();
-    let event = null;
-    mb.on('reload', (e) => { event = e; });
-    mb.reload();
-    assert.ok(event);
-  });
-});
-
-describe('addEntry', () => {
-  it('adds entry to file on disk', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, '# Memory\n');
-
-    const mb = new MemoryBudget(filePath, { charBudget: 500 });
-    const result = mb.addEntry('new fact learned');
-
-    assert.equal(result.added, true);
-    const content = fs.readFileSync(filePath, 'utf-8');
-    assert.ok(content.includes('- new fact learned'));
-  });
-
-  it('creates section if missing', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, '# Memory\n');
-
-    const mb = new MemoryBudget(filePath, { charBudget: 500 });
-    mb.addEntry('fact', { section: 'Context' });
-
-    const content = fs.readFileSync(filePath, 'utf-8');
-    assert.ok(content.includes('## Context'));
-  });
-
-  it('rejects entry when over budget and cannot trim', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    // Fill with non-bullet content so nothing can be trimmed
-    // 490 chars of headers/text + new entry with section = well over 500
-    fs.writeFileSync(filePath, '# Memory\n## Recent\n' + 'x'.repeat(480));
-
-    const mb = new MemoryBudget(filePath, { charBudget: 500 });
-    const result = mb.addEntry('this entry will not fit because budget is full');
-
-    assert.equal(result.added, false);
-  });
-
-  it('trims oldest bullets to make room', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, '# Memory\n- old entry one\n- old entry two\n');
-
-    const mb = new MemoryBudget(filePath, { charBudget: 80 });
-    const result = mb.addEntry('brand new entry');
-
-    assert.equal(result.added, true);
-    const content = fs.readFileSync(filePath, 'utf-8');
-    assert.ok(content.includes('- brand new entry'));
-  });
-
-  it('emits add event', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, '# Memory\n');
-
-    const mb = new MemoryBudget(filePath, { charBudget: 500 });
-    let event = null;
-    mb.on('add', (e) => { event = e; });
-    mb.addEntry('test');
-
-    assert.ok(event);
-    assert.equal(event.entry, 'test');
-    assert.ok(event.pctUsed >= 0);
-    assert.ok(event.totalBudget === 500);
-  });
-
-  it('emits warning at 80% threshold', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, 'x'.repeat(75));
-
-    const mb = new MemoryBudget(filePath, { charBudget: 100 });
-    let warning = null;
-    mb.on('warning', (e) => { warning = e; });
-    mb.addEntry('push past 80%');
-
-    assert.ok(warning);
-    assert.ok(warning.pctUsed >= 80);
-  });
-
-  it('emits trim event when removing old entries', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    // "# Memory\n## Recent\n- old bullet entry\n" = 40 chars
-    // Budget 55, so adding "- new entry here\n" (18 chars) => 58 > 55, triggers trim
-    fs.writeFileSync(filePath, '# Memory\n## Recent\n- old bullet entry\n');
-
-    const contentLen = fs.readFileSync(filePath, 'utf-8').length;
-    const mb = new MemoryBudget(filePath, { charBudget: contentLen + 5 });
-    let trimEvent = null;
-    mb.on('trim', (e) => { trimEvent = e; });
-    mb.addEntry('new entry that exceeds budget');
-
-    assert.ok(trimEvent);
-    assert.ok(trimEvent.removed.includes('old bullet'));
   });
 });
 
@@ -236,41 +96,44 @@ describe('getStats', () => {
   });
 });
 
-describe('reload after external write', () => {
-  it('reload after external write updates getRendered in mid-session', () => {
-    const filePath = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(filePath, '# Memory\n- original fact\n');
-
-    const mb = new MemoryBudget(filePath, { charBudget: 500 });
-    mb.startSession();
-    assert.equal(mb.getRendered(), '# Memory\n- original fact\n');
-
-    // Simulate an external flush writing new facts to MEMORY.md on disk
-    fs.writeFileSync(filePath, '# Memory\n- original fact\n- extracted-by-flush\n');
-
-    // Without reload, frozen snapshot is stale
-    assert.equal(mb.getRendered(), '# Memory\n- original fact\n');
-
-    // After reload, snapshot picks up the flush output
-    const reloaded = mb.reload();
-    assert.equal(mb.getRendered(), '# Memory\n- original fact\n- extracted-by-flush\n');
-    assert.equal(reloaded, '# Memory\n- original fact\n- extracted-by-flush\n');
-
-    // Verify reload event carried correct stats
-    let reloadEvent = null;
-    mb.on('reload', (e) => { reloadEvent = e; });
-    fs.writeFileSync(filePath, '# Memory\n- final version\n');
-    mb.reload();
-    assert.ok(reloadEvent);
-    assert.equal(reloadEvent.charCount, '# Memory\n- final version\n'.length);
-    assert.equal(reloadEvent.lineCount, 3);
-  });
-});
-
 describe('createBudget', () => {
   it('creates budget with correct file path', () => {
     const mb = createBudget(tmpDir);
     assert.equal(mb.filePath, path.join(tmpDir, 'MEMORY.md'));
+  });
+});
+
+// Nothing read the frozen copy (no getRendered caller) and nothing called
+// addEntry, so the reloads, the add/warning/trim listeners and the
+// "snapshot reloaded" log lines suggested prompts changed when none did.
+describe('only the live parts of the budget remain', () => {
+  it('MemoryBudget keeps the session events, the budget and the stats, and no prompt-snapshot or write API', () => {
+    const mb = createBudget(tmpDir, { charBudget: 300 });
+    assert.equal(mb.charBudget, 300);
+    assert.equal(typeof mb.startSession, 'function');
+    assert.equal(typeof mb.endSession, 'function');
+    assert.equal(typeof mb.getStats, 'function');
+    for (const gone of ['getRendered', 'reload', 'addEntry']) assert.equal(mb[gone], undefined, `${gone} is still exposed`);
+  });
+
+  it('the daemon neither reloads a snapshot nor listens for budget writes', () => {
+    const daemon = fs.readFileSync(path.join(repo, 'workspace-bin/memory-daemon.mjs'), 'utf8');
+    assert.doesNotMatch(daemon, /\.reload\(\)/);
+    assert.doesNotMatch(daemon, /memoryBudget\.on\(/);
+    assert.doesNotMatch(daemon, /snapshot reloaded/);
+  });
+
+  it('a flush that adds facts logs no snapshot reload', () => {
+    const fx = daemonFixture();
+    try {
+      transcript(fx, 'aaaa1111', 10);
+      runDaemon(fx, `await daemon.runRequestedFlush([{ sessionId: 'aaaa1111', state: 'ACTIVE' }], config);`);
+      const log = daemonLog(fx);
+      assert.match(log, /nats-triggered flush \[regex\] aaaa1111: \d+ facts, [1-9]\d* added/);
+      assert.doesNotMatch(log, /memory-budget/);
+    } finally {
+      removeFixture(fx);
+    }
   });
 });
 

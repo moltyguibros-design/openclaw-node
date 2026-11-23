@@ -124,7 +124,7 @@ const subsystems = [
     name: 'Memory budget event recorder',
     // Live daemon: `import { createBudget } from '../lib/memory-budget.mjs'` via initMemoryBudget()
     check: () => isInvoked(daemonSrc, 'createMemoryBudget') || isInvoked(daemonSrc, 'new MemoryBudget') || isInvoked(daemonSrc, 'createBudget'),
-    notWiredFix: 'Daemon must instantiate MemoryBudget if memory.session_*/fact_extracted events are wanted',
+    notWiredFix: 'Daemon must instantiate MemoryBudget if memory.session_* events are wanted',
   },
   {
     name: 'Session store',

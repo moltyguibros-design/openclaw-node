@@ -260,30 +260,6 @@ describe('MemoryBudget dual-write', () => {
     assert.equal(published[0].data.turn_count, 0);
   });
 
-  it('calls publishLocal on addEntry when eventLog provided', async () => {
-    const memFile = path.join(tmpDir, 'MEMORY.md');
-    fs.writeFileSync(memFile, '# Memory\n');
-
-    const published = [];
-    const mockEventLog = {
-      publishLocal: async (event) => { published.push(event); },
-    };
-
-    const mb = new MemoryBudget(memFile, { eventLog: mockEventLog, nodeId: 'test-node' });
-    mb.startSession();
-    await new Promise(r => setTimeout(r, 10));
-    published.length = 0;
-
-    mb.addEntry('User prefers dark mode');
-    await new Promise(r => setTimeout(r, 10));
-
-    assert.equal(published.length, 1);
-    assert.equal(published[0].event_type, 'memory.fact_extracted');
-    assert.equal(published[0].data.fact, 'User prefers dark mode');
-    assert.equal(published[0].data.category, 'Recent');
-    assert.equal(published[0].data.speaker, 'user');
-  });
-
   it('works without eventLog (no errors)', () => {
     const memFile = path.join(tmpDir, 'MEMORY.md');
     fs.writeFileSync(memFile, '# Memory\n');
@@ -291,9 +267,6 @@ describe('MemoryBudget dual-write', () => {
     const mb = new MemoryBudget(memFile);
     const frozen = mb.startSession();
     assert.equal(frozen, '# Memory\n');
-
-    const result = mb.addEntry('test fact');
-    assert.equal(result.added, true);
 
     mb.endSession();
     assert.equal(mb.isFrozen, false);
@@ -313,9 +286,6 @@ describe('MemoryBudget dual-write', () => {
     // None of these should throw despite publishLocal errors
     const frozen = mb.startSession();
     assert.equal(typeof frozen, 'string');
-
-    const result = mb.addEntry('another fact');
-    assert.equal(result.added, true);
 
     mb.endSession();
     assert.equal(mb.isFrozen, false);

@@ -570,7 +570,7 @@ openclaw-node-check --axis network --no-mutate # read-only bus probes (also --ax
 - **Knowledge over NATS** *(planned)* — the `mesh.tool.{nodeId}.<tool>.*` request/reply pattern exists but is wired only for `discord-history` today; there is no knowledge-over-NATS responder yet (mesh workers query the lead's index over HTTP)
 - **Tailscale** — encrypted WireGuard tunnel between nodes
 - **Agent Activity Monitor** (`lib/agent-activity.js`) — zero-cost agent state detection via Claude Code JSONL session files (active, ready, idle, blocked)
-- **Memory Budget** (`lib/memory-budget.mjs`) — character budget enforcement for MEMORY.md with freeze/thaw semantics per session
+- **Memory Budget** (`lib/memory-budget.mjs`) — the MEMORY.md character budget the flush writes under, its usage meter, and the node memory session events (`memory.session_started` / `memory.session_ended`)
 - **Mesh Registry** (`lib/mesh-registry.js`) — NATS KV-backed tool registry: tools register here and are called over request/reply on `mesh.tool.<node>.<tool>.<method>`; the only registered tool today is `discord-history` (`bin/mesh-tool-discord.js`)
 
 The mesh is optional. Without Tailscale, everything runs as a standalone single node.

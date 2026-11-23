@@ -26,11 +26,11 @@ default `~/.openclaw/workspace/`). They are **not** committed to any git repo.
 
 ### `MEMORY.md`
 
-- **Owner:** `pre-compression-flush.mjs` → `runFlush()` (writes); `memory-budget.mjs` → `MemoryBudget` (manages budget, snapshots)
+- **Owner:** `pre-compression-flush.mjs` → `runFlush()` (writes, under the `memory-budget.mjs` character cap the daemon passes as `charBudget`)
 - **Format:** Markdown. Extracted facts as bullet points, optionally with `[user]`/`[assistant]` speaker tags and `<!-- supersedes: <hash> -->` comments.
-- **Lifetime:** Persistent. Content accumulates across sessions; trimmed under character budget pressure (~2200 chars). Frozen (snapshotted) at session start, reloaded after flushes.
+- **Lifetime:** Persistent. Content accumulates across sessions; trimmed under character budget pressure (~2200 chars).
 - **Consumers:**
-  - `memory-budget.mjs` — freezes snapshot for prompt injection at session start
+  - `memory-budget.mjs` — reports its size against the budget (usage meter in the daemon log)
   - `memory-daemon.mjs` — triggers flush writes on ACTIVE→IDLE and IDLE→ENDED transitions
   - Claude session hooks — read at session start via `session-start.sh` (indirectly, via the bootstrap chain)
 

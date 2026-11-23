@@ -194,7 +194,7 @@ memory-daemon detects new session via JSONL mtime
   → memory-maintenance --force (catch up on any stale maintenance)
   → compile-boot --all (ensure boot artifacts are fresh)
   → clawvault-local doctor (verify vault integrity)
-  → MEMORY.md snapshot frozen, transcript directory imported
+  → node memory session opened (memory.session_started), transcript directory imported
 ```
 
 ### During Active Session (ACTIVE state)
@@ -230,7 +230,7 @@ Idle timeout (15min no JSONL writes) → IDLE
   → clawvault-local checkpoint --working-on idle
 IDLE timeout (5min) → ENDED
   → end-of-session flush and archive of that transcript
-  → MEMORY.md snapshot released only when no other session is live
+  → node memory session closed (memory.session_ended) only when no other session is live
   → clawvault-local sleep
 ```
 
