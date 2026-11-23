@@ -132,13 +132,43 @@ step "Step 19: Plan Templates"
 TEMPLATES_DIR="${OPENCLAW_ROOT}/plan-templates"
 run mkdir -p "$TEMPLATES_DIR"
 
-for tmpl in team-feature team-bugfix team-deploy; do
-  TMPL_SRC="${REPO_DIR}/config/plan-templates/${tmpl}.yaml"
-  TMPL_DST="${TEMPLATES_DIR}/${tmpl}.yaml"
-  if [ -f "$TMPL_SRC" ] && [ ! -f "$TMPL_DST" ]; then
-    run cp "$TMPL_SRC" "$TMPL_DST"
-    info "Installed plan template: ${tmpl}.yaml"
+# install_template — `mesh plan` reads this folder before the shipped templates,
+# so a copy must follow the shipped one or every template fix stays shadowed.
+# Templates carry no version: line, so the ${dst}.sha record of what was last
+# copied decides: a copy still matching it was never edited and is refreshed;
+# an edited one is kept and the new version saved as .new.
+install_template() {
+  local src="$1" dst="$2" name="$3"
+  local rec="${dst}.sha" src_hash dst_hash
+  if [ ! -f "$src" ]; then return; fi
+  src_hash=$(rule_hash "$src")
+
+  if [ ! -f "$dst" ]; then
+    run cp "$src" "$dst"
+    echo "$src_hash" | write_file "$rec"
+    info "Installed plan template: ${name}"
+    return
   fi
+
+  dst_hash=$(rule_hash "$dst")
+  if [ -z "$dst_hash" ] || [ "$dst_hash" = "$src_hash" ]; then
+    # Copies from before records existed are adopted while still pristine.
+    if [ -n "$dst_hash" ] && [ ! -f "$rec" ]; then echo "$dst_hash" | write_file "$rec"; fi
+    return
+  fi
+
+  if [ -f "$rec" ] && [ "$dst_hash" = "$(cat "$rec")" ]; then
+    run cp "$src" "$dst"
+    echo "$src_hash" | write_file "$rec"
+    info "Updated plan template: ${name}"
+  else
+    run cp "$src" "${dst}.new"
+    warn "Plan template ${name}: a newer version ships but the local copy was edited (or has no install record). Saved as ${name}.new for manual merge."
+  fi
+}
+
+for tmpl in team-feature team-bugfix team-deploy; do
+  install_template "${REPO_DIR}/config/plan-templates/${tmpl}.yaml" "${TEMPLATES_DIR}/${tmpl}.yaml" "${tmpl}.yaml"
 done
 
 info "Templates directory: ${TEMPLATES_DIR}"
