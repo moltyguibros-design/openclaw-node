@@ -185,7 +185,8 @@ If `R=3 valid: false`, ensure all 3 NATS nodes are clustered before creating the
 ### 1.5 Start the daemons
 
 Start each node's memory daemon with the appropriate environment. `OPENCLAW_HOME` is the
-node root (`bin/spawn-node.mjs` prints this line for each node): the daemon keeps its
+node root (`bin/spawn-node.mjs` prints this line, and the consolidation line below, for each
+node): the daemon keeps its
 `config/daemon.json`, `state.db`, `workspace/` (with `.knowledge.db` and the LLM-queue
 snapshot `.tmp/ollama-queue-state.json`), `graph-cache.db` and `watcher.jsonl` there, reads
 `OLLAMA_NUM_PARALLEL` from the root's `openclaw.env`, and its flushes write vault notes into
@@ -220,6 +221,19 @@ OPENCLAW_HOME=$HOME/.openclaw-charlie \
 OPENCLAW_NATS=nats://localhost:4224 \
 MEMORY_INJECT_PORT=7902 \
 node workspace-bin/memory-daemon.mjs &
+```
+
+The daemon runs no consolidation cycle (decay, session notes, digests, promotion
+candidates), and the installed consolidation timer has no `OPENCLAW_HOME`, so it cycles only
+`~/.openclaw/state.db`. Each node runs its own scheduler on its root:
+
+```bash
+OPENCLAW_HOME=$HOME/.openclaw-alpha OPENCLAW_NODE_ID=alpha OPENCLAW_NATS=nats://localhost:4222 \
+node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=$HOME/.openclaw-bravo OPENCLAW_NODE_ID=bravo OPENCLAW_NATS=nats://localhost:4223 \
+node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=$HOME/.openclaw-charlie OPENCLAW_NODE_ID=charlie OPENCLAW_NATS=nats://localhost:4224 \
+node bin/consolidation-scheduler.mjs --daemon &
 ```
 
 The daemon will:
@@ -497,10 +511,32 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+The node's consolidation cycles run beside it, on the same root:
+
+```ini
+# /etc/systemd/system/openclaw-consolidation.service
+[Unit]
+Description=OpenClaw Consolidation Scheduler
+After=openclaw-daemon.service
+
+[Service]
+Type=simple
+User=<operator>
+Environment=OPENCLAW_NODE_ID=alpha
+Environment=OPENCLAW_HOME=/home/<operator>/.openclaw-alpha
+Environment=OPENCLAW_NATS=nats://localhost:4222
+ExecStart=/usr/bin/node /home/<operator>/openclaw-nodedev/bin/consolidation-scheduler.mjs --daemon
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable openclaw-daemon
-sudo systemctl start openclaw-daemon
+sudo systemctl enable openclaw-daemon openclaw-consolidation
+sudo systemctl start openclaw-daemon openclaw-consolidation
 ```
 
 ---
@@ -723,5 +759,5 @@ rm -rf ~/.openclaw/nats/jetstream-{1,2,3}
 2. **Shared stream** — first daemon to start creates `OPENCLAW_SHARED` (R=3)
 3. **Node trees** — `spawn-node.mjs` for each node (idempotent)
 4. **Identity keys** — generated on first use (idempotent)
-5. **Daemons** — start each node's `memory-daemon.mjs` with `OPENCLAW_FEDERATION=1` and the node's env vars
+5. **Daemons** — start each node's `memory-daemon.mjs` with `OPENCLAW_FEDERATION=1` and the node's env vars, and its `consolidation-scheduler.mjs --daemon` on the same `OPENCLAW_HOME`
 6. **Verify** — run integration tests or manual broadcast round-trip

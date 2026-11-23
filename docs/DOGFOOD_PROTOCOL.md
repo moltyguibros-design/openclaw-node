@@ -40,6 +40,16 @@ OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo nod
 OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node workspace-bin/memory-daemon.mjs &
 ```
 
+The daemon runs no consolidation cycle, and the installed consolidation timer cycles only
+`~/.openclaw`, so each node also runs its own scheduler on its root (`bin/spawn-node.mjs`
+prints both lines):
+
+```bash
+OPENCLAW_HOME=~/.openclaw-alpha OPENCLAW_NODE_ID=alpha node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node bin/consolidation-scheduler.mjs --daemon &
+```
+
 ### 4. Run the dogfood harness
 
 ```bash

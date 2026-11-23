@@ -22,11 +22,10 @@
  */
 
 import { openStore } from '../lib/sqlite-store.mjs';
-import path from 'path';
-import os from 'os';
 import { createHash } from 'crypto';
 import { createRequire } from 'node:module';
 import { resolveNodeId } from '../lib/node-id.js';
+import { memoryDaemonPaths } from '../lib/memory-daemon-paths.mjs';
 import {
   initConsolidationTables,
   decayWeights,
@@ -48,8 +47,6 @@ import { generateThemeNotes } from '../lib/obsidian-theme-notes.mjs';
 import { backfillDigests, previousIsoWeekEnd, refreshDigests } from '../lib/obsidian-digest.mjs';
 
 const require = createRequire(import.meta.url);
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), '.openclaw/state.db');
 
 const REMOVED_SAMPLE = 50;
 
@@ -93,8 +90,8 @@ function decayedEventData(decay, prune, durationMs) {
  * threads the signal down to per-concept granularity.
  *
  * @param {object} [opts]
- * @param {string} [opts.dbPath] — path to extraction store DB
- * @param {string} [opts.vaultPath] — Obsidian vault path
+ * @param {string} [opts.dbPath] — path to extraction store DB (default: the node root's state.db, memoryDaemonPaths)
+ * @param {string} [opts.vaultPath] — Obsidian vault path (default: a spawned node root's vault, else getVaultPath)
  * @param {boolean} [opts.dryRun] — skip only the vault-surface writers (session/decision/theme notes, daily/weekly digest); decay, prune, reinforce, concept summaries, events and the promotion fingerprint still write
  * @param {object} [opts.db] — pre-opened database (for testing)
  * @param {boolean|'quick'} [opts.integrityCheck] — openStore's open-time check (default full)
@@ -110,7 +107,9 @@ function decayedEventData(decay, prune, durationMs) {
  */
 export async function runConsolidationCycle(opts = {}) {
   const startMs = Date.now();
-  const dbPath = opts.dbPath || DEFAULT_DB_PATH;
+  const nodePaths = memoryDaemonPaths();
+  const dbPath = opts.dbPath || nodePaths.stateDb;
+  const vaultPath = opts.vaultPath || nodePaths.vault;
   const db = opts.db || openStore(dbPath, { integrityCheck: opts.integrityCheck });
   const ownDb = !opts.db;
   const signal = opts.signal || null;
@@ -189,7 +188,7 @@ export async function runConsolidationCycle(opts = {}) {
     // one writer failing never kills the cycle.
     if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
     if (!abortInfo && !opts.dryRun) {
-      const vp = opts.vaultPath ? { vaultPath: opts.vaultPath } : {};
+      const vp = vaultPath ? { vaultPath } : {};
       vaultSurfaceResult = {};
       let sessionNoteDates = [];
       try {
@@ -241,7 +240,7 @@ export async function runConsolidationCycle(opts = {}) {
     if (!abortInfo) {
       summaryResult = await regenerateSummaries({
         db,
-        vaultPath: opts.vaultPath,
+        vaultPath,
         client: opts.client,
         signal,
         maxConcepts: opts.maxConcepts,
@@ -339,7 +338,8 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const vaultIdx = args.indexOf('--vault-path');
   const noEvents = args.includes('--no-events');
   if (args.includes('--backfill-digests')) {
-    const r = await backfillDigests(vaultIdx !== -1 && args[vaultIdx + 1] ? { vaultPath: args[vaultIdx + 1] } : {});
+    const vaultPath = (vaultIdx !== -1 && args[vaultIdx + 1]) || memoryDaemonPaths().vault;
+    const r = await backfillDigests(vaultPath ? { vaultPath } : {});
     console.log(`Digests backfilled: ${r.daily} daily, ${r.weekly} weekly.`);
     process.exit(0);
   }

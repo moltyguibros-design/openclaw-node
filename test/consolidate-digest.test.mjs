@@ -18,8 +18,8 @@ import { backfillDigests, generateDailyDigest, isoWeekEnd } from '../lib/obsidia
 const DAY = 86400000;
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
 
-function sessionDb(sessions) {
-  const db = new Database(':memory:');
+function sessionDb(sessions, file = ':memory:') {
+  const db = new Database(file);
   db.exec(`
     CREATE TABLE entities (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, type TEXT NOT NULL,
       canonical_name TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, mention_count INTEGER NOT NULL DEFAULT 1,
@@ -112,6 +112,36 @@ describe('backfillDigests: the one-time catch-up over existing session notes', (
     assert.match(r.stdout, /Digests backfilled: 1 daily, 1 weekly/);
     assert.ok(existsSync(join(vault, 'daily', '2026-06-01.md')));
     assert.equal(existsSync(join(dir, 'state.db')), false, 'no cycle ran');
+  });
+});
+
+// The installed timer runs the cycle with no --db or --vault-path, and a
+// spawned node (bin/spawn-node.mjs) runs it with only OPENCLAW_HOME=<root>.
+describe('the standalone cycle on a node root', () => {
+  const CONSOLIDATE = fileURLToPath(new URL('../bin/consolidate.mjs', import.meta.url));
+  const cycle = (env) => spawnSync(process.execPath, [CONSOLIDATE, '--no-events'], { env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
+  const noted = (vault, shortId) => existsSync(join(vault, 'sessions')) && readdirSync(join(vault, 'sessions')).some((f) => f.endsWith(`-${shortId}.md`));
+
+  it('under OPENCLAW_HOME it cycles <root>/state.db into <root>/obsidian-local and leaves ~/.openclaw alone', () => {
+    const dir = tmpDir('consolidate-node-root-');
+    const home = join(dir, 'home');
+    const node = join(dir, 'node');
+    mkdirSync(home);
+    mkdirSync(node);
+    sessionDb([{ id: 'dddd0001-1111-2222-3333-444455556666', start: new Date().toISOString() }], join(node, 'state.db')).close();
+    const r = cycle({ HOME: home, OPENCLAW_HOME: node });
+    assert.equal(existsSync(join(home, '.openclaw')), false, `the cycle opened the main node's store: ${r.stdout}${r.stderr}`);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(noted(join(node, 'obsidian-local'), 'dddd0001'), 'no session note in the node root vault');
+  });
+
+  it('without OPENCLAW_HOME it keeps cycling ~/.openclaw/state.db into ~/.openclaw/obsidian-local', () => {
+    const home = join(tmpDir('consolidate-default-root-'), 'home');
+    mkdirSync(join(home, '.openclaw'), { recursive: true });
+    sessionDb([{ id: 'eeee0001-1111-2222-3333-444455556666', start: new Date().toISOString() }], join(home, '.openclaw', 'state.db')).close();
+    const r = cycle({ HOME: home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(noted(join(home, '.openclaw', 'obsidian-local'), 'eeee0001'), 'no session note in the default vault');
   });
 });
 

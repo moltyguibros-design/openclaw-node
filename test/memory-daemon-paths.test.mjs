@@ -9,10 +9,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { memoryDaemonPaths } from '../lib/memory-daemon-paths.mjs';
-import { runCommand } from '../bin/spawn-node.mjs';
+import { consolidationCommand, runCommand } from '../bin/spawn-node.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -60,5 +62,23 @@ describe('memory daemon paths', () => {
   it('spawn-node prints a run line with the node root, bus URL and its own inject port', () => {
     assert.equal(runCommand({ nodeRoot: '/n/bravo', id: 'bravo', port: 7901, natsUrl: 'nats://localhost:4223' }),
       'OPENCLAW_HOME=/n/bravo OPENCLAW_NODE_ID=bravo OPENCLAW_NATS=nats://localhost:4223 MEMORY_INJECT_PORT=7901 node workspace-bin/memory-daemon.mjs');
+  });
+
+  // The daemon runs no consolidation cycle, and the installed timer cycles
+  // only ~/.openclaw: a spawned node needs its own scheduler on its root.
+  it('spawn-node also prints the consolidation scheduler on the same root, id and bus', () => {
+    assert.equal(consolidationCommand({ nodeRoot: '/n/bravo', id: 'bravo', natsUrl: 'nats://localhost:4223' }),
+      'OPENCLAW_HOME=/n/bravo OPENCLAW_NODE_ID=bravo OPENCLAW_NATS=nats://localhost:4223 node bin/consolidation-scheduler.mjs --daemon');
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-node-cli-'));
+    try {
+      const r = spawnSync(process.execPath, [path.join(ROOT, 'bin', 'spawn-node.mjs'), '--id', 'bravo', '--base-dir', path.join(base, 'openclaw-')],
+        { cwd: ROOT, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      const root = path.join(base, 'openclaw-bravo');
+      assert.ok(r.stdout.includes(`OPENCLAW_HOME=${root} OPENCLAW_NODE_ID=bravo `) && r.stdout.includes(' node workspace-bin/memory-daemon.mjs'), r.stdout);
+      assert.ok(r.stdout.includes(`OPENCLAW_HOME=${root} OPENCLAW_NODE_ID=bravo OPENCLAW_NATS=`) && r.stdout.includes(' node bin/consolidation-scheduler.mjs --daemon'), r.stdout);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });
