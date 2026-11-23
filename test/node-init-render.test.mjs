@@ -17,7 +17,6 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS } = require('../bin/openclaw-node-init.js');
-const { tmpDir } = require('./helpers/tmp-dir.cjs');
 
 const vars = serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://10.0.0.5:4222', provider: 'deepseek' } });
 const formatOf = (t) => (t.endsWith('.plist') ? 'plist' : 'systemd');
@@ -317,8 +316,9 @@ describe('read-only mesh CLIs bind to KV buckets, never create them', () => {
 
   // A bind does not check the stream, so a MESH_TOOLS nobody created yet fails at keys(),
   // which sat outside the "no bucket" catch and ended the CLI with "stream not found".
-  it('discord-read treats a MESH_TOOLS bucket nobody created as no tools', () => {
-    const dir = tmpDir('discord-read-nobucket-');
+  it('discord-read treats a MESH_TOOLS bucket nobody created as no tools', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'discord-read-nobucket-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
     const preload = join(dir, 'fake-nats.cjs');
     writeFileSync(preload, `const Module = require('node:module');
 const realLoad = Module._load;
