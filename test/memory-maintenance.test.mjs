@@ -130,7 +130,7 @@ for (const authorized of [true, false]) {
     try {
       const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
         env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root,
-          MC_URL: `http://127.0.0.1:${server.address().port}`,
+          OPENCLAW_MC_API_URL: `http://127.0.0.1:${server.address().port}`,
           // The retired third spelling must not win over the one override.
           MC_SESSION_TOKEN_PATH: decoyPath, OPENCLAW_MC_TOKEN_FILE: tokenPath },
         timeout: 15000,
@@ -171,7 +171,7 @@ test('prediction closure expires only stale predictions whose outcome is still e
   try {
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
       // MC is unreachable on port 9: only the local checks matter here.
-      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9' },
       timeout: 15000,
     }).catch((error) => error);
     const after = fs.readFileSync(path.join(root, 'memory', 'predictions.md'), 'utf8');
@@ -200,7 +200,7 @@ test('a non-executable clawvault-local is reported as a failed checkpoint, not a
   try {
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
       env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root,
-        MC_URL: `http://127.0.0.1:${server.address().port}`,
+        OPENCLAW_MC_API_URL: `http://127.0.0.1:${server.address().port}`,
         OPENCLAW_MC_TOKEN_FILE: tokenPath },
       timeout: 15000,
     });
@@ -223,7 +223,7 @@ test('a hung clawvault checkpoint is killed at its 10 s timeout instead of outli
   try {
     const started = Date.now();
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
-      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9' },
       timeout: 25000,
     }).catch(error => error);
     assert.ok(Date.now() - started < 20000, 'the CLI must not wait for the full hang');
@@ -245,7 +245,7 @@ test('a run with only warnings exits 0 and still reports them', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maint-warn-exit-'));
   try {
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
-      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9' },
       timeout: 15000,
     });
     assert.match(result.stdout, /Done: \d+ actions, [1-9]\d* warnings/);
@@ -264,7 +264,7 @@ test('runMaintenance({ dryRun: true }) changes nothing even without --dry-run', 
   try {
     const script = `import(${JSON.stringify(MAINT)}).then(m => m.runMaintenance({ force: true, dryRun: true })).then(r => console.log(JSON.stringify(r)))`;
     const result = await promisify(execFile)(process.execPath, ['-e', script], {
-      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9' },
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9' },
       timeout: 15000,
     });
     assert.doesNotMatch(result.stdout, /PREDICTIONS: 1 expired/);
@@ -283,7 +283,7 @@ test('the companion freshness check reads the daemon\'s per-node state file', as
   fs.utimesSync(state, old, old);
   try {
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
-      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_NODE_ID: 'node-maint', MC_URL: 'http://127.0.0.1:9' },
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_NODE_ID: 'node-maint', OPENCLAW_MC_API_URL: 'http://127.0.0.1:9' },
       timeout: 15000,
     });
     assert.match(result.stdout, /COMPANION_STALE: \.daemon-state-node-maint\.md is 5 hours old/);
@@ -302,7 +302,7 @@ test('the shared-lessons check reads the vault obsidian-sync writes to, not a ha
     '# Shared lessons\n- [a] one\n- [b] two\n');
   try {
     const result = await promisify(execFile)(process.execPath, [MAINT, '--force', '--verbose'], {
-      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, MC_URL: 'http://127.0.0.1:9',
+      env: { ...process.env, HOME: root, OPENCLAW_WORKSPACE: root, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9',
         OPENCLAW_OBSIDIAN_SYNC_CONFIG: '' },
       timeout: 15000,
     }).catch((error) => error);

@@ -57,7 +57,7 @@ async function fixture(t, { healthy = false, restartFails = false, authStatus, m
     fs.rmSync(root, { recursive: true, force: true });
   });
   const env = { ...process.env, HOME: root, OPENCLAW_MC_TOKEN_FILE: tokenFile,
-    MC_URL: `http://localhost:${port}`, PATH: `${root}${path.delimiter}${process.env.PATH}`,
+    OPENCLAW_MC_API_URL: `http://localhost:${port}`, PATH: `${root}${path.delimiter}${process.env.PATH}`,
     MC_TEST_CALLS: calls, MC_TEST_FORBIDDEN: path.join(root, 'forbidden') };
   let result;
   try {

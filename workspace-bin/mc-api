@@ -47,8 +47,8 @@ async function main() {
   const body = readBody(bodyArg);
 
   const tokenLib = path.join(__dirname, '..', 'lib', 'mc-session-token.mjs');
-  const { mcAuthHeaders, DEFAULT_MC_TOKEN_PATH } = await import(pathToFileURL(tokenLib).href);
-  const base = (process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const { mcAuthHeaders, mcApiBase, DEFAULT_MC_TOKEN_PATH } = await import(pathToFileURL(tokenLib).href);
+  const base = mcApiBase();
   const headers = { ...mcAuthHeaders() };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 

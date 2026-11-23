@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HAVE_PY_YAML = spawnSync('python3', ['-c', 'import yaml']).status === 0;
 const TOKEN = 'tok123';
 
-async function compileMain(t, { withToken }) {
+async function compileMain(t, { withToken, env: extraEnv = {} }) {
   const root = mkdtempSync(join(tmpdir(), 'compile-boot-'));
   const ws = join(root, 'ws');
   mkdirSync(join(ws, 'bin'), { recursive: true });
@@ -41,8 +41,8 @@ async function compileMain(t, { withToken }) {
     rmSync(root, { recursive: true, force: true });
   });
 
-  const env = { ...process.env, HOME: root, OPENCLAW_MC_URL: `http://127.0.0.1:${server.address().port}`,
-    OPENCLAW_MC_TOKEN_FILE: tokenFile };
+  const env = { ...process.env, HOME: root, OPENCLAW_MC_API_URL: `http://127.0.0.1:${server.address().port}`,
+    OPENCLAW_MC_TOKEN_FILE: tokenFile, ...extraEnv };
   delete env.http_proxy;
   delete env.HTTP_PROXY;
   const child = spawn('python3', [join(ws, 'bin', 'compile-boot'), '--profile', 'main'], { env });
@@ -60,6 +60,13 @@ describe('compile-boot entity block', { skip: !HAVE_PY_YAML && 'python3 with PyY
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.authorization, `Bearer ${TOKEN}`);
     assert.match(r.stdout, /ENTITY-MARKER/);
+  });
+
+  it('never sends the token off this machine: a non-loopback OPENCLAW_MC_API_URL skips the block', async (t) => {
+    const r = await compileMain(t, { withToken: true, env: { OPENCLAW_MC_API_URL: 'http://100.64.0.1:3000' } });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.authorization, undefined);
+    assert.match(r.stderr, /entity block skipped \(OPENCLAW_MC_API_URL must be loopback HTTP without credentials\)/);
   });
 
   it('reports a skipped block on stderr instead of failing silently', async (t) => {
@@ -81,7 +88,7 @@ function compileWithBudget(t, args) {
     'sections:', '  A: { priority: boot, profile: [main, lite, heartbeat, discord, worker], compile: verbatim }',
     'model_overrides:', '  openai: { max_boot_tokens: 50 }', '  claude: { max_boot_tokens: 100000 }', '',
   ].join('\n'));
-  const env = { ...process.env, HOME: ws, OPENCLAW_MC_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
+  const env = { ...process.env, HOME: ws, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
   return spawnSync('python3', [join(ws, 'bin', 'compile-boot'), ...args], { env, encoding: 'utf8' });
 }
 
@@ -116,7 +123,7 @@ function compileWithLessons(t, { vaultPath }) {
   const meta = join(ws, vaultPath || 'projects/arcane-vault', '00-meta');
   mkdirSync(meta, { recursive: true });
   writeFileSync(join(meta, 'shared-lessons.md'), '---\ntitle: t\n---\n- [error] lesson one\n');
-  const env = { ...process.env, HOME: ws, OPENCLAW_MC_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
+  const env = { ...process.env, HOME: ws, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
   delete env.OPENCLAW_OBSIDIAN_SYNC_CONFIG;
   if (vaultPath) {
     const cfg = join(ws, 'obsidian-sync.json');
@@ -148,7 +155,7 @@ function compileShipped(t, profile) {
   copyFileSync(join(ROOT, 'workspace-bin', 'compile-boot'), join(ws, 'bin', 'compile-boot'));
   copyFileSync(join(ROOT, 'identity', 'AGENTS.md'), join(ws, 'AGENTS.md'));
   copyFileSync(join(ROOT, 'boot', 'manifest.yaml'), join(ws, '.boot', 'manifest.yaml'));
-  const env = { ...process.env, HOME: ws, OPENCLAW_MC_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
+  const env = { ...process.env, HOME: ws, OPENCLAW_MC_API_URL: 'http://127.0.0.1:9', OPENCLAW_MC_TOKEN_FILE: join(ws, 'none') };
   return spawnSync('python3', [join(ws, 'bin', 'compile-boot'), '--profile', profile], { env, encoding: 'utf8' });
 }
 

@@ -788,6 +788,19 @@ describe('node-watch observed verdicts', () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { scheduled: { at: 2, cron: 1 }, ready: 0, overdue: 0, graceMinutes: 30 } }) });
     assert.equal((await target('ops.calendar').run(envFor(ctx))).status, STATUS.WORKING);
   });
+  it('both Mission Control probes follow OPENCLAW_MC_API_URL, not a hardcoded :3000', async () => {
+    const seen = [];
+    const ctx = makeCtx({ httpGet: async (url) => { seen.push(url); throw new Error('ECONNREFUSED'); } });
+    const saved = process.env.OPENCLAW_MC_API_URL;
+    process.env.OPENCLAW_MC_API_URL = 'http://127.0.0.1:3999';
+    try {
+      await target('ops.calendar').run(envFor(ctx));
+      await target('ops.diagnostics').run(envFor(ctx));
+    } finally {
+      if (saved === undefined) delete process.env.OPENCLAW_MC_API_URL; else process.env.OPENCLAW_MC_API_URL = saved;
+    }
+    assert.deepEqual(seen, ['http://127.0.0.1:3999/api/scheduler/status', 'http://127.0.0.1:3999/api/diagnostics']);
+  });
   it('calendar BROKEN when scheduled tasks are overdue (tick not running)', async () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { scheduled: { at: 3, cron: 0 }, overdue: 2, overdueIds: ['T1', 'T2'], graceMinutes: 30 } }) });
     assert.equal((await target('ops.calendar').run(envFor(ctx))).status, STATUS.BROKEN);

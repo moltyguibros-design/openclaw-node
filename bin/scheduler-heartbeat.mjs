@@ -2,9 +2,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_MC_TOKEN_PATH as DEFAULT_TOKEN_PATH } from '../lib/mc-session-token.mjs';
+import { DEFAULT_MC_TOKEN_PATH as DEFAULT_TOKEN_PATH, mcApiBase } from '../lib/mc-session-token.mjs';
 
-const DEFAULT_ENDPOINT = 'http://127.0.0.1:3000/api/scheduler/tick';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
 export const HEARTBEAT_TIMEOUT_MS = 30_000;
 
@@ -19,7 +18,7 @@ export function validateHeartbeatEndpoint(value) {
 
 export async function runSchedulerHeartbeat(options = {}) {
   const tokenPath = options.tokenPath || DEFAULT_TOKEN_PATH;
-  const endpoint = validateHeartbeatEndpoint(options.endpoint || DEFAULT_ENDPOINT);
+  const endpoint = validateHeartbeatEndpoint(options.endpoint || `${mcApiBase()}/api/scheduler/tick`);
   const read = options.readFile || readFile;
   const request = options.fetch || fetch;
   const token = (await read(tokenPath, 'utf8')).trim();
@@ -42,7 +41,6 @@ export async function runSchedulerHeartbeat(options = {}) {
 async function main() {
   try {
     const result = await runSchedulerHeartbeat({
-      endpoint: process.env.OPENCLAW_MC_TICK_URL || DEFAULT_ENDPOINT,
       tokenPath: process.env.OPENCLAW_MC_TOKEN_FILE || DEFAULT_TOKEN_PATH,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);

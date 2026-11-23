@@ -445,12 +445,16 @@ def main():
     profiles_to_compile = ["main", "lite", "heartbeat", "discord", "worker"] if args.all else [args.profile]
 
     # Fetch entity context block from MC (best-effort). MC requires its session
-    # token on every /api method; same file lib/mc-session-token.mjs reads.
+    # token on every /api method; same file and same loopback-only
+    # OPENCLAW_MC_API_URL rule as lib/mc-session-token.mjs (mcApiBase).
     entity_block = ""
     try:
         import urllib.request
-        mc_url = os.environ.get("OPENCLAW_MC_URL", "http://127.0.0.1:3000")
-        req = urllib.request.Request(f"{mc_url}/api/memory/graph?boot=true", method="GET")
+        import urllib.parse
+        mc_api = urllib.parse.urlsplit(os.environ.get("OPENCLAW_MC_API_URL") or "http://127.0.0.1:3000")
+        if mc_api.scheme != "http" or mc_api.hostname not in ("127.0.0.1", "localhost") or mc_api.username or mc_api.password:
+            raise ValueError("OPENCLAW_MC_API_URL must be loopback HTTP without credentials")
+        req = urllib.request.Request(f"http://{mc_api.netloc}/api/memory/graph?boot=true", method="GET")
         req.add_header("Accept", "application/json")
         token_path = Path(os.environ.get("OPENCLAW_MC_TOKEN_FILE") or Path.home() / ".openclaw" / "config" / "mc-session-token")
         req.add_header("Authorization", "Bearer " + token_path.read_text().strip())

@@ -103,7 +103,7 @@ if (args.test) {
       title: `OpenClaw test — ${kind}`,
       subtitle: 'openclaw-notify --test',
       message: `test notification (${kind}); click should open the notifications ledger page`,
-      url: 'http://127.0.0.1:3000/notifications',
+      url: `${process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000'}/notifications`,
     });
     await new Promise(r => setTimeout(r, 800));
   }

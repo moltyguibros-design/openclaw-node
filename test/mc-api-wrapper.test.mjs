@@ -53,7 +53,7 @@ describe('mc-api', () => {
       });
     });
     await new Promise(r => server.listen(0, '127.0.0.1', r));
-    env = { OPENCLAW_MC_URL: `http://127.0.0.1:${server.address().port}`, OPENCLAW_MC_TOKEN_FILE: path.join(dir, 'token') };
+    env = { OPENCLAW_MC_API_URL: `http://127.0.0.1:${server.address().port}`, OPENCLAW_MC_TOKEN_FILE: path.join(dir, 'token') };
   });
 
   after(() => {
@@ -113,8 +113,30 @@ describe('mc-api', () => {
     await new Promise(r => probe.listen(0, '127.0.0.1', r));
     const port = probe.address().port;
     await new Promise(r => probe.close(r));
-    const r = await run(['/api/tasks'], { ...env, OPENCLAW_MC_URL: `http://127.0.0.1:${port}` });
+    const r = await run(['/api/tasks'], { ...env, OPENCLAW_MC_API_URL: `http://127.0.0.1:${port}` });
     assert.equal(r.code, 7);
     assert.match(r.stderr, /Mission Control unreachable/);
+  });
+
+  // OPENCLAW_MC_URL is the base of notification links and may name a tailnet address;
+  // the token only ever goes to the loopback OPENCLAW_MC_API_URL.
+  it('sends the token only to a loopback OPENCLAW_MC_API_URL, never to the link base', async () => {
+    const before = seen.length;
+    const refused = await run(['/api/tasks'], { ...env, OPENCLAW_MC_API_URL: 'http://100.64.0.1:3000' });
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /OPENCLAW_MC_API_URL must be loopback HTTP/);
+    assert.equal(seen.length, before);
+
+    const linkHits = [];
+    const link = http.createServer((req, res) => { linkHits.push(req.headers.authorization); res.end('{}'); });
+    await new Promise(r => link.listen(0, '127.0.0.1', r));
+    try {
+      const r = await run(['/api/tasks'], { ...env, OPENCLAW_MC_URL: `http://127.0.0.1:${link.address().port}` });
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(seen.at(-1).auth, `Bearer ${TOKEN}`);
+      assert.deepEqual(linkHits, []);
+    } finally {
+      await new Promise(r => link.close(r));
+    }
   });
 });

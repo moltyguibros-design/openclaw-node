@@ -12,6 +12,12 @@ handles). Bootstrap once per browser by opening
 cookie is set and the token is stripped from the URL. API clients send
 `Authorization: Bearer <token>`. Requests whose Host is not `127.0.0.1` or `localhost` get 403.
 
+The node's own tools (`mc-api`, `mc-health`, memory maintenance, node-watch, the scheduler
+heartbeat, `compile-boot`) send that token to `OPENCLAW_MC_API_URL`, default
+`http://127.0.0.1:3000`, and refuse any value that is not loopback HTTP without credentials.
+`OPENCLAW_MC_URL` only sets the base of the links in notifications, so it may name a tailnet
+address without the token ever leaving the machine.
+
 ## Environment
 
 The installer writes `.env.local`:
