@@ -308,10 +308,17 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
       try {
         // preSha's code may predate the schema the failed deploy migrated the
         // memory store to: it would open it without a check of its own. The node
-        // stays on the tree that matches its store.
-        const refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
-          repoDir: REPO_DIR, toSha: preSha, dbPath: path.join(os.homedir(), '.openclaw', 'state.db'),
-        });
+        // stays on the tree that matches its store. A store it cannot read (a
+        // failed `npm ci` took better-sqlite3 with it) does not block the
+        // rollback, which is what puts the old node_modules back.
+        let refusal = null;
+        try {
+          refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
+            repoDir: REPO_DIR, toSha: preSha, dbPath: path.join(os.homedir(), '.openclaw', 'state.db'),
+          });
+        } catch (guardErr) {
+          console.warn(`[deploy-listener] ${guardErr.message.replace(/^cannot/, 'could not')} — rolling back without the check`);
+        }
         if (refusal) throw new Error(`rollback refused: ${refusal}`);
         if (git('rev-parse', 'HEAD') !== preSha) {
           console.log(`[deploy-listener] Rolling back ${targetSha.slice(0, 7)} → ${preSha.slice(0, 7)}`);

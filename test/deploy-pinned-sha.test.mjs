@@ -1185,3 +1185,47 @@ describe('a rollback below the memory store\'s schema is refused and points to t
     assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
   });
 });
+
+// deps.sh's `npm ci` wipes node_modules before it installs: a failed one leaves
+// no better-sqlite3 to read the store with. The listener's rollback (which puts
+// the old node_modules back) must not be blocked by a check it cannot make.
+describe('a rollback whose memory-store schema cannot be read', () => {
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent' };
+  let fx, S1;
+  before(() => {
+    fx = makeNode('schema-unreadable', {
+      'bin/mesh-agent.js': '// agent v0\n',
+      'lib/extraction-store.mjs': 'if (getVersion(db) < 8) setVersion(db, 8);\n',
+    });
+    ranOk(fx.deploy(['--force'], env));
+    S1 = fx.commit('v1: an agent that fails to start', { 'bin/mesh-agent.js': '// agent v1 BREAK_DEPLOY\n' });
+    fs.mkdirSync(fx.rt('.openclaw/state.db'), { recursive: true });
+  });
+
+  it('the listener still rolls a failed deploy back, and says it could not check', () => {
+    const script = `require(${JSON.stringify(path.join(REPO, 'bin', 'mesh-deploy-listener.js'))})
+      .runDeploy(${JSON.stringify({ sha: S1.slice(0, 7), branch: 'main', components: ['all'], initiator: 'lead-test' })})
+      .then(r => console.log('RESULT ' + JSON.stringify(r)));`;
+    const run = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8', cwd: fx.node,
+      env: { ...process.env, ...env, HOME: fx.home, OPENCLAW_REPO_DIR: fx.node, DEPLOY_TEST_CALLS: fx.callLog },
+    });
+    const result = JSON.parse(run.stdout.split('\n').find(l => l.startsWith('RESULT ')).slice('RESULT '.length));
+    assert.equal(result.rolledBack, true, result.errors.join('\n'));
+    assert.match(run.stderr, /could not read the memory-store schema .* rolling back without the check/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+  });
+
+  it('mesh deploy --rollback refuses without --force and goes ahead with it', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    git(fx.node, 'checkout', '-q', 'main');
+    fx.commit('v2', { 'bin/mesh-agent.js': '// agent v2\n' });
+    ranOk(fx.deploy([], env));
+    const refused = fx.deploy(['--rollback'], env);
+    assert.equal(refused.status, 1, refused.stdout);
+    assert.match(refused.stdout, /cannot read the memory-store schema of .*state\.db/);
+    const forced = fx.deploy(['--rollback', '--force'], env);
+    ranOk(forced);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+  });
+});

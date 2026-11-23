@@ -79,4 +79,15 @@ describe('schemaRollbackRefusal', () => {
     fs.rmSync(dir, { recursive: true });
     assert.match(schemaRollbackRefusal({ repoDir: repo, toSha: v7, dbPath }), /no backup that code can open in /);
   });
+
+  it('a store it cannot read throws, unless the target has no extraction store to compare', () => {
+    fs.rmSync(dbPath, { force: true });
+    fs.mkdirSync(dbPath);
+    try {
+      assert.throws(() => schemaRollbackRefusal({ repoDir: repo, toSha: v7, dbPath }), /cannot read the memory-store schema of /);
+      assert.equal(schemaRollbackRefusal({ repoDir: repo, toSha: noStore, dbPath }), null);
+    } finally {
+      fs.rmSync(dbPath, { recursive: true });
+    }
+  });
 });

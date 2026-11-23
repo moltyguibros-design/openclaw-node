@@ -1324,9 +1324,14 @@ async function main() {
     // Older code carries no newer-schema check of its own: refuse to put it in
     // front of a memory store a later deploy migrated, unless told to (--force).
     const assertStoreSchema = (toSha) => {
-      const refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
-        repoDir: REPO_DIR, toSha, dbPath: path.join(DIRS.OPENCLAW_HOME, 'state.db'),
-      });
+      let refusal;
+      try {
+        refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
+          repoDir: REPO_DIR, toSha, dbPath: path.join(DIRS.OPENCLAW_HOME, 'state.db'),
+        });
+      } catch (err) {
+        refusal = err.message;
+      }
       if (!refusal) return;
       if (!forceAll) throw new Error(`${refusal} (or roll back anyway: mesh-deploy.js --rollback --force)`);
       warn(`${refusal} — rolling back anyway (--force)`);
