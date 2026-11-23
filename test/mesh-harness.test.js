@@ -302,6 +302,17 @@ describe('preCommitSecretScan', () => {
     assert.ok(!result.findings.some(f => f.includes(key)));
   });
 
+  it('names every file a pattern hits, non-ASCII paths unquoted', (t) => {
+    const keyA = 'sk-' + 'ant-api03-' + 'A'.repeat(60);
+    const keyB = 'sk-' + 'proj-' + 'B'.repeat(40);
+    const { dir } = repoWith({ 'café.js': `const a = "${keyA}";\n`, 'plain.js': `const b = "${keyB}";\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = preCommitSecretScan(dir);
+    assert.strictEqual(result.blocked, true);
+    assert.deepStrictEqual(result.findings, ['regex: provider-key in café.js', 'regex: provider-key in plain.js']);
+    assert.ok(!result.findings.some(f => f.includes(keyA) || f.includes(keyB)));
+  });
+
   it('blocks an Anthropic-style key the regex fallback used to miss', (t) => {
     const key = 'sk-' + 'ant-api03-' + 'Ab1'.repeat(30);
     const { dir } = repoWith({ 'k.js': `const k = "${key}";\n` });
