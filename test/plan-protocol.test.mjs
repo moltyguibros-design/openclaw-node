@@ -645,6 +645,43 @@ describe('plan-tick shares one repo lock and blames only its own silo for dirt',
     assert.equal(fs.existsSync(f.seen), false, 'claude ran on a dirty tree');
   });
 
+  // A chain waiting on someone else's dirt re-polls every throttle gap and re-logged the list each time.
+  it('a waiting chain lists the outside dirt once, then only when it changes', () => {
+    const f = repo('pquiet');
+    const listed = /^ {8} M lib\/code\.js$/m;
+    fs.writeFileSync(path.join(f.root, 'lib', 'code.js'), 'operator edit\n');
+    const first = f.tick();
+    const second = f.tick();
+    assert.match(first.stdout, listed);
+    assert.match(second.stdout, /skip: tracked changes outside memory-plan\/plans\/pquiet\//);
+    assert.doesNotMatch(second.stdout, listed);
+    fs.appendFileSync(path.join(f.root, 'workspace-bin', 'plan-lint.sh'), '# operator edit\n');
+    assert.match(f.tick().stdout, /^ {8} M workspace-bin\/plan-lint\.sh$/m);
+  });
+
+  it('a tick keeps the newest 200 tick-log pairs plus the live one, and caps the launchd logs', () => {
+    const f = repo('pprune');
+    const logs = path.join(f.plan, 'tick-logs');
+    fs.mkdirSync(logs);
+    const name = (i) => `20260101-${String(i).padStart(6, '0')}`;
+    for (let i = 0; i < 205; i++) {
+      fs.writeFileSync(path.join(logs, `${name(i)}.log`), 'log\n');
+      fs.writeFileSync(path.join(logs, `${name(i)}.jsonl`), '{}\n');
+    }
+    fs.symlinkSync(`${name(0)}.log`, path.join(logs, 'current.log'));
+    fs.writeFileSync(path.join(logs, 'launchd.stdout.log'), Buffer.alloc(11 * 1024 * 1024, 'x'));
+    fs.writeFileSync(path.join(logs, 'launchd.stderr.log'), 'small\n');
+    fs.writeFileSync(f.blockPath, '# CONTINUATION_BLOCKED\n');
+    const r = f.tick();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const left = (ext) => fs.readdirSync(logs).filter((e) => e.endsWith(ext) && e.startsWith('2026')).sort();
+    const expected = [0, ...Array.from({ length: 200 }, (_, i) => i + 5)].map(name);
+    assert.deepEqual(left('.log'), expected.map((n) => `${n}.log`));
+    assert.deepEqual(left('.jsonl'), expected.map((n) => `${n}.jsonl`));
+    assert.equal(fs.statSync(path.join(logs, 'launchd.stdout.log')).size, 0);
+    assert.equal(fs.readFileSync(path.join(logs, 'launchd.stderr.log'), 'utf8'), 'small\n');
+  });
+
   it('tracked edits inside the silo on a clean VERSION still write the stall block', () => {
     const f = repo('pown');
     fs.appendFileSync(path.join(f.plan, 'INVENTORY.md'), '| 2 | 1.2 | v1.2 | [ ] | half-done |\n');

@@ -188,6 +188,22 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 printf '%s\n' "${PLAN_ID}" > "${LOCK_DIR}/plan"
 
+# Every tick leaves a <ts>.log/<ts>.jsonl pair and launchd appends to its two logs, all
+# forever. Keep the newest 200 pairs (never current.log's target) and cap launchd's at 10 MB.
+prune_tick_logs() {
+  local current logs i f
+  current=$(readlink "${TICK_LOG_DIR}/current.log" 2>/dev/null || true)
+  logs=( "${TICK_LOG_DIR}"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].log )
+  for (( i = 0; i < ${#logs[@]} - 200; i++ )); do
+    [ "$(basename "${logs[i]}")" = "${current}" ] && continue
+    rm -f "${logs[i]}" "${logs[i]%.log}.jsonl"
+  done
+  for f in "${TICK_LOG_DIR}/launchd.stdout.log" "${TICK_LOG_DIR}/launchd.stderr.log"; do
+    if [ -f "${f}" ] && [ "$(( $(wc -c < "${f}") ))" -gt 10485760 ]; then : > "${f}"; fi
+  done
+}
+prune_tick_logs
+
 maybe_autopause() {
   local reason="$1"
   [ "${WORKPLAN_AUTOPAUSE:-0}" = "1" ] || return 0
@@ -236,7 +252,12 @@ if [ -n "${DIRTY}" ]; then
     *-pre|*-mid) log "info: tree dirty but VERSION=${VERSION} (in-flight); proceeding" ;;
     *) if [ -z "${OWN_DIRTY}" ]; then
          log "skip: tracked changes outside memory-plan/plans/${PLAN_ID}/ — not this plan's stall; not invoking claude"
-         printf '%s\n' "${DIRTY}" | sed 's/^/        /'
+         # A waiting chain re-polls every throttle gap: list the dirt only when it changed.
+         DIRT_SUM=$(printf '%s\n' "${DIRTY}" | cksum)
+         if [ "${DIRT_SUM}" != "$(cat "${TICK_LOG_DIR}/.outside-dirt" 2>/dev/null)" ]; then
+           printf '%s\n' "${DIRTY}" | sed 's/^/        /'
+           printf '%s\n' "${DIRT_SUM}" > "${TICK_LOG_DIR}/.outside-dirt"
+         fi
          exit 0
        fi
        log "skip: tree dirty on clean VERSION=${VERSION} — unexpected; not invoking claude"
@@ -245,6 +266,7 @@ if [ -n "${DIRTY}" ]; then
        maybe_autopause "dirty tree on clean VERSION"; exit 0 ;;
   esac
 fi
+rm -f "${TICK_LOG_DIR}/.outside-dirt"
 
 # ── Conformance gate (plan-lint) ─────────────────────────────────────────────
 # A nonconformant silo is never driven headless. Before, plan-lint ran only in
