@@ -93,6 +93,15 @@ test('the 3 unit-render dry-run guards live in services.sh', () => {
   assert.equal(installSrc.match(guard), null);
 });
 
+// systemd --user and launchd load only from these directories, and uninstall.sh removes
+// only from them: an override rendered units nothing loaded or removed.
+test('units render into the directories systemd and launchd load from', () => {
+  const svc = moduleSrc['services.sh'];
+  assert.doesNotMatch(svc, /OPENCLAW_(SYSTEMD|LAUNCHD)_DIR/);
+  assert.match(svc, /^SYSTEMD_DEST="\$HOME\/\.config\/systemd\/user"$/m);
+  assert.match(svc, /^LAUNCHD_DEST="\$HOME\/Library\/LaunchAgents"$/m);
+});
+
 const unitNames = () => moduleSrc['services.sh'].match(/^UNIT_NAMES='([^']*)'$/m)?.[1];
 const renderUnitCli = (format, template, env) => spawnSync(process.execPath,
   [join(ROOT, 'lib/render-unit.js'), format, unitNames(), template], { encoding: 'utf8', env });
