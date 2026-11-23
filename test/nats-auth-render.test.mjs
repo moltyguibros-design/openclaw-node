@@ -55,9 +55,9 @@ describe('renderAuthorization', () => {
     });
     assert.ok(out.startsWith('authorization {\n  users: [\n'));
     assert.ok(out.includes(`{ nkey: "${LEAD}" }`), 'lead entry has no permissions block');
-    assert.ok(out.includes(`{ nkey: "${WORKER}", permissions: { publish: { deny: ["mesh.deploy.trigger", "$JS.API.STREAM.DELETE.>"] } } }`));
+    assert.ok(out.includes(`{ nkey: "${WORKER}", permissions: { publish: { deny: ["mesh.deploy.trigger", "$JS.API.STREAM.DELETE.>", "$JS.API.STREAM.PURGE.>", "$JS.API.STREAM.UPDATE.>", "$JS.API.STREAM.MSG.DELETE.>"] } } }`));
     assert.ok(out.includes('{ user: "openclaw", password: "tok" }'));
-    assert.deepEqual(WORKER_PUBLISH_DENY, ['mesh.deploy.trigger', '$JS.API.STREAM.DELETE.>']);
+    assert.deepEqual(WORKER_PUBLISH_DENY, ['mesh.deploy.trigger', '$JS.API.STREAM.DELETE.>', '$JS.API.STREAM.PURGE.>', '$JS.API.STREAM.UPDATE.>', '$JS.API.STREAM.MSG.DELETE.>']);
     // Worker perms deny only publishes: no subscribe block (the deploy listener subscribes).
     assert.doesNotMatch(out, /subscribe/);
   });

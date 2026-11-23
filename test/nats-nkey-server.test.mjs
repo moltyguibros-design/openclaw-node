@@ -98,6 +98,31 @@ describe('nkey auth on a real nats-server', { skip: SKIP }, () => {
     await nc.close();
   });
 
+  // Denying only STREAM.DELETE protected no data: the same worker credential could purge a
+  // whole bucket, shrink a stream to one message, or delete single messages.
+  it('the worker cannot purge, shrink or delete messages from a stream; the lead still can', async () => {
+    const leadNc = await connect({ servers: url(), authenticator: nkeyAuthenticatorFor(path.join(dir, 'lead')), timeout: 3000 });
+    const leadKv = await leadNc.jetstream().views.kv('NKEY_GUARD', { history: 5 });
+    await leadKv.put('a', '1');
+    await leadKv.put('b', '2');
+    const stream = 'KV_NKEY_GUARD';
+    const nc = await connect({ servers: url(), authenticator: nkeyAuthenticatorFor(path.join(dir, 'worker')), timeout: 3000 });
+    const jsm = await nc.jetstreamManager();
+    const { config } = await jsm.streams.info(stream);
+    await assert.rejects(jsm.streams.purge(stream), /permissions violation/i, 'STREAM.PURGE');
+    await assert.rejects(jsm.streams.update(stream, { ...config, max_msgs: 1 }), /permissions violation/i, 'STREAM.UPDATE');
+    await assert.rejects(jsm.streams.deleteMessage(stream, 1), /permissions violation/i, 'STREAM.MSG.DELETE');
+    assert.equal((await jsm.streams.info(stream)).state.messages, 2, 'the stream kept every message');
+    const kv = await nc.jetstream().views.kv('NKEY_GUARD');
+    await kv.put('c', '3');
+    assert.equal((await kv.get('a')).string(), '1');
+    await kv.purge('b');
+    await nc.close();
+    const leadJsm = await leadNc.jetstreamManager();
+    assert.equal((await leadJsm.streams.purge(stream)).success, true, 'the allow-all lead keeps its maintenance path (pruneTerminal purgeDeletes)');
+    await leadNc.close();
+  });
+
   it('the legacy user works until the render drops it and the server reloads', async () => {
     const legacy = await connect({ servers: url(), user: 'openclaw', pass: TOKEN, timeout: 3000 });
     assert.equal(legacy.info.auth_required, true);

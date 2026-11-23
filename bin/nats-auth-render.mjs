@@ -22,12 +22,16 @@
  *              dropped with --no-legacy-user (or OPENCLAW_NATS_LEGACY_USER=0)
  *
  * Worker permissions (v1, the operator's "minimal safe set"): publish DENY on
- * mesh.deploy.trigger (only the lead deploys) and $JS.API.STREAM.DELETE.>
- * (nothing in the codebase deletes streams; it is the most destructive call a
- * leaked credential could make). Everything else — JetStream/KV API, inboxes,
+ * mesh.deploy.trigger (only the lead deploys) and on the four JetStream calls
+ * that destroy stream data: STREAM.DELETE, STREAM.PURGE (empties a bucket),
+ * STREAM.UPDATE (can shrink a stream to one message) and STREAM.MSG.DELETE.
+ * No worker code makes them; the lead's own maintenance (pruneTerminal's
+ * purgeDeletes) runs allow-all. Everything else — JetStream/KV API, inboxes,
  * mesh.*, memory.*, fed.* — stays allowed: workers legitimately purge KV keys
- * and publish mesh.tasks.merged. No subscribe denies: a worker's own deploy
- * listener subscribes to mesh.deploy.trigger.
+ * (a marker publish to $KV.<bucket>.<key>, not STREAM.PURGE) and publish
+ * mesh.tasks.merged. No subscribe denies: a worker's own deploy listener
+ * subscribes to mesh.deploy.trigger. A changed set reaches a node only on a
+ * re-render with --reload.
  *
  * Usage:
  *   node bin/nats-auth-render.mjs [--out FILE] [--mode token|nkey] [--identity-dir DIR]
@@ -48,7 +52,13 @@ import { assertLegacyNatsLockHeld, reexecUnderLegacyNatsLock } from '../lib/nats
 const require = createRequire(import.meta.url);
 const { identityToNkey, publicKeyBase64ToNkey, defaultIdentityDir } = require('../lib/nats-nkey.js');
 
-export const WORKER_PUBLISH_DENY = ['mesh.deploy.trigger', '$JS.API.STREAM.DELETE.>'];
+export const WORKER_PUBLISH_DENY = [
+  'mesh.deploy.trigger',
+  '$JS.API.STREAM.DELETE.>',
+  '$JS.API.STREAM.PURGE.>',
+  '$JS.API.STREAM.UPDATE.>',
+  '$JS.API.STREAM.MSG.DELETE.>',
+];
 export const DEFAULT_LEGACY_USER = 'openclaw';
 
 function quote(s) {
