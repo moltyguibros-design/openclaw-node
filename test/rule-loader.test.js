@@ -193,6 +193,18 @@ describe('matchRules', () => {
     assert.strictEqual(matched[2].id, 'universal-high');
     assert.strictEqual(matched[3].id, 'universal-low');
   });
+
+  // The scope harness reads a bare 'src' as the folder (mesh-harness scopeEntryMatches);
+  // rule injection read it as a file named 'src' and dropped the folder's rules.
+  it('a bare folder scope gets the rules of that folder, as the scope harness reads it', () => {
+    const shipped = ['framework', 'universal'].flatMap(t => loadAllRules(path.join(__dirname, '..', 'config', 'rules', t)));
+    const ids = (scope) => matchRules(shipped, scope).map(r => r.id);
+    assert.ok(ids(['contracts']).includes('solidity'), ids(['contracts']).join());
+    assert.ok(ids(['src']).includes('typescript'), ids(['src']).join());
+    assert.ok(ids(['test']).includes('test-standards'), ids(['test']).join());
+    assert.deepStrictEqual(ids(['contracts']), ids(['contracts/']));
+    assert.ok(!ids(['contracts.md']).includes('solidity'), 'a file name is not a folder');
+  });
 });
 
 // ── formatRulesForPrompt ──────────────────────────
