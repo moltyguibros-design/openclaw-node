@@ -181,6 +181,36 @@ describe('context engine', () => {
     assert.equal(received.length, before, 'no daemon calls');
   });
 
+  // A heartbeat runs in the main session with no user behind it: recall would
+  // queue a query analysis beside extraction and boost whatever it matched.
+  it('skips recall on heartbeat turns (flag or HEARTBEAT.md/HEARTBEAT_OK prompt) unless skipHeartbeats is false', async () => {
+    const beat = 'Read HEARTBEAT.md if it exists and follow it. If nothing needs attention, reply HEARTBEAT_OK.';
+    const before = received.length;
+    const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
+    let out = await e.assemble({ sessionId: 's', sessionKey: 'agent:main:main', messages: [userMsg(beat)], tokenBudget: 100000 });
+    assert.equal(out.systemPromptAddition, undefined);
+    out = await e.assemble({ sessionId: 's', sessionKey: 'agent:main:main', messages: [userMsg('check the inbox and calendar')], isHeartbeat: true, tokenBudget: 100000 });
+    assert.equal(out.systemPromptAddition, undefined);
+    assert.equal(received.length, before, 'no daemon calls for heartbeats');
+
+    out = await e.assemble({ sessionId: 's', sessionKey: 'agent:main:main', messages: [userMsg(beat), userMsg('what did we decide about jetstream?')], tokenBudget: 100000 });
+    assert.match(out.systemPromptAddition, /^\[memory: /);
+    assert.equal(received.at(-1).prompt, 'what did we decide about jetstream?');
+
+    const recallAll = createMemoryContextEngine({ client: mkClient(), config: { skipHeartbeats: false }, logger: logger() });
+    out = await recallAll.assemble({ sessionId: 's', messages: [userMsg(beat)], isHeartbeat: true, tokenBudget: 100000 });
+    assert.match(out.systemPromptAddition, /^\[memory: /);
+    assert.equal(received.at(-1).prompt, beat);
+  });
+
+  it('documents skipHeartbeats in the manifest schema, the UI hints and the README', () => {
+    const pkg = new URL('../packages/openclaw-memory-context-engine/', import.meta.url);
+    const manifest = JSON.parse(readFileSync(new URL('openclaw.plugin.json', pkg), 'utf8'));
+    assert.deepEqual(manifest.configSchema.properties.skipHeartbeats, { type: 'boolean' });
+    assert.match(manifest.uiHints.skipHeartbeats.help, /heartbeat/i);
+    assert.match(readFileSync(new URL('README.md', pkg), 'utf8'), /^\| `skipHeartbeats` \| `true` \|/m);
+  });
+
   it('lifecycle hooks are no-ops and say so', async () => {
     const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
     assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'committed' });

@@ -44,6 +44,7 @@ and the daemon's `memory.injected` events (Mission Control → watcher) show
 | `injectUrl` | `http://127.0.0.1:7893` | Must be loopback; the client refuses anything else. |
 | `tokenPath` | `$OPENCLAW_HOME/config/memory-injection-token` (`~/.openclaw/...` when `OPENCLAW_HOME` is unset, as the daemon writes it) | Re-read on every request. |
 | `autoRecall` | `true` | Inject on every turn. |
+| `skipHeartbeats` | `true` | No recall on heartbeat turns: flagged by the host (`isHeartbeat`) or a prompt naming `HEARTBEAT.md` / `HEARTBEAT_OK`. Saves the daemon's query analysis and keeps heartbeat checks from boosting memory ranking; a user turn naming either also goes without memory. |
 | `maxInjectedChars` | `6000` | Longer blocks are cut on a line boundary. |
 | `timeoutMs` | `12000` | Above the daemon's worst case (up to 8 s of LLM query analysis, then embedding and retrieval: about 9–11 s); the turn can wait that long. On timeout the turn proceeds without memory. |
 | `bypassSessionPatterns` | `[]` | e.g. `agent:*:cron:**` — no recall for matching session keys. |

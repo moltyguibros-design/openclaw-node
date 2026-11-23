@@ -65,6 +65,15 @@ export function isBypassed(sessionKey, patterns) {
   return patterns.some((p) => compileSessionPattern(p).test(sessionKey));
 }
 
+// Heartbeats run in the main session, so no session pattern singles them out,
+// and the host may not pass isHeartbeat to assemble: the heartbeat prompt
+// names its checklist file or its quiet reply.
+const HEARTBEAT_PROMPT_RE = /\bHEARTBEAT(?:\.md|_OK)\b/;
+
+export function isHeartbeatTurn({ isHeartbeat, prompt, messages }) {
+  return isHeartbeat === true || HEARTBEAT_PROMPT_RE.test(lastUserPrompt(messages, prompt));
+}
+
 /**
  * @param {object} deps
  * @param {{inject:Function, health:Function}} deps.client — from memory-client.js
@@ -74,6 +83,7 @@ export function isBypassed(sessionKey, patterns) {
  */
 export function createMemoryContextEngine({ client, config = {}, logger, runtimeCompact }) {
   const autoRecall = config.autoRecall !== false;
+  const skipHeartbeats = config.skipHeartbeats !== false;
   const maxInjectedChars = Number(config.maxInjectedChars) || DEFAULT_MAX_INJECTED_CHARS;
   const bypass = Array.isArray(config.bypassSessionPatterns) ? config.bypassSessionPatterns : [];
   const warn = (m) => (logger.warn ? logger.warn(m) : logger.info(m));
@@ -128,10 +138,13 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
      * Pass the messages through untouched and add the daemon's memory block
      * to the system prompt, within the host's token budget. Any failure
      * (daemon down, no token, timeout) degrades to "no memory this turn".
+     * Heartbeat turns get none (skipHeartbeats): nobody asked, and the
+     * daemon's recall would boost whatever the checklist matched.
      */
-    async assemble({ sessionId, sessionKey, messages = [], prompt, tokenBudget }) {
+    async assemble({ sessionId, sessionKey, messages = [], prompt, tokenBudget, isHeartbeat }) {
       const passthrough = { messages, estimatedTokens: messages.reduce((n, m) => n + estimateTokens(messageText(m)), 0) };
       if (!autoRecall || isBypassed(sessionKey, bypass)) return passthrough;
+      if (skipHeartbeats && isHeartbeatTurn({ isHeartbeat, prompt, messages })) return passthrough;
       let recalled;
       try {
         recalled = await recall({ sessionId, sessionKey, prompt, messages });

@@ -25,6 +25,11 @@
       "label": "Auto-recall",
       "help": "Inject the [memory: …] block into the system prompt on every turn (default true)."
     },
+    "skipHeartbeats": {
+      "label": "Skip heartbeat turns",
+      "advanced": true,
+      "help": "No auto-recall on heartbeat turns: those the host flags, or whose prompt names HEARTBEAT.md or HEARTBEAT_OK (default true). Saves a query analysis per heartbeat and keeps heartbeat checks from boosting memory ranking. A user turn that names one of those also gets no memory."
+    },
     "maxInjectedChars": {
       "label": "Max injected chars",
       "placeholder": "6000",
@@ -50,6 +55,7 @@
       "injectUrl": { "type": "string" },
       "tokenPath": { "type": "string" },
       "autoRecall": { "type": "boolean" },
+      "skipHeartbeats": { "type": "boolean" },
       "maxInjectedChars": { "type": "number", "minimum": 200, "maximum": 60000 },
       "timeoutMs": { "type": "number", "minimum": 250, "maximum": 60000 },
       "bypassSessionPatterns": { "type": "array", "items": { "type": "string" } }
