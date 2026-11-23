@@ -28,7 +28,7 @@ describe('fleet component filter', () => {
   it('lets every repo-sourced MANIFEST id through on the role that runs it', () => {
     assert.deepEqual(FLEET_COMPONENTS.lead, [
       'mesh-daemons', 'mesh-cli', 'shared-lib', 'mc', 'memory-daemon', 'workspace-bin',
-      'souls', 'skills', 'boot', 'workspace-docs', 'harness-rules', 'config', 'lane-watchdog',
+      'souls', 'skills', 'boot', 'boot-manifest', 'workspace-docs', 'harness-rules', 'config', 'lane-watchdog',
       'log-rotate', 'mesh-tool-discord',
     ]);
     // Workers install and run the log-rotate timer too (service-manifest role 'both').

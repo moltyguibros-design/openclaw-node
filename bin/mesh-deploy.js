@@ -422,18 +422,19 @@ const MANIFEST = [
     targets: [DIRS.BOOT_SRC],  // = WORKSPACE_BIN (compile-boot lives there)
     servicesMac: [],
     servicesLinux: [],
-    postInstall: () => {
-      const compilerPath = path.join(DIRS.BOOT_SRC, 'compile-boot');
-      if (fs.existsSync(compilerPath)) {
-        info('Recompiling boot profiles...');
-        try {
-          exec(`python3 "${compilerPath}"`, { cwd: DIRS.WORKSPACE });
-          ok('Boot profiles recompiled');
-        } catch (err) {
-          warn(`Boot recompile failed: ${err.message}`);
-        }
-      }
-    },
+    postInstall: () => recompileBoot(),
+  },
+
+  {
+    id: 'boot-manifest',
+    name: 'Boot Manifest',
+    description: 'Profile definitions compile-boot reads (.boot/manifest.yaml)',
+    risk: 'safe',
+    repoPaths: ['boot/manifest.yaml'],
+    targets: [DIRS.BOOT],
+    servicesMac: [],
+    servicesLinux: [],
+    postInstall: () => recompileBoot(),
   },
 
   // ── WORKSPACE ROOT DOCUMENTS ────────────────────────────────────────────
@@ -476,6 +477,11 @@ const MANIFEST = [
       // installFiles copies the list this hook was handed.
       for (const f of kept) files.splice(files.indexOf(f), 1);
       if (kept.length > 0 && files.length === 0) return false;
+    },
+    // The compiled boot profiles are built from AGENTS.md; only where 'boot' runs.
+    postInstall: (changedFiles) => {
+      const bootFilter = MANIFEST.find(c => c.id === 'boot').nodeFilter;
+      if (changedFiles.includes('identity/AGENTS.md') && (bootFilter === 'all' || bootFilter === nodeRole())) recompileBoot();
     },
     notes: 'These files are your agent identity docs. They are NOT auto-overwritten. ' +
            'If the repo has updates, they are saved as .repo files for manual merge.',
@@ -754,6 +760,20 @@ function retireManagedSkillCopies() {
       if (!packaging && !fs.existsSync(path.join(DIRS.SKILLS, name))) continue;
     }
     archiveTo(path.join(DIRS.MANAGED_SKILLS, name), path.join(archive, name));
+  }
+}
+
+// Without --all compile-boot prints the main profile to stdout and writes no
+// .boot/<profile>.compiled.md; install.sh runs the same command.
+function recompileBoot() {
+  const compilerPath = path.join(DIRS.BOOT_SRC, 'compile-boot');
+  if (!fs.existsSync(compilerPath)) return;
+  info('Recompiling boot profiles...');
+  try {
+    exec(`python3 "${compilerPath}" --all`, { cwd: DIRS.WORKSPACE });
+    ok('Boot profiles recompiled');
+  } catch (err) {
+    warn(`Boot recompile failed: ${err.message}`);
   }
 }
 

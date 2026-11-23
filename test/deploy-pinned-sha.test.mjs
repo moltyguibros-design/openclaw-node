@@ -94,6 +94,7 @@ esac`);
 // fetching deploy run `npm update -g openclaw` on its own.
 stub('npm', 'case "$*" in "view openclaw version") echo 9.9.9 ;; esac');
 stub('openclaw', 'echo 1.0.0');
+stub('python3', '');
 if (IS_MAC) {
   for (const label of ['ai.openclaw.mesh-agent', 'ai.openclaw.mission-control']) {
     write(HOME, `Library/LaunchAgents/${label}.plist`, '<plist/>\n');
@@ -475,6 +476,55 @@ describe('the openclaw CLI is installed only when named, and only at a pinned ve
   it('installs exactly the pinned version', () => {
     ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'openclaw'], { OPENCLAW_CLI_VERSION: '2026.9.1' }));
     assert.deepEqual(fx.calls().filter(l => l.startsWith('npm ')), ['npm install -g openclaw@2026.9.1']);
+  });
+});
+
+// Without --all, compile-boot prints the main profile to stdout and writes
+// nothing under .boot/; install.sh copies boot/manifest.yaml there.
+describe('boot profiles are recompiled with --all after a compiler, manifest or AGENTS.md change', () => {
+  let fx, S1, S2, S3;
+  const compileAll = () => `python3 ${fx.rt('.openclaw/workspace/bin/compile-boot')} --all`;
+  const pythonCalls = () => fx.calls().filter(l => l.startsWith('python3 '));
+  before(() => {
+    fx = makeNode('boot', {
+      'bin/mesh-agent.js': '// agent v0\n',
+      'workspace-bin/compile-boot': '#!/usr/bin/env python3\n# v0\n',
+      'boot/manifest.yaml': 'profiles: {}\n',
+      'identity/AGENTS.md': '# agents v0\n',
+    });
+    ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--force']));
+  });
+
+  it('a compiler change recompiles every profile', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    S1 = fx.commit('v1: compiler', { 'workspace-bin/compile-boot': '#!/usr/bin/env python3\n# v1\n' });
+    ranOk(fx.deploy(['--from', fx.S0, '--to', S1]));
+    assert.deepEqual(pythonCalls(), [compileAll()]);
+  });
+
+  it('a manifest change installs .boot/manifest.yaml and recompiles', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    S2 = fx.commit('v2: manifest', { 'boot/manifest.yaml': 'profiles: {v: 2}\n' });
+    const run = fx.deploy(['--from', S1, '--to', S2]);
+    ranOk(run);
+    assert.equal(read(fx.rt('.openclaw/workspace/.boot/manifest.yaml')), 'profiles: {v: 2}\n');
+    assert.ok(resultOf(run).components.some(c => c.id === 'boot-manifest'), run.stdout);
+    assert.deepEqual(pythonCalls(), [compileAll()]);
+  });
+
+  it('an AGENTS.md that reaches the workspace recompiles; one this node keeps does not', () => {
+    fs.rmSync(fx.callLog, { force: true });
+    fs.rmSync(fx.rt('.openclaw/workspace/AGENTS.md'));
+    S3 = fx.commit('v3: agents', { 'identity/AGENTS.md': '# agents v3\n' });
+    ranOk(fx.deploy(['--from', S2, '--to', S3]));
+    assert.equal(read(fx.rt('.openclaw/workspace/AGENTS.md')), '# agents v3\n');
+    assert.deepEqual(pythonCalls(), [compileAll()]);
+
+    fs.rmSync(fx.callLog, { force: true });
+    write(fx.home, '.openclaw/workspace/AGENTS.md', '# agents, edited on this node\n');
+    const S4 = fx.commit('v4: agents', { 'identity/AGENTS.md': '# agents v4\n' });
+    ranOk(fx.deploy(['--from', S3, '--to', S4]));
+    assert.deepEqual(pythonCalls(), []);
   });
 });
 
