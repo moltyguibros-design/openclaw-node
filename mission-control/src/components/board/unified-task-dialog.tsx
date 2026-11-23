@@ -353,8 +353,8 @@ export function UnifiedTaskDialog({
             .replace(/^-|-$/g, "")
             .slice(0, 128);
 
-        const result = type === "project"
-          ? await createProject({
+        if (type === "project") {
+          await createProject({
             id: slug,
             title,
             description: finalDescription || undefined,
@@ -363,8 +363,9 @@ export function UnifiedTaskDialog({
             end_date: endDate || undefined,
             owner: owner || undefined,
             status,
-          })
-          : await createTask({
+          });
+        } else {
+          await createTask({
             id: slug,
             title,
             status,
@@ -387,13 +388,10 @@ export function UnifiedTaskDialog({
             auto_priority: autoPriority || undefined,
             artifacts: artifacts.length > 0 ? artifacts : undefined,
           });
-        if (result?.error) {
-          alert(`Create failed: ${result.error}`);
-          return;
         }
       } else {
         // Create leaf task
-        const result = await createTask({
+        await createTask({
           title,
           status,
           owner: owner || undefined,
@@ -421,10 +419,6 @@ export function UnifiedTaskDialog({
           budget_minutes: execFields.budget_minutes || undefined,
           scope: execFields.scope.length ? execFields.scope : undefined,
         });
-        if (result?.error) {
-          alert(`Create failed: ${result.error}`);
-          return;
-        }
       }
       onClose();
     } catch (err) {

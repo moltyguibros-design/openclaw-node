@@ -14,6 +14,12 @@ test("the task dialog has both create paths", () => {
   expect(createCalls).toHaveLength(2);
 });
 
+// createTask/createProject reject a refused write (intervene-session.test.ts), so
+// the dialog's catch is the only failure path and a resolved body never has `error`.
+test("the task dialog does not check a resolved create body for an error", () => {
+  expect(dialog).not.toMatch(/\?\.error\b/);
+});
+
 test.each(createCalls.map((body, i) => [i, body]))(
   "createTask call %i sends next_action in the snake_case key the POST route reads",
   (_i, body) => {
