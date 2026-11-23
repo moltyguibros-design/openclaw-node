@@ -92,7 +92,10 @@ stub('launchctl', `case "$1" in
 esac`);
 // The registry has a newer openclaw than the installed CLI: what made the old
 // fetching deploy run `npm update -g openclaw` on its own.
-stub('npm', 'case "$*" in "view openclaw version") echo "${DEPLOY_TEST_NPM_OPENCLAW:-9.9.9}" ;; esac');
+stub('npm', `case "$*" in
+  "view openclaw version") echo "\${DEPLOY_TEST_NPM_OPENCLAW:-9.9.9}" ;;
+  "prefix -g") echo "$DEPLOY_TEST_NPM_PREFIX" ;;
+esac`);
 // The banner the published CLI prints for --version.
 stub('openclaw', 'echo "OpenClaw ${DEPLOY_TEST_OPENCLAW:-1.0.0} (abcdef1)"');
 stub('python3', '');
@@ -462,21 +465,53 @@ describe('openclaw.json is rewritten only from a changed template, rendered as t
 });
 
 describe('the openclaw CLI is installed only when named, and only at a pinned version', () => {
-  let fx;
-  before(() => { fx = makeNode('openclaw-cli', { 'bin/mesh-agent.js': '// agent v0\n' }); });
+  let fx, prefix, lockedPrefix;
+  const npmCalls = () => fx.calls().filter(l => l.startsWith('npm '));
+  const installOpenclaw = (env, ...args) => {
+    fs.rmSync(fx.callLog, { force: true });
+    return fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'openclaw', ...args], env);
+  };
+  before(() => {
+    fx = makeNode('openclaw-cli', { 'bin/mesh-agent.js': '// agent v0\n' });
+    prefix = path.join(ROOT, 'openclaw-cli', 'npm-prefix');
+    fs.mkdirSync(path.join(prefix, 'lib', 'node_modules'), { recursive: true });
+    lockedPrefix = path.join(ROOT, 'openclaw-cli', 'npm-prefix-root-owned');
+    fs.mkdirSync(path.join(lockedPrefix, 'lib', 'node_modules'), { recursive: true });
+  });
 
   it('`--component openclaw` refuses without an exact OPENCLAW_CLI_VERSION', () => {
     for (const version of [undefined, 'latest', '^1.2.0']) {
-      const run = fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'openclaw'], { OPENCLAW_CLI_VERSION: version });
+      const run = installOpenclaw({ OPENCLAW_CLI_VERSION: version, DEPLOY_TEST_NPM_PREFIX: prefix });
       assert.equal(run.status, 1, `OPENCLAW_CLI_VERSION=${version}:\n${run.stdout}`);
       assert.match(run.stdout, /DEPLOY_ERROR .*OPENCLAW_CLI_VERSION/);
+      assert.deepEqual(npmCalls(), []);
     }
-    assert.deepEqual(fx.calls().filter(l => l.startsWith('npm ')), []);
   });
 
   it('installs exactly the pinned version', () => {
-    ranOk(fx.deploy(['--from', fx.S0, '--to', fx.S0, '--component', 'openclaw'], { OPENCLAW_CLI_VERSION: '2026.9.1' }));
-    assert.deepEqual(fx.calls().filter(l => l.startsWith('npm ')), ['npm install -g openclaw@2026.9.1']);
+    ranOk(installOpenclaw({ OPENCLAW_CLI_VERSION: '2026.9.1', DEPLOY_TEST_NPM_PREFIX: prefix }));
+    assert.deepEqual(npmCalls(), ['npm prefix -g', 'npm install -g openclaw@2026.9.1']);
+  });
+
+  // NodeSource and system npm put the global prefix under /usr; install.sh
+  // runs every global install there with sudo.
+  it('refuses with the sudo command when the global prefix is not writable', {
+    skip: process.getuid?.() === 0 && 'root can write any directory',
+  }, () => {
+    fs.chmodSync(path.join(lockedPrefix, 'lib', 'node_modules'), 0o555);
+    try {
+      const env = { OPENCLAW_CLI_VERSION: '2026.9.1', DEPLOY_TEST_NPM_PREFIX: lockedPrefix };
+      const run = installOpenclaw(env);
+      assert.equal(run.status, 1, run.stdout);
+      assert.match(run.stdout, /DEPLOY_ERROR .*not writable by this user — run: sudo npm install -g openclaw@2026\.9\.1/);
+      assert.deepEqual(npmCalls(), ['npm prefix -g']);
+      const dry = installOpenclaw(env, '--dry-run');
+      ranOk(dry);
+      assert.match(dry.stdout, /Would refuse: the global npm prefix .* is not writable by this user/);
+      assert.deepEqual(npmCalls(), ['npm prefix -g']);
+    } finally {
+      fs.chmodSync(path.join(lockedPrefix, 'lib', 'node_modules'), 0o755);
+    }
   });
 });
 

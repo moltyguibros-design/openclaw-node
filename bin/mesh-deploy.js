@@ -574,10 +574,19 @@ const MANIFEST = [
         throw new Error('--component openclaw installs an exact pinned version: set OPENCLAW_CLI_VERSION=<x.y.z>' +
           (version ? ` (got ${JSON.stringify(version).slice(0, 40)})` : ''));
       }
+      // npm creates <prefix>/lib/node_modules on first use: probe the nearest existing ancestor.
+      const prefix = exec('npm prefix -g');
+      let probe = path.join(prefix, 'lib', 'node_modules');
+      while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+      let writable = true;
+      try { fs.accessSync(probe, fs.constants.W_OK); } catch { writable = false; }
+      const hint = `the global npm prefix ${prefix} is not writable by this user — run: sudo npm install -g openclaw@${version}`;
       if (dryRun) {
-        info(`Would run: npm install -g openclaw@${version}`);
+        if (writable) info(`Would run: npm install -g openclaw@${version}`);
+        else warn(`Would refuse: ${hint}`);
         return;
       }
+      if (!writable) throw new Error(hint);
       info(`Installing OpenClaw gateway ${version}...`);
       exec(`npm install -g openclaw@${version}`, { timeout: 180000 });
       ok(`OpenClaw ${version} installed`);
