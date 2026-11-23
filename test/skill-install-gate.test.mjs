@@ -73,6 +73,22 @@ describe('skill install gate', () => {
     assert.doesNotMatch(text, /\s-y\b|--yes/);
     assert.match(text, /Never pass `--force`/);
   });
+
+  // The scanner gates skills, not gateway plugins: clawguard's plugin runs inside the gateway.
+  // The plugin reads api.pluginConfig, which the gateway fills from plugins.entries.<id>.config.
+  it('clawguard installs a pinned gateway plugin as an operator step, metrics off', () => {
+    const text = fs.readFileSync(path.join(SKILLS, 'clawguard', 'SKILL.md'), 'utf8');
+    const installs = text.split('\n').filter((l) => /plugins install /.test(l));
+    assert.equal(installs.length, 2, installs.join('\n'));
+    for (const line of installs) assert.match(line, /plugins install @capsulesecurity\/clawguard@0\.1\.5$/, line);
+    for (const install of ['openclaw plugins install', 'openclaw-cli plugins install']) {
+      const after = text.slice(text.indexOf(install));
+      assert.match(after.slice(0, after.indexOf('```')), /config set plugins\.entries\.clawguard\.config\.metricsEnabled false/, install);
+    }
+    assert.doesNotMatch(text, /config set plugins\.clawguard\./);
+    assert.match(text, /The agent does not run the Prerequisites, Installation or Docker commands/);
+    assert.match(text, /sent to the configured model/);
+  });
 });
 
 // The node runs the openclaw CLI from ~/.openclaw; clawdbot, clawdhub and
