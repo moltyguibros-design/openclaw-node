@@ -16,6 +16,9 @@
  *
  * Usage:
  *   node bin/consolidate.mjs [--db <path>] [--vault-path <path>] [--no-events]
+ *   node bin/consolidate.mjs --backfill-digests [--vault-path <path>]
+ *     one-time: the daily digest of every session-note date in the vault and
+ *     the weekly digest of every ended week among them; no cycle runs.
  */
 
 import { openStore } from '../lib/sqlite-store.mjs';
@@ -42,7 +45,7 @@ import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
 import { backfillSessionNotes } from '../lib/obsidian-session-notes.mjs';
 import { generateDecisionNotes } from '../lib/obsidian-decision-notes.mjs';
 import { generateThemeNotes } from '../lib/obsidian-theme-notes.mjs';
-import { generateDailyDigest, generateWeeklyDigest, previousIsoWeekEnd } from '../lib/obsidian-digest.mjs';
+import { backfillDigests, previousIsoWeekEnd, refreshDigests } from '../lib/obsidian-digest.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -101,7 +104,7 @@ function decayedEventData(decay, prune, durationMs) {
  * @param {object} [opts.eventLog] — local event log instance (publishLocal method)
  * @param {string} [opts.nodeId] — node identifier for event emission
  * @param {string} [opts.promotionPolicyPath] — promotion policy YAML (default: resolvePromotionPolicyPath — $PROMOTION_POLICY, ~/.openclaw/config, then config/ beside lib/)
- * @param {number} [opts.now] — clock for the weekly digest's week (testing)
+ * @param {number} [opts.now] — clock for the digests' today and ended weeks (testing)
  * @returns {Promise<object>} cycle results, including `aborted: true` and
  *   `abortedAt: '<step name>'` when the cycle stopped short.
  */
@@ -188,10 +191,12 @@ export async function runConsolidationCycle(opts = {}) {
     if (!abortInfo && !opts.dryRun) {
       const vp = opts.vaultPath ? { vaultPath: opts.vaultPath } : {};
       vaultSurfaceResult = {};
+      let sessionNoteDates = [];
       try {
         const r = await backfillSessionNotes({ db, ...vp, limit: opts.sessionNoteLimit ?? 20 });
         vaultSurfaceResult.sessionNotes = r.generated;
         vaultSurfaceResult.sessionNotesRemaining = r.remaining;
+        sessionNoteDates = r.dates;
       } catch (e) { vaultSurfaceResult.sessionNotesError = e.message; }
       if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
       if (!abortInfo) try {
@@ -203,26 +208,30 @@ export async function runConsolidationCycle(opts = {}) {
         const r = await generateThemeNotes({ db, ...vp });
         vaultSurfaceResult.themeNotes = r.notes.length;
       } catch (e) { vaultSurfaceResult.themeNotesError = e.message; }
-      // Daily digest reads vault state — must run after the writers above.
+      // Digests read vault state — must run after the writers above. A session
+      // note is filed under its session's start date, so besides today the
+      // cycle refreshes yesterday (a session that crossed UTC midnight) and the
+      // day of every note it backfilled, with their ended ISO weeks. The first
+      // cycle of each ISO week also writes the week that just ended
+      // (daily/<its Sunday>-weekly.md).
       if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
       if (!abortInfo) try {
-        const r = await generateDailyDigest({ ...vp });
-        vaultSurfaceResult.dailyDigest = r.generated ? 1 : 0;
-      } catch (e) { vaultSurfaceResult.dailyDigestError = e.message; }
-      // Weekly digest: the first cycle of each ISO week writes the week that
-      // just ended (daily/<its Sunday>-weekly.md); later cycles that week skip.
-      if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
-      if (!abortInfo) try {
-        const endDate = previousIsoWeekEnd(opts.now ?? Date.now());
+        const nowMs = opts.now ?? Date.now();
+        const endDate = previousIsoWeekEnd(nowMs);
         const last = db.prepare(`SELECT value FROM consolidation_meta WHERE key = 'last_weekly_digest'`).get()?.value;
-        vaultSurfaceResult.weeklyDigest = 0;
+        const r = await refreshDigests({
+          ...vp,
+          dates: [new Date(nowMs).toISOString().slice(0, 10), new Date(nowMs - 86400000).toISOString().slice(0, 10), ...sessionNoteDates],
+          weekEnds: last !== endDate ? [endDate] : [],
+          now: nowMs,
+        });
         if (last !== endDate) {
-          const r = await generateWeeklyDigest({ ...vp, endDate });
           db.prepare(`INSERT INTO consolidation_meta (key, value) VALUES ('last_weekly_digest', ?)
                       ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(endDate);
-          vaultSurfaceResult.weeklyDigest = r.generated ? 1 : 0;
         }
-      } catch (e) { vaultSurfaceResult.weeklyDigestError = e.message; }
+        vaultSurfaceResult.dailyDigest = r.daily;
+        vaultSurfaceResult.weeklyDigest = r.weekly;
+      } catch (e) { vaultSurfaceResult.digestError = e.message; }
       lap('vault-surfaces');
     }
 
@@ -329,6 +338,11 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   const dbIdx = args.indexOf('--db');
   const vaultIdx = args.indexOf('--vault-path');
   const noEvents = args.includes('--no-events');
+  if (args.includes('--backfill-digests')) {
+    const r = await backfillDigests(vaultIdx !== -1 && args[vaultIdx + 1] ? { vaultPath: args[vaultIdx + 1] } : {});
+    console.log(`Digests backfilled: ${r.daily} daily, ${r.weekly} weekly.`);
+    process.exit(0);
+  }
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
   const nodeId = resolveNodeId();

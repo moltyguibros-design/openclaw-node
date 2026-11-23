@@ -42,5 +42,6 @@ test('parked modules are marked PARKED and have no production caller', () => {
 test('the weekly digest carries no PARKED marker now that the consolidation cycle calls it', () => {
   const src = fs.readFileSync(path.join(ROOT, 'lib/obsidian-digest.mjs'), 'utf8');
   assert.doesNotMatch(src, /PARKED:/);
-  assert.match(fs.readFileSync(path.join(ROOT, 'bin/consolidate.mjs'), 'utf8'), /\bgenerateWeeklyDigest\(/);
+  assert.match(fs.readFileSync(path.join(ROOT, 'bin/consolidate.mjs'), 'utf8'), /\brefreshDigests\(/);
+  assert.match(src, /for \(const endDate of weeks\) await generateWeeklyDigest\(/);
 });
