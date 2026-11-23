@@ -178,6 +178,7 @@ describe('node-acceptance probes — network', () => {
     const r = await probeById(baseCtx({ natsConnect: async () => nc }), 'NET-L2-STREAM').run();
     assert.equal(r.status, VERDICT.FAIL);
     assert.match(r.detail, /not scoped to local\.testnode\.>/);
+    assert.ok(r.detail.includes("after preserving its history, narrow it: nats stream edit local-events-testnode --subjects 'local.testnode.>'"), r.detail);
   });
   it('NET-L2-STREAM FAIL when stream missing', async () => {
     const nc = mockNc(); nc.jetstreamManager = async () => ({ streams: { info: async () => { throw new Error('stream not found'); } } });

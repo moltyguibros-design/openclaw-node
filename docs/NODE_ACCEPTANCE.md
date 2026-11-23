@@ -187,6 +187,9 @@ that a server is listening.
 > node, e.g. `local-events-daedalus`), this node's stream cannot be created: the memory daemon logs
 > `Local event log unavailable (cannot create local-events-<NODE_ID> … stream local-events-<old-id> owns local.> …)`
 > and runs without an event log, and NET-L2-STREAM fails "not found" naming the same stream and command.
+> When it is this node's own stream, NET-L2-STREAM fails "not scoped" and prints the same command for it;
+> the watcher and promoter already read only `local.<NODE_ID>.>` (they move an older unfiltered durable
+> to that filter at start), but the stream still blocks every other node's.
 > The code never edits that stream. Preserve its history first, then narrow it with
 > `nats stream edit local-events-<old-id> --subjects 'local.<old-id>.>'` (or remove it) and restart the
 > memory daemon. Narrowing deletes no stored message.

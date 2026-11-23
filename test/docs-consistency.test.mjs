@@ -445,6 +445,10 @@ test('NODE_ACCEPTANCE gives the legacy local.> stream procedure the daemon and N
   assert.match(read('workspace-bin/memory-daemon.mjs'), /log\(`Local event log unavailable \(\$\{evtErr\.message\}\)/);
   assert.ok(net.includes('`Local event log unavailable (cannot create local-events-<NODE_ID>'), 'NODE_ACCEPTANCE §6 misquotes the daemon log');
   assert.match(net, /Preserve its history first/);
+  assert.match(read('lib/node-acceptance-probes.mjs'), /not scoped to \$\{want\}; after preserving its history, narrow it: nats stream edit \$\{streamName\} --subjects '\$\{want\}'/);
+  assert.match(net, /NET-L2-STREAM fails "not scoped" and prints the same command/);
+  assert.match(read('lib/shared-event-stream.mjs'), /jsm\.consumers\.update\(stream, config\.durable_name, \{ filter_subject: config\.filter_subject \}\)/);
+  assert.match(net, /they move an older unfiltered durable\n> to that filter at start/);
 });
 
 test('MULTI_NODE_DEPLOY gives the INJECTION_TOKEN_BUDGET default memory-injector falls back to', () => {

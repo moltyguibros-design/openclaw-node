@@ -122,6 +122,27 @@ describe('local event stream on an upgraded node (real nats-server)', { skip }, 
     }
   });
 
+  it('on a legacy local.> stream, an unfiltered durable is narrowed to this node\'s events, deleting nothing', async () => {
+    await addLegacyStream(LOCAL);
+    await jsm.consumers.add(LOCAL, { durable_name: 'watcher-daedalus', deliver_policy: 'all', ack_policy: 'explicit' });
+    await nc.jetstream().publish('local.othernode.memory.events.x1.memory.ingested',
+      new TextEncoder().encode(JSON.stringify({ event_id: 'x1', event_type: 'memory.ingested', data: {} })));
+    await publishEvent('e2');
+    const logs = [];
+    const outputPath = path.join(dir, 'watcher-filter.jsonl');
+    const watcher = await createMemoryWatcher(nc, 'daedalus', { outputPath, log: (m) => logs.push(m) });
+    try {
+      assert.equal((await jsm.consumers.info(LOCAL, 'watcher-daedalus')).config.filter_subject, 'local.daedalus.>');
+      assert.ok(logs.some((l) => l.includes(`${LOCAL}/watcher-daedalus: filter_subject (none) -> local.daedalus.>`)), logs.join(' | '));
+      await until(() => watcherIds(outputPath).length > 0, 5000, 'the watcher record');
+      await new Promise((r) => setTimeout(r, 300));
+      assert.deepEqual(watcherIds(outputPath), ['e2']);
+      assert.equal((await jsm.streams.info(LOCAL)).state.messages, 2);
+    } finally {
+      await watcher.stop();
+    }
+  });
+
   it('a watcher record that fails to write is redelivered after the nak delay', async () => {
     await addLocalStream();
     const logs = [];

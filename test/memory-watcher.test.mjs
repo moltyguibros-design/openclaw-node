@@ -14,7 +14,9 @@ function buildFixtureEvent(...args) {
   MemoryEventSchema.parse(event);
   return event;
 }
-import { toWatcherRecord, classifyStatus, runStoreHealthProbes, createAnomalyDetector, appendWatcherRecord } from '../lib/memory-watcher.mjs';
+import { toWatcherRecord, classifyStatus, runStoreHealthProbes, createAnomalyDetector, appendWatcherRecord, createMemoryWatcher } from '../lib/memory-watcher.mjs';
+import { createPromoter } from '../bin/memory-promoter.mjs';
+import { eventStreamRetention } from '../lib/local-event-log.mjs';
 
 describe('toWatcherRecord', () => {
   it('extracts flat record from memory.ingested event', () => {
@@ -625,5 +627,51 @@ describe('R41 (repair 7.8): the gateway-era vocabulary is watcher-consumed', () 
     }, 'daedalus');
     assert.equal(classifyStatus(artifact), 'ok');
     assert.equal(toWatcherRecord(artifact).session, 's-78');
+  });
+});
+
+describe('upgraded readers: an existing durable gets this node\'s filter', () => {
+  // An explicit-ack durable from before the per-node filter, as consumers.info reports it.
+  function existingConsumerNc(filterSubject) {
+    const updates = [];
+    const nc = {
+      jetstreamManager: async () => ({
+        streams: { info: async (name) => ({ config: { name, ...eventStreamRetention() }, state: { messages: 0, bytes: 0 } }) },
+        consumers: {
+          info: async (_stream, name) => ({ config: { durable_name: name, ack_policy: 'explicit', ...(filterSubject && { filter_subject: filterSubject }) } }),
+          add: async () => { throw new Error('the durable exists'); },
+          update: async (stream, name, cfg) => { updates.push({ stream, name, ...cfg }); },
+        },
+      }),
+      jetstream: () => ({
+        consumers: { get: async () => ({ consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() {} }) }) },
+      }),
+    };
+    return { nc, updates };
+  }
+
+  it('an unfiltered watcher and promoter durable is narrowed to local.<node>.> once, and logged', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'watcher-filter-'));
+    const { nc, updates } = existingConsumerNc(null);
+    const logs = [];
+    const watcher = await createMemoryWatcher(nc, 'Daedalus.local', { outputPath: path.join(dir, 'watcher.jsonl'), log: (m) => logs.push(m) });
+    await watcher.stop();
+    const promoter = await createPromoter(nc, 'Daedalus.local', { policy: { automatic: [] }, log: (m) => logs.push(m) });
+    await promoter.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(updates, [
+      { stream: 'local-events-daedalus', name: 'watcher-daedalus', filter_subject: 'local.daedalus.>' },
+      { stream: 'local-events-daedalus', name: 'promoter-daedalus', filter_subject: 'local.daedalus.>' },
+    ]);
+    assert.equal(logs.filter((l) => l.includes('filter_subject (none) -> local.daedalus.>')).length, 2, logs.join(' | '));
+  });
+
+  it('a durable already on this node\'s filter is left alone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'watcher-filter-'));
+    const { nc, updates } = existingConsumerNc('local.daedalus.>');
+    const watcher = await createMemoryWatcher(nc, 'daedalus', { outputPath: path.join(dir, 'watcher.jsonl') });
+    await watcher.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(updates, []);
   });
 });
