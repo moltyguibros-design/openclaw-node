@@ -161,6 +161,7 @@ function tombstoneKv() {
   const rows = new Map();
   let rev = 0;
   return {
+    rows,
     async get(k) { const r = rows.get(k); return r ? { ...r } : null; },
     async put(k, v) { rows.set(k, { value: v, revision: ++rev, operation: "PUT" }); },
     async update(k, v, expected) {
@@ -298,7 +299,26 @@ describe("pruneTerminal() KV hygiene (P4-5)", () => {
     await seed(store, { ...createTask({ task_id: "child", title: "t", depends_on: ["dep"] }), status: TASK_STATUS.QUEUED });
     assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), []);
     assert.ok(await store.get("dep"));
-    assert.equal(kv.purges, 0);
+    assert.equal(kv.purges, 1, "a run that prunes nothing still purges the markers earlier runs left");
+  });
+
+  it("the markers one run leaves are gone after the next run, even when that run prunes nothing", async () => {
+    let clock = 0;
+    const kv = tombstoneKv();
+    const markedAt = new Map();
+    const del = kv.delete.bind(kv);
+    kv.delete = async (k) => { markedAt.set(k, clock); await del(k); };
+    kv.purgeDeletes = async (olderMillis = 30 * 60000) => {
+      for (const [k, at] of markedAt) if (at < clock - olderMillis) { kv.rows.delete(k); markedAt.delete(k); }
+    };
+    const store = new TaskStore(kv);
+    await seed(store, { ...createTask({ task_id: "gone", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    await seed(store, { ...createTask({ task_id: "live", title: "t" }), status: TASK_STATUS.RUNNING });
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), ["gone"]);
+    assert.ok(kv.rows.has("gone"), "a fresh marker survives the run that wrote it");
+    clock += 3600000;
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), []);
+    assert.deepEqual([...kv.rows.keys()], ["live"]);
   });
 
   it("is a no-op when disabled (maxAgeMs 0)", async () => {
