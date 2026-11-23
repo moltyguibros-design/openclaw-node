@@ -186,8 +186,11 @@ If `R=3 valid: false`, ensure all 3 NATS nodes are clustered before creating the
 
 Start each node's memory daemon with the appropriate environment. `OPENCLAW_HOME` is the
 node root (`bin/spawn-node.mjs` prints this line for each node): the daemon keeps its
-`config/daemon.json`, `state.db`, `workspace/` (with `.knowledge.db`), `graph-cache.db` and
-`watcher.jsonl` there, so the three daemons share nothing but the bus. Each needs its own
+`config/daemon.json`, `state.db`, `workspace/` (with `.knowledge.db` and the LLM-queue
+snapshot `.tmp/ollama-queue-state.json`), `graph-cache.db` and `watcher.jsonl` there, reads
+`OLLAMA_NUM_PARALLEL` from the root's `openclaw.env`, and its flushes write vault notes into
+the root's `obsidian-local/` (unless `OBSIDIAN_VAULT_PATH` is set), so the three daemons share
+nothing but the bus. Each needs its own
 `MEMORY_INJECT_PORT`, since they all bind 127.0.0.1. The bus token still comes from
 `OPENCLAW_NATS_TOKEN` or `~/.openclaw/openclaw.env`. Federation is opt-in: without
 `OPENCLAW_FEDERATION=1` the daemon never starts the broadcaster, offerer or acceptor, so the
@@ -570,7 +573,7 @@ All three require `nats-server` on PATH. Tests auto-skip if not available.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCLAW_NODE_ID` | `os.hostname()` | Node identifier for event attribution |
-| `OPENCLAW_HOME` | `~/.openclaw` | Node root: the memory daemon's config, `state.db`, `workspace/` (unless `OPENCLAW_WORKSPACE` is set), `graph-cache.db` and `watcher.jsonl` |
+| `OPENCLAW_HOME` | `~/.openclaw` | Node root: the memory daemon's config, `state.db`, `workspace/` (unless `OPENCLAW_WORKSPACE` is set), `graph-cache.db`, `watcher.jsonl`, the LLM-queue snapshot, the `OLLAMA_NUM_PARALLEL` env file and the flush's `obsidian-local/` vault |
 | `MEMORY_INJECT_PORT` | `7893` | Loopback port of the memory daemon's inject endpoint (one per daemon on a machine) |
 
 ### NATS connection

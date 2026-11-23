@@ -370,7 +370,7 @@ function runMemoryWorker(data, timeoutMs = FLUSH_WORKER_TIMEOUT_MS) {
   });
 }
 function runFlushInWorker(jsonlPath, memoryMdPath, opts = {}) {
-  return runMemoryWorker({ kind: 'flush', jsonlPath, memoryMdPath, ...opts });
+  return runMemoryWorker({ kind: 'flush', jsonlPath, memoryMdPath, vaultPath: PATHS.vault, ...opts });
 }
 // Session-store imports are serialized: the end-of-session archive, the boot
 // pass and the Phase 2 pass all write the current session's rows, and two

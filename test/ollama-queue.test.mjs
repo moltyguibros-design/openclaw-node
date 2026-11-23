@@ -336,6 +336,29 @@ describe('requestAnalysis fallback paths', () => {
     }
   });
 
+  it('reads OLLAMA_NUM_PARALLEL from the node root openclaw.env under OPENCLAW_HOME', async () => {
+    const prev = { slots: process.env.OLLAMA_NUM_PARALLEL, home: process.env.HOME, root: process.env.OPENCLAW_HOME };
+    const home = mkdtempSync(join(tmpdir(), 'ollama-queue-home-'));
+    const nodeRoot = mkdtempSync(join(tmpdir(), 'ollama-queue-node-'));
+    writeFileSync(join(nodeRoot, 'openclaw.env'), 'OLLAMA_NUM_PARALLEL=4\n');
+    delete process.env.OLLAMA_NUM_PARALLEL;
+    process.env.HOME = home;
+    process.env.OPENCLAW_HOME = nodeRoot;
+    try {
+      markExternalJob('w1', { type: 'extraction' });
+      const result = await requestAnalysis(async () => 'from-node-env-file', { waitTimeoutMs: 500 });
+      assert.equal(result.mode, 'llm');
+      clearExternalJob('w1');
+    } finally {
+      process.env.HOME = prev.home;
+      process.env.OLLAMA_NUM_PARALLEL = prev.slots;
+      if (prev.root === undefined) delete process.env.OPENCLAW_HOME;
+      else process.env.OPENCLAW_HOME = prev.root;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(nodeRoot, { recursive: true, force: true });
+    }
+  });
+
   it('still answers busy during extraction when OLLAMA_NUM_PARALLEL is 1', async () => {
     const prev = process.env.OLLAMA_NUM_PARALLEL;
     process.env.OLLAMA_NUM_PARALLEL = '1';

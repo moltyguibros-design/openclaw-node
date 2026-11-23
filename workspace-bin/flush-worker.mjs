@@ -47,7 +47,7 @@ try {
     }
     post({ ok: true, result: { results, failed } });
   } else {
-    const { jsonlPath, memoryMdPath, charBudget, checkShouldFlush, contextWindowTokens } = workerData;
+    const { jsonlPath, memoryMdPath, vaultPath, charBudget, checkShouldFlush, contextWindowTokens } = workerData;
     const { runFlush, shouldFlush, USE_LLM_EXTRACTION } = await import('../lib/pre-compression-flush.mjs');
     let check = null;
     if (checkShouldFlush) {
@@ -72,7 +72,7 @@ try {
           extractionStoreError = err.message;
         }
       }
-      const result = await runFlush(jsonlPath, memoryMdPath, { charBudget, llmClient, extractionStore, extractionStoreError });
+      const result = await runFlush(jsonlPath, memoryMdPath, { charBudget, vaultPath, llmClient, extractionStore, extractionStoreError });
       if (check) result.check = check;
       post({ ok: true, result });
     }

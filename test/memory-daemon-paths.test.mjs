@@ -42,6 +42,12 @@ describe('memory daemon paths', () => {
     assert.equal(memoryDaemonPaths({ OPENCLAW_HOME: '/n/alpha', OPENCLAW_WORKSPACE: '/w' }).workspace, '/w');
   });
 
+  it('a spawned node flushes into its own root vault; the default node keeps the vault resolution it had', () => {
+    assert.equal(memoryDaemonPaths({}, '/home/op').vault, null, 'unset: getVaultPath keeps resolving env, obsidian-sync.json, ~/.openclaw/obsidian-local');
+    assert.equal(memoryDaemonPaths({ OPENCLAW_HOME: '/n/alpha' }).vault, '/n/alpha/obsidian-local', 'the vault spawn-node lays out');
+    assert.equal(memoryDaemonPaths({ OPENCLAW_HOME: '/n/alpha', OBSIDIAN_VAULT_PATH: '/v' }).vault, '/v', 'an explicit vault still wins');
+  });
+
   it('memory-daemon.mjs derives no node path from the home directory itself', () => {
     const src = fs.readFileSync(path.join(ROOT, 'workspace-bin', 'memory-daemon.mjs'), 'utf8');
     assert.match(src, /memoryDaemonPaths\(\)/);
