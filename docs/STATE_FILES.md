@@ -127,6 +127,7 @@ recreates what it needs on next tick.
   - `messages` — per-message content with turn index
   - `messages_fts` — FTS5 virtual table for full-text search over messages
   - `session_store_meta` — session-store schema version
+  - `session_import_markers` — source markers of transcripts that parsed to no messages, so the importer skips them until they change
   - `entities` — named things (people, projects, technologies, etc.)
   - `entity_aliases` — alternate names that resolve to an entity
   - `themes` — hierarchical topic labels
