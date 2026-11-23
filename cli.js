@@ -48,6 +48,42 @@ function stableInstallRoot(dryRun) {
   return dest;
 }
 
+function compareVersions(a, b) {
+  const [, ma, pa = ''] = a.match(/^(\d+\.\d+\.\d+)(?:-(.+))?$/);
+  const [, mb, pb = ''] = b.match(/^(\d+\.\d+\.\d+)(?:-(.+))?$/);
+  const core = ma.localeCompare(mb, 'en', { numeric: true });
+  if (core || pa === pb) return core;
+  if (!pa || !pb) return pa ? -1 : 1;
+  return pa.localeCompare(pb, 'en', { numeric: true });
+}
+
+// Each copy is about 0.5 GB. install.sh has just moved the workspace and mesh-home
+// dependency links onto `current`, so keep it and the newest other copy (a rollback
+// target) and remove the rest, except a copy a rendered service unit still runs from.
+function pruneHarnessCopies(current) {
+  const harness = path.dirname(current);
+  const unitDirs = [path.join(os.homedir(), 'Library', 'LaunchAgents'), path.join(os.homedir(), '.config', 'systemd', 'user')];
+  const units = unitDirs.filter((dir) => fs.existsSync(dir))
+    .flatMap((dir) => fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => fs.readFileSync(path.join(dir, e.name), 'utf8')));
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const others = fs.readdirSync(harness)
+    .filter((v) => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(v) && path.join(harness, v) !== current)
+    .sort(compareVersions);
+  others.pop();
+  for (const v of others) {
+    const dir = path.join(harness, v);
+    const inUse = new RegExp(`${escape(dir)}(?![\\w.+-])`);
+    if (units.some((text) => inUse.test(text))) {
+      console.log(`Keeping old harness copy ${dir}: a service unit still runs from it`);
+      continue;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`Removed old harness copy ${dir}`);
+  }
+}
+
 // spawnSync reports a signal-killed or never-spawned child as status null.
 function exitWith(result) {
   if (result.error) {
@@ -77,9 +113,10 @@ if (meshOnly) {
     process.exit(1);
   }
 
+  const dryRun = args.includes('--dry-run');
   let root;
   try {
-    root = stableInstallRoot(args.includes('--dry-run'));
+    root = stableInstallRoot(dryRun);
   } catch (err) {
     console.error('ERROR: could not copy the package out of the npx cache:', err.message);
     process.exit(1);
@@ -95,5 +132,13 @@ if (meshOnly) {
     stdio: 'inherit',
     cwd: root,
   });
+  const installed = !result.error && result.status === 0 && !dryRun && !args.some((a) => a === '--help' || a === '-h');
+  if (installed && root !== PKG_ROOT) {
+    try {
+      pruneHarnessCopies(root);
+    } catch (err) {
+      console.error('WARN: could not remove old harness copies:', err.message);
+    }
+  }
   exitWith(result);
 }

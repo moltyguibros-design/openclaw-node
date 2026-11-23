@@ -74,6 +74,22 @@ build_event_schemas() {
 # gets a node_modules of links into the repo's one installed dependency set. A
 # package the repo gained since the last run gets its link; existing ones already
 # point at the reinstalled tree.
+# A link into an older npx copy ($OPENCLAW_ROOT/harness/<version>) is moved to
+# this run's tree: left there, the daemons kept the first version's libraries and
+# cli.js could never remove that copy. Any other existing entry is left alone.
+link_dependency() {
+  local target="$1" link="$2"
+  if [ -e "$link" ]; then
+    [ -L "$link" ] || return 0
+    case "$(readlink "$link")" in
+      "$target") return 0 ;;
+      "${OPENCLAW_ROOT:-$HOME/.openclaw}/harness/"*) ;;
+      *) return 0 ;;
+    esac
+  fi
+  run ln -sfn "$target" "$link"
+  LINKED_COUNT=$((LINKED_COUNT + 1))
+}
 link_dependency_tree() {
   local src="$1" dest="$2" pkgdir pkg scoped_dir scoped
   LINKED_COUNT=0
@@ -87,14 +103,10 @@ link_dependency_tree() {
       for scoped_dir in "$pkgdir"*/; do
         [ -d "$scoped_dir" ] || continue
         scoped=$(basename "$scoped_dir")
-        if [ ! -e "$dest/$pkg/$scoped" ]; then
-          run ln -sfn "$pkgdir$scoped" "$dest/$pkg/$scoped"
-          LINKED_COUNT=$((LINKED_COUNT + 1))
-        fi
+        link_dependency "$pkgdir$scoped" "$dest/$pkg/$scoped"
       done
-    elif [ ! -e "$dest/$pkg" ]; then
-      run ln -sfn "$src/$pkg" "$dest/$pkg"
-      LINKED_COUNT=$((LINKED_COUNT + 1))
+    else
+      link_dependency "$src/$pkg" "$dest/$pkg"
     fi
   done
 }

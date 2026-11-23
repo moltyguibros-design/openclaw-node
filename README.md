@@ -92,7 +92,9 @@ npx openclaw-node-harness --mesh-only # Worker nodes — mesh agent + NATS only,
 
 > A full install or update under `npx` first copies the package out of the npx cache to
 > `~/.openclaw/harness/<version>/` and runs `install.sh` from there, so the services never
-> run from a cache npm may clear. The fleet deploy listener still needs a git clone.
+> run from a cache npm may clear. After a successful run it keeps that copy and the newest
+> other one (for rollback) and removes the rest, unless a service unit still runs from it.
+> The fleet deploy listener still needs a git clone.
 >
 > `npx` requires npm, which requires Node. It therefore **cannot install Node**, and
 > cannot bootstrap a virgin machine — use the `curl | bash` command above for that.
