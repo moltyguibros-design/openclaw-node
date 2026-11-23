@@ -3,9 +3,12 @@
 /**
  * mesh-deploy.js v2 — Full-stack OpenClaw deployment across all nodes.
  *
- * Covers EVERYTHING: mesh daemons, Mission Control, memory system,
- * soul system, skills, boot compiler, companion-bridge, OpenClaw
- * gateway, database migrations, config regeneration, service definitions.
+ * Covers the repo-sourced runtime: mesh daemons and CLI, shared libs,
+ * Mission Control, memory daemon, workspace scripts, souls, skills, boot
+ * compiler and manifest, workspace docs, harness rules, config templates,
+ * lane watchdog, log rotation and the Discord tool. The npm-sourced openclaw
+ * CLI and companion-bridge deploy only when named. Service units change only
+ * through install.sh.
  *
  * ARCHITECTURE:
  *   Each deployable component is defined in the MANIFEST with:
@@ -16,7 +19,7 @@
  *   - install:     how to deploy the change
  *   - restart:     which services to bounce
  *   - validate:    how to confirm the deploy worked
- *   - risk:        "safe" (auto-deploy) | "careful" (warn) | "manual" (skip unless --force)
+ *   - risk:        "safe" (auto-deploy) | "careful" (warn)
  *
  *   Every mode runs one function, deploy(fromSha, toSha): check out toSha, apply
  *   `git diff --name-status fromSha toSha` (deletions and renames included) to
@@ -30,7 +33,7 @@
  *   mesh deploy --dry-run               — preview what would happen
  *   mesh deploy --component mc          — reinstall only Mission Control (all its files)
  *   mesh deploy --component all         — reinstall everything (even unchanged)
- *   mesh deploy --force                 — reinstall everything, manual-risk components too
+ *   mesh deploy --force                 — reinstall every repo-sourced component, changed or not
  *   mesh deploy --local                 — this node only
  *   mesh deploy --local --to <sha> [--from <sha>]
  *                                       — pinned: no fetch; check out <sha> and apply the
@@ -55,7 +58,6 @@ const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const crypto = require('crypto');
 const { createTracer } = require('../lib/tracer');
 const { resolveNodeId } = require('../lib/node-id');
 const { loadNodeAliases, planNodeTargets, unknownNodes } = require('../lib/node-aliases');
@@ -98,12 +100,8 @@ const DIRS = {
   CONFIG:           path.join(HOME, '.openclaw', 'config'),
   BOOT:             path.join(WORKSPACE, '.boot'),
   BOOT_SRC:         path.join(WORKSPACE, 'bin'),  // compile-boot lives here
-  MEMORY:           path.join(WORKSPACE, 'memory'),
-  MEMORY_VAULT:     path.join(WORKSPACE, 'memory-vault'),
   SERVICES_MAC:     path.join(HOME, 'Library', 'LaunchAgents'),
-  SERVICES_LINUX:   path.join(HOME, '.config', 'systemd', 'user'),
   COMPANION:        path.join(HOME, 'companion-adapter'),
-  TMP:              path.join(WORKSPACE, '.tmp'),
   DEPLOY_STATE:     path.join(HOME, '.openclaw', '.deploy-state.json'),
 };
 
@@ -147,13 +145,6 @@ function exec(cmd, opts = {}) {
     if (opts.ignoreError) return err.stdout?.trim() || '';
     throw err;
   }
-}
-
-function fileHash(filePath) {
-  try {
-    const content = fs.readFileSync(filePath);
-    return crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
-  } catch { return null; }
 }
 
 // Git takes shas and paths as argv, never through a shell.
@@ -276,10 +267,6 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: [],
     servicesLinux: [],
-    postInstall: () => {
-      const wrapperPath = path.join(DIRS.CLI_BIN, 'mesh');
-      if (fs.existsSync(wrapperPath)) fs.chmodSync(wrapperPath, 0o755);
-    },
   },
 
   {
@@ -1027,17 +1014,9 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
   const services = [];
   let listenerAffected = false;
   for (const { comp, install, remove } of plans) {
-    const risk = comp.risk === 'safe' ? C.green('●')
-      : comp.risk === 'careful' ? C.yellow('●')
-      : C.red('●');
+    const risk = comp.risk === 'safe' ? C.green('●') : C.yellow('●');
     console.log(`  ${risk} ${C.bold(comp.name)} ${C.dim(`(${comp.id})`)}`);
     console.log(`    ${C.dim(comp.description)}`);
-
-    // Skip manual-risk components unless forced or named
-    if (comp.risk === 'manual' && !force && !filterIds.includes(comp.id)) {
-      skip(`    Skipped (use --force or --component ${comp.id})`);
-      continue;
-    }
 
     // Pre-install hook (backup, merge protection, etc.) — false vetoes the component
     if (comp.preInstall && comp.preInstall(install, { repoDir, toSha, dryRun }) === false) continue;
@@ -1284,9 +1263,7 @@ async function main() {
       if (affected.length > 0) {
         console.log(`\n  Affected components:`);
         for (const { comp, install, remove } of affected) {
-          const risk = comp.risk === 'safe' ? C.green(comp.risk)
-            : comp.risk === 'careful' ? C.yellow(comp.risk)
-            : C.red(comp.risk);
+          const risk = comp.risk === 'safe' ? C.green(comp.risk) : C.yellow(comp.risk);
           console.log(`    ${comp.name} [${risk}] — ${install.length + remove.length} files`);
         }
       }

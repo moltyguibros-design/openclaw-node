@@ -104,6 +104,22 @@ describe('mesh-deploy MANIFEST and the role table are one list', () => {
     assert.ok(!DEPLOY_COMPONENTS.some(c => c.id === 'memory-harness'));
   });
 
+  // No component was ever 'manual', the deploy has no service-definitions or
+  // migrations component, and fileHash had no caller.
+  it('every MANIFEST risk is safe or careful, and nothing branches on a manual tier', () => {
+    const src = fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8');
+    const start = src.indexOf('const MANIFEST = [');
+    const block = src.slice(start, src.indexOf('\n];', start));
+    const risks = [...block.matchAll(/^ {4}risk: '([^']+)'/gm)].map(m => m[1]);
+    assert.ok(risks.length >= 10);
+    for (const risk of risks) assert.ok(risk === 'safe' || risk === 'careful', risk);
+    assert.doesNotMatch(src, /risk === 'manual'|"manual"|manual-risk|C\.red\(comp\.risk\)/);
+    assert.doesNotMatch(src, /function fileHash|require\('crypto'\)/);
+    assert.doesNotMatch(src.slice(0, src.indexOf('*/')), /service definitions|database migrations/);
+    const meshCli = block.slice(block.indexOf("    id: 'mesh-cli',"), block.indexOf('\n  },', block.indexOf("    id: 'mesh-cli',")));
+    assert.doesNotMatch(meshCli, /postInstall/, 'nothing in the repo ships a ~/openclaw/bin/mesh wrapper to chmod');
+  });
+
   it('log-rotate restarts the Linux timer service it ships to every node', () => {
     const src = fs.readFileSync(path.join(REPO, 'bin/mesh-deploy.js'), 'utf8');
     const entry = src.slice(src.indexOf("    id: 'log-rotate',"), src.indexOf('\n  },', src.indexOf("    id: 'log-rotate',")));
