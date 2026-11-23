@@ -10,7 +10,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,15 +19,25 @@ const SKILLS = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 describe('dead skill files', () => {
   it('upstream dev and fixture files are not shipped', () => {
     const present = [
-      'fast-browser-use/package.json',
-      'fast-browser-use/package-lock.json',
-      'fast-browser-use/CODEBUDDY.md',
-      'fast-browser-use/test_auth.json',
-      'fast-browser-use/test_state.json',
       'clawddocs/package.json',
       'crypto-price/ARCHITECTURE.md',
     ].filter((rel) => existsSync(join(SKILLS, rel)));
     assert.deepEqual(present, []);
+  });
+
+  it('no shipped skill carries Rust source, which no install path compiles', () => {
+    const rust = [];
+    const walk = (rel) => {
+      for (const name of readdirSync(join(SKILLS, rel))) {
+        const child = join(rel, name);
+        if (statSync(join(SKILLS, child)).isDirectory()) walk(child);
+        else if (name === 'Cargo.toml' || name.endsWith('.rs')) rust.push(child);
+      }
+    };
+    for (const e of readdirSync(SKILLS, { withFileTypes: true })) {
+      if (e.isDirectory() && e.name !== '_quarantine' && e.name !== 'node_modules') walk(e.name);
+    }
+    assert.deepEqual(rust, []);
   });
 
   it('crypto-price README promises no unshipped font or wrapper skills', () => {

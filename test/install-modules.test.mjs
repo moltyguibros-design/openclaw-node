@@ -657,6 +657,8 @@ test('every quarantined or deleted skill is archived out of an installed workspa
   assert.ok(quarantined.includes('capability-evolver'));
   // Every Drive request and the standing OAuth grant go through maton.ai.
   assert.ok(quarantined.includes('google-drive'));
+  // Its sandbox fix lived in vendored Rust nothing builds; the binary it installs runs Chrome unsandboxed.
+  assert.ok(quarantined.includes('fast-browser-use'));
   for (const s of quarantined) {
     assert.equal(existsSync(join(ROOT, 'skills', s)), false, `${s} still ships`);
     assert.equal(existsSync(join(ROOT, 'skills/_quarantine', s, 'SKILL.md')), true, `${s} has no SKILL.md in _quarantine`);
@@ -704,9 +706,7 @@ test('an --update removes the files the repo deleted from inside shipped skills,
   }
   const deleted = [
     'moltbook-interact/INSTALL.md', 'clawddocs/package.json', 'clawddocs/package-lock.json',
-    'clawddocs/snippets/common-configs.md', 'crypto-price/ARCHITECTURE.md',
-    'fast-browser-use/package.json', 'fast-browser-use/package-lock.json', 'fast-browser-use/CODEBUDDY.md',
-    'fast-browser-use/test_auth.json', 'fast-browser-use/test_state.json', 'openclaw-skill-scanner/report-template.md',
+    'clawddocs/snippets/common-configs.md', 'crypto-price/ARCHITECTURE.md', 'openclaw-skill-scanner/report-template.md',
   ];
   for (const rel of deleted) assert.equal(existsSync(join(ROOT, 'skills', rel)), false, `${rel} still ships`);
   const src = moduleSrc['workspace.sh'];
@@ -737,7 +737,7 @@ test('an --update removes the files the repo deleted from inside shipped skills,
   assert.equal(existsSync(join(skills, 'clawddocs/snippets')), false);
   const calls = readFileSync(log, 'utf8');
   assert.match(calls, /^pip3 .*\/crypto-price\/+requirements\.txt$/m, 'the dependency loop ran');
-  assert.doesNotMatch(calls, /^npm (clawddocs|fast-browser-use)$/m, calls);
+  assert.doesNotMatch(calls, /^npm clawddocs$/m, calls);
 });
 
 test('installer links scoped packages into both deployed parent trees', () => {

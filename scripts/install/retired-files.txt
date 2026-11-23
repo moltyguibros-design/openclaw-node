@@ -43,6 +43,7 @@ skills proactive-messages
 skills self-reflection
 skills ontology
 skills google-drive
+skills fast-browser-use
 # Skills deleted from the repo.
 skills memory-setup
 skills memory-hygiene

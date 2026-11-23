@@ -199,8 +199,6 @@ retire_shipped_files skills "$WORKSPACE/skills"
 # clawddocs lock there).
 for f in moltbook-interact/INSTALL.md clawddocs/package.json clawddocs/package-lock.json \
   clawddocs/snippets/common-configs.md crypto-price/ARCHITECTURE.md \
-  fast-browser-use/package.json fast-browser-use/package-lock.json fast-browser-use/CODEBUDDY.md \
-  fast-browser-use/test_auth.json fast-browser-use/test_state.json \
   openclaw-skill-scanner/report-template.md; do
   run rm -f "$WORKSPACE/skills/$f"
 done
