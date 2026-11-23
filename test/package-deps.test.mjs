@@ -64,6 +64,21 @@ describe('event-schemas workspace dependencies', () => {
   });
 });
 
+// onnxruntime-node's postinstall downloads CUDA EP binaries from a GitHub release on
+// Linux x64; when that asset 404s, npm ci and the installer's npm install fail outright.
+describe('onnxruntime CUDA download', () => {
+  const hasNpm = spawnSync('npm', ['--version'], { encoding: 'utf8' }).status === 0;
+  it('npm reads the project .npmrc that skips it', { skip: !hasNpm && 'npm not on PATH' }, () => {
+    const r = spawnSync('npm', ['config', 'get', 'onnxruntime-node-install-cuda'], { cwd: ROOT, encoding: 'utf8' });
+    assert.equal(r.stdout.trim(), 'skip', r.stderr);
+  });
+
+  it('nothing in the code asks ONNX Runtime for the CUDA execution provider', () => {
+    const r = spawnSync('git', ['grep', '-l', '-i', '-E', "cuda(ExecutionProvider)?['\"]|device: *['\"]cuda", '--', 'lib', 'bin', 'workspace-bin', 'packages'], { cwd: ROOT, encoding: 'utf8' });
+    assert.equal(r.stdout.trim(), '');
+  });
+});
+
 // With root "workspaces", npm pack reads no .gitignore/.npmignore below the root, so a
 // publish from a dev checkout shipped mission-control/node_modules (~830 MB), .env.local,
 // data/ and .next. The negations in "files" are what keep them out.
