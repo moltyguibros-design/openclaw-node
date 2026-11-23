@@ -52,3 +52,16 @@ test('re-adding a source reports the stored path', t => {
   const out = add('x', 'two');
   assert.ok(out.includes(`Updated source: x → ${path.join(cwd, 'two')}`), out);
 });
+
+test('under OPENCLAW_HOME the source lands in that node\'s registry, the one the readers load', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'register-source-node-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const nodeRoot = path.join(root, 'node-b');
+  const r = spawnSync(process.execPath, [BIN, 'add', '--name', 'b', '--path', '/b/sessions'], {
+    encoding: 'utf8', env: { ...process.env, HOME: path.join(root, 'home'), OPENCLAW_HOME: nodeRoot },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(path.join(root, 'home', '.openclaw')), 'nothing written under ~/.openclaw');
+  const { loadTranscriptSources } = await import('../lib/transcript-sources.mjs');
+  assert.deepEqual(loadTranscriptSources(nodeRoot).map(s => s.path), ['/b/sessions']);
+});

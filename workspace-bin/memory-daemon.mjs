@@ -29,7 +29,6 @@ import { Worker } from 'worker_threads';
 import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { resolveNodeId } from '../lib/node-id.js';
@@ -58,6 +57,7 @@ import { createMemoryWatcher, runStoreHealthProbes, appendWatcherRecord } from '
 import { initDatabase as initKnowledgeDb } from '../lib/mcp-knowledge/core.mjs';
 import { createGraphCache } from '../bin/obsidian-graph-cache.mjs';
 import { memoryDaemonPaths } from '../lib/memory-daemon-paths.mjs';
+import { loadTranscriptSources as readTranscriptSources } from '../lib/transcript-sources.mjs';
 
 const traceEmitter = createSessionTraceEmitter(tracer);
 
@@ -143,9 +143,7 @@ const __dirname = path.dirname(__filename);
 const NODE_ID = resolveNodeId();
 const PATHS = memoryDaemonPaths();
 const WORKSPACE = PATHS.workspace || path.dirname(__dirname);
-const HOME = os.homedir();
 const CONFIG_PATH = PATHS.config;
-const TRANSCRIPT_REGISTRY = PATHS.transcriptSources;
 // The unit renders TZ from OPENCLAW_TIMEZONE; daemon.json's timezone, once
 // loaded, governs the daemon's dates, its log stamps and its children's TZ.
 const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal';
@@ -185,11 +183,6 @@ function loadConfig() {
   return defaults;
 }
 
-function resolvePath(p) {
-  if (p.startsWith('~')) return path.join(HOME, p.slice(1));
-  return p;
-}
-
 // ============================================================
 // LOGGING
 // ============================================================
@@ -225,23 +218,10 @@ function log(msg) {
 // ============================================================
 
 function loadTranscriptSources() {
-  if (fs.existsSync(TRANSCRIPT_REGISTRY)) {
-    try {
-      const reg = JSON.parse(fs.readFileSync(TRANSCRIPT_REGISTRY, 'utf-8'));
-      return (reg.sources || [])
-        .filter(s => s.enabled !== false)
-        .map(s => ({ ...s, path: resolvePath(s.path) }));
-    } catch (err) { console.warn(`[memory-daemon] transcript registry parse failed: ${err.message}`); }
-  }
-
-  // Legacy fallback: derive Claude Code paths from workspace
-  const workspaceAbs = fs.realpathSync(WORKSPACE);
-  const slug = workspaceAbs.replace(/[/.]/g, '-');
-  return [
-    { name: 'claude-code', path: path.join(HOME, '.claude/projects', slug), format: 'claude-code' },
-    { name: 'claude-home', path: path.join(HOME, '.claude/projects', '-' + path.basename(HOME)), format: 'claude-code' },
-    { name: 'gateway', path: PATHS.gatewaySessions, format: 'openclaw-gateway' },
-  ];
+  return readTranscriptSources(PATHS.root, {
+    workspace: WORKSPACE,
+    warn: (m) => console.warn(`[memory-daemon] ${m}`),
+  });
 }
 
 // ============================================================

@@ -6,11 +6,8 @@
  * (skips tool calls/results), flattens to single-line entries, and writes a
  * structured recap to memory/last-session-recap.md.
  *
- * Scans every enabled source in ~/.openclaw/config/transcript-sources.json, or
- * without it:
- *   - Claude Code workspace sessions (~/.claude/projects/<workspace path slug>/)
- *   - Claude Code home sessions (~/.claude/projects/-<home dir name>/)
- *   - OpenClaw Gateway sessions (~/.openclaw/agents/main/sessions/)
+ * Scans every transcript folder lib/transcript-sources.mjs lists: the enabled
+ * sources of the node's registry, or the default folders without a readable one.
  *
  * Handles both JSONL formats:
  *   - Claude Code: {type: "user"/"assistant", message: {role, content}, timestamp}
@@ -36,51 +33,15 @@
 const fs = require("fs");
 const path = require("path");
 const { MIN_SESSION_BYTES } = require("../lib/session-floor");
+const { loadTranscriptSources } = require("../lib/transcript-sources.mjs");
 const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || "America/Montreal";
 
 // --- Config (portable — derives paths from script location) ---
 const SCRIPT_DIR = path.dirname(fs.realpathSync(__filename));
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(SCRIPT_DIR);
-const HOME = process.env.HOME || require("os").homedir();
-
-// --- Transcript source discovery ---
-// Primary: read from ~/.openclaw/config/transcript-sources.json (registry-driven)
-// Fallback: hardcoded paths + .config/transcript-sources.txt (legacy)
-const TRANSCRIPT_REGISTRY = path.join(HOME, ".openclaw/config/transcript-sources.json");
-const EXTRA_DIRS_FILE = path.join(WORKSPACE, ".config/transcript-sources.txt");
-
-function resolveSourcePath(p) {
-  if (p.startsWith("~")) return path.join(HOME, p.slice(1));
-  return p;
-}
 
 function loadTranscriptDirs() {
-  // Registry-driven (preferred)
-  if (fs.existsSync(TRANSCRIPT_REGISTRY)) {
-    try {
-      const reg = JSON.parse(fs.readFileSync(TRANSCRIPT_REGISTRY, "utf-8"));
-      return (reg.sources || [])
-        .filter(s => s.enabled !== false)
-        .map(s => resolveSourcePath(s.path));
-    } catch { /* fall through to legacy */ }
-  }
-
-  // Legacy fallback: hardcoded paths + .config/transcript-sources.txt
-  const WORKSPACE_ABS = fs.realpathSync(WORKSPACE);
-  const CLAUDE_PROJECT_SLUG = WORKSPACE_ABS.replace(/[/.]/g, "-");
-  const dirs = [
-    path.join(HOME, ".claude/projects", CLAUDE_PROJECT_SLUG),
-    path.join(HOME, ".claude/projects", "-" + path.basename(HOME)),
-    path.join(HOME, ".openclaw/agents/main/sessions"),
-  ];
-  if (fs.existsSync(EXTRA_DIRS_FILE)) {
-    const lines = fs.readFileSync(EXTRA_DIRS_FILE, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith("#")) dirs.push(trimmed);
-    }
-  }
-  return dirs;
+  return loadTranscriptSources(undefined, { workspace: WORKSPACE }).map(s => s.path);
 }
 
 const OUTPUT_FILE = path.join(WORKSPACE, "memory/last-session-recap.md");

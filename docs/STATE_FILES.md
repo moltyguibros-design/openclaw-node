@@ -182,10 +182,12 @@ install scripts).
 - **Owner:** `openclaw-register-source` script / operator
 - **Format:** JSON. Registry of transcript source directories with `name`, `path`, `format`, `enabled` fields.
 - **Lifetime:** Persistent. Updated when new frontends are registered.
-- **Consumers:**
-  - `memory-daemon.mjs` → `loadTranscriptSources()` — scans for active JSONL sessions
-  - `session-recap` → `loadTranscriptDirs()` — discovers JSONL files for digest generation
-  - `session-search.mjs` — discovers sources for search
+- **Reader:** `lib/transcript-sources.mjs` → `loadTranscriptSources(root)`, the one loader. A readable registry is authoritative (its enabled sources only, so disabling every source stops ingest everywhere); the default folders (the workspace's Claude Code project folder, `~/.claude/projects/-<home>`, `<root>/agents/main/sessions`) apply only when the file is missing or unparseable. `<root>` is `$OPENCLAW_HOME`, default `~/.openclaw`.
+- **Consumers (all through that loader):**
+  - `memory-daemon.mjs` — scans for active JSONL sessions
+  - `session-recap` — discovers JSONL files for digest generation
+  - `session-search.mjs --import` — discovers sources to import
+  - `lib/heartbeat-detect.mjs` — finds the newest gateway session (Mission Control heartbeat status)
 
 ---
 

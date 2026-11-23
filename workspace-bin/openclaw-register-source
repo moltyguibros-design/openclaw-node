@@ -7,14 +7,15 @@
  *   openclaw-register-source remove --name "kimi"
  *   openclaw-register-source list
  *
- * Registry: ~/.openclaw/config/transcript-sources.json
+ * Registry: $OPENCLAW_HOME/config/transcript-sources.json (default ~/.openclaw),
+ * the file lib/transcript-sources.mjs loads for every transcript reader.
  */
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { memoryDaemonPaths } = require('../lib/memory-daemon-paths.mjs');
 
-const CONFIG_PATH = path.join(os.homedir(), '.openclaw/config/transcript-sources.json');
+const CONFIG_PATH = memoryDaemonPaths().transcriptSources;
 
 function loadRegistry() {
   if (!fs.existsSync(CONFIG_PATH)) {

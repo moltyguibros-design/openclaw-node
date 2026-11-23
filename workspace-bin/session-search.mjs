@@ -19,12 +19,11 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
+import { loadTranscriptSources } from '../lib/transcript-sources.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
-const HOME = os.homedir();
 
 // ── Args ────────────────────────────────────
 
@@ -88,37 +87,12 @@ async function main() {
 
   // ── Import mode ────────────────────────────────────
   if (flags.import) {
-    const transcriptRegistry = path.join(HOME, '.openclaw/config/transcript-sources.json');
-    let sources = []; // { path, name, format }
-
-    if (fs.existsSync(transcriptRegistry)) {
-      try {
-        const reg = JSON.parse(fs.readFileSync(transcriptRegistry, 'utf-8'));
-        sources = (reg.sources || [])
-          .filter(s => s.enabled !== false)
-          .map(s => ({
-            path: s.path.startsWith('~') ? path.join(HOME, s.path.slice(1)) : s.path,
-            name: s.name || 'unknown',
-            format: s.format || null,
-          }));
-      } catch { /* fall through */ }
-    }
-
-    if (sources.length === 0) {
-      // Fallback: known transcript locations with correct format tags
-      const wsAbs = fs.existsSync(WORKSPACE) ? fs.realpathSync(WORKSPACE) : WORKSPACE;
-      const slug = wsAbs.replace(/[/.]/g, '-');
-      sources = [
-        { path: path.join(HOME, '.claude/projects', slug), name: 'claude-code', format: 'claude-code' },
-        { path: path.join(HOME, '.claude/projects', '-' + path.basename(HOME)), name: 'claude-home', format: 'claude-code' },
-        { path: path.join(HOME, '.openclaw/agents/main/sessions'), name: 'gateway', format: 'openclaw-gateway' },
-      ];
-    }
+    const sources = loadTranscriptSources(undefined, { workspace: WORKSPACE });
 
     let totalImported = 0, totalSkipped = 0;
     for (const src of sources) {
       if (!fs.existsSync(src.path)) continue;
-      const result = await store.importDirectory(src.path, { source: src.name, format: src.format });
+      const result = await store.importDirectory(src.path, { source: src.name || 'unknown', format: src.format || null });
       totalImported += result.imported;
       totalSkipped += result.skipped;
       for (const f of result.failed) process.stderr.write(`  ${f.file}: import failed: ${f.error}\n`);
