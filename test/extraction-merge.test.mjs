@@ -183,6 +183,36 @@ describe('prompt: known memories', () => {
   });
 });
 
+describe('runFlush ignores gateway tool results it never extracts from', () => {
+  const gatewayLine = (role, content) => JSON.stringify({ type: 'message', message: { role, content }, timestamp: '2026-09-21T10:00:00Z' });
+  const writeGateway = (file, toolOutput) => fs.writeFileSync(file, [
+    gatewayLine('user', 'Why does the jetstream consumer stall?'),
+    gatewayLine('assistant', 'Let me list the consumers.'),
+    gatewayLine('toolResult', toolOutput),
+    gatewayLine('assistant', 'The durable consumer has max_ack_pending set too low.'),
+  ].join('\n'));
+  const client = { async generate() { return { content: JSON.stringify({ ...base, entities: [ent('NATS JetStream')], decisions: [] }) }; } };
+
+  it('picks known memories from the conversation only, and a tool-only change is not a new tail', async () => {
+    const jsonlPath = path.join(tmpDir, 'gw.jsonl');
+    const candidateText = [];
+    const realFind = store.findCandidateMemories.bind(store);
+    store.findCandidateMemories = (text) => { candidateText.push(text); return realFind(text); };
+    const opts = { vaultPath: path.join(tmpDir, 'vault'), llmClient: client, extractionStore: store, sessionId: 'gw' };
+
+    writeGateway(jsonlPath, 'drwxr-xr-x  consumer-ledger.json  TOOL_OUTPUT_ONE');
+    const first = await runFlush(jsonlPath, path.join(tmpDir, 'MEMORY.md'), opts);
+    assert.equal(first.mode, 'llm');
+    assert.equal(candidateText.length, 1);
+    assert.ok(!candidateText[0].includes('TOOL_OUTPUT'), candidateText[0]);
+    assert.match(candidateText[0], /max_ack_pending/);
+
+    writeGateway(jsonlPath, 'drwxr-xr-x  consumer-ledger.json  TOOL_OUTPUT_TWO');
+    const second = await runFlush(jsonlPath, path.join(tmpDir, 'MEMORY.md'), opts);
+    assert.equal(second.mode, 'llm-dedup', 'only the tool output changed');
+  });
+});
+
 describe('runFlush read-before-write', () => {
   it('shows the extractor the known memories and reports the merge outcome', async () => {
     store.storeExtractionResult('earlier', { ...base, entities: [ent('NATS JetStream')], decisions: [dec('Use file storage for JetStream')] });
