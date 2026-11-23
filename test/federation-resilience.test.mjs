@@ -406,6 +406,8 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
       cleanupIntervalMs: 50, // fast cleanup for test
       log: (m) => logs.push(m),
     });
+    await acceptor.start();
+    assert.ok(logs.some(l => /started/.test(l)), `acceptor did not start: ${logs.join(' | ')}`);
 
     // Queue an offer that expires very soon
     const offer = {
@@ -435,30 +437,19 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
       },
     };
 
-    await acceptor._processOffer(offer);
-    assert.equal(acceptor.getPendingOffers().length, 1);
+    try {
+      await acceptor._processOffer(offer);
+      assert.equal(acceptor.getPendingOffers().length, 1);
 
-    // Start the acceptor to activate the cleanup timer
-    // We need to start but the subscription will fail since we're not fully set up —
-    // just test the processOffer + cleanup directly
-    // Wait for expiry + cleanup interval
-    await new Promise(r => setTimeout(r, 200));
-
-    // Manually verify the cleanup would work
-    const { cleanupExpiredOffers: cleanup } = await import('../lib/federation-resilience.mjs');
-    const pending = acceptor.getPendingOffers(); // returns a copy
-    // The original internal array may have been cleaned by the timer if start() was called
-    // Test the cleanup function directly on a copy
-    const testOffers = new Map([
-      ['exp1', { event_id: 'exp1', data: { expires_at: new Date(Date.now() - 1000).toISOString() } }],
-      ['valid1', { event_id: 'valid1', data: { expires_at: new Date(Date.now() + 60_000).toISOString() } }],
-    ]);
-    const removed = cleanup(testOffers);
-    assert.equal(removed, 1);
-    assert.equal(testOffers.size, 1);
-    assert.equal(testOffers.has('valid1'), true);
-
-    acceptor.stop();
+      const deadline = Date.now() + 1000;
+      while (acceptor.getPendingOffers().length > 0 && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 25));
+      }
+      assert.equal(acceptor.getPendingOffers().length, 0);
+      assert.equal(acceptor.stats.expiredCleaned, 1);
+    } finally {
+      await acceptor.stop();
+    }
   });
 
   it('peer offline mid-federation: surviving node continues processing', async () => {
