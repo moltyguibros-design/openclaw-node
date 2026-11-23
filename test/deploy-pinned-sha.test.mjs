@@ -144,6 +144,8 @@ write(SEED, 'mission-control/package.json', '{ "name": "mission-control" }\n');
 write(SEED, 'mission-control/src/app/page.tsx', "export default () => 'v0';\n");
 const S0 = commit('v0');
 git(ROOT, 'clone', '-q', ORIGIN, NODE);
+// install.sh installed Mission Control on this node; a deploy only updates it.
+write(RT.mc, 'package.json', '{ "name": "mission-control" }\n');
 
 const require = createRequire(import.meta.url);
 const { runDeploy } = require('../bin/mesh-deploy-listener.js');
@@ -1030,6 +1032,7 @@ describe('a Mission Control build that fails keeps the previous build and fails 
       'mission-control/package.json': '{ "name": "mission-control" }\n',
       'mission-control/src/app/page.tsx': "export default () => 'v0';\n",
     });
+    write(fx.home, '.openclaw/workspace/projects/mission-control/package.json', '{ "name": "mission-control" }\n');
     ranOk(fx.deploy(['--force'], env));
   });
 
@@ -1113,6 +1116,7 @@ describe('a worker deploys what the installer put on it', () => {
       'mission-control/package.json': '{ "name": "mission-control" }\n',
       'mission-control/src/app/page.tsx': "export default () => 'v0';\n",
     });
+    write(fx.home, '.openclaw/workspace/projects/mission-control/package.json', '{ "name": "mission-control" }\n');
   });
 
   it('the memory daemon and Mission Control reach a worker and restart there', () => {
@@ -1128,6 +1132,38 @@ describe('a worker deploys what the installer put on it', () => {
     for (const svc of ['openclaw-memory-daemon', 'openclaw-mission-control']) {
       assert.ok(resultOf(run).restarted.includes(svc), `${svc}: ${run.stdout}`);
     }
+  });
+});
+
+// A worker joined with mesh-install.sh + openclaw-node-init runs only the agent
+// and the deploy listener. Deploying 'mc' there copied the changed files into a
+// partial tree and ran an npm ci with no lockfile: the deploy failed, and so did
+// the listener's rollback of it.
+describe('a node with no Mission Control installed skips the mc component', () => {
+  const env = { OPENCLAW_NODE_ROLE: 'worker', DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent' };
+  let fx, S1;
+  const mc = () => fx.rt('.openclaw/workspace/projects/mission-control');
+  const assertSkipped = (run) => {
+    ranOk(run);
+    assert.deepEqual(resultOf(run).components, [], run.stdout);
+    assert.match(run.stdout, /Mission Control is not installed on this node/);
+    assert.ok(!fs.existsSync(path.join(mc(), 'src')), 'a partial Mission Control tree was created');
+    assert.deepEqual(fx.calls().filter(c => c.startsWith('npx -y npm@10 ci') || c.startsWith('npm run build')), []);
+  };
+  before(() => {
+    fx = makeNode('joinworker', {
+      'mission-control/package.json': '{ "name": "mission-control" }\n',
+      'mission-control/src/app/page.tsx': "export default () => 'v0';\n",
+    });
+    S1 = fx.commit('v1', { 'mission-control/src/app/page.tsx': "export default () => 'v1';\n" });
+  });
+
+  it('a commit that touches only Mission Control deploys nothing and succeeds', () => {
+    assertSkipped(fx.deploy(['--from', fx.S0, '--to', S1], env));
+  });
+
+  it('the listener\'s reverse deploy of it succeeds too', () => {
+    assertSkipped(fx.deploy(['--from', S1, '--to', fx.S0], env));
   });
 });
 

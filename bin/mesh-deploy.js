@@ -348,6 +348,13 @@ const MANIFEST = [
     targets: [DIRS.MC_PROJECT],
     servicesMac: ['ai.openclaw.mission-control'],
     servicesLinux: ['openclaw-mission-control'],
+    // A join-path worker (openclaw-node-init) has no Mission Control to update.
+    // package.json, not the dir: the tracer creates data/mission-control.db on any node.
+    preInstall: () => {
+      if (fs.existsSync(path.join(DIRS.MC_PROJECT, 'package.json'))) return true;
+      skip('  Mission Control is not installed on this node — skipped');
+      return false;
+    },
     // The service runs `next start`, which serves the prebuilt .next — a restart
     // without a rebuild keeps serving the old UI. install.sh's own steps: npm@10 ci
     // and the better-sqlite3 rebuild under this deploy's node when the lockfile or
