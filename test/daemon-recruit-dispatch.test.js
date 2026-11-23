@@ -41,6 +41,8 @@ function makeContext() {
     async markReleased(taskId, reason) { released.push({ taskId, reason }); return { task_id: taskId, status: 'released' }; },
     async markFailed(taskId, reason) { failed.push({ taskId, reason }); return { task_id: taskId, status: 'failed' }; },
     async markCompleted(taskId, result) { completed.push({ taskId, result }); return { task_id: taskId, status: 'completed' }; },
+    // Recruit close hands the parent to its session; a member holds it here.
+    async markSessionOwned() { return null; },
   };
   const nc = { publish(subject) { published.push(subject); }, request: async () => ({}) };
   daemon.__test.setContext({ collabStore, store, nc });
@@ -207,7 +209,7 @@ describe('startRecruitedSession — concurrent join-close and sweep start ONE ro
     const published = [];
     daemon.__test.setContext({
       collabStore,
-      store: { async get() { return { title: 't', description: 'd', scope: [] }; }, async markReleased() {}, async markFailed() {} },
+      store: { async get() { return { title: 't', description: 'd', scope: [] }; }, async markReleased() {}, async markFailed() {}, async markSessionOwned() { return null; } },
       nc: { publish(subject) { published.push(subject); }, request: async () => ({}) },
     });
     const session = createSession('task-parallel-race', { mode: 'parallel', min_nodes: 2, max_nodes: 2, automation_tier: 1 });

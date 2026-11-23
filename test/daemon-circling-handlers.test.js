@@ -62,6 +62,8 @@ function harness() {
     async markCompleted(taskId, result) { completed.push({ taskId, result }); return { task_id: taskId, status: 'completed', result }; },
     async markReleased(taskId, reason) { released.push({ taskId, reason }); return false; },
     async markFailed(taskId, reason) { failed.push({ taskId, reason }); return false; },
+    // Recruit close hands the parent to its session; a member holds it here.
+    async markSessionOwned() { return null; },
   };
   const nc = {
     publish(subject, data) { published.push({ subject, payload: JSON.parse(sc.decode(data)) }); },

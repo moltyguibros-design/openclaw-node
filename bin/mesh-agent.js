@@ -717,7 +717,7 @@ async function natsRequest(subject, payload, timeoutMs = 10000) {
     if (!response.ok) {
       warn(`natsRequest ${subject}: ${response.error}`);
       // A TASK_TERMINAL refusal carries the task's status so the caller can stop.
-      throw Object.assign(new Error(response.error), { code: response.code, taskStatus: response.status });
+      throw Object.assign(new Error(response.error), { code: response.code, taskStatus: response.status, refused: true });
     }
     return response.data;
   } catch (err) {
@@ -2036,35 +2036,29 @@ async function executeCollabTask(task) {
   // Join the session using the discovered session_id
   let session;
   try {
-    const joinResult = await natsRequest('mesh.collab.join', {
+    session = await natsRequest('mesh.collab.join', {
       session_id: sessionId,
       node_id: NODE_ID,
     }, 10000);
-    session = joinResult;
   } catch (err) {
-    log(`COLLAB JOIN FAILED: ${err.message} (session: ${sessionId})`);
     roundSub.unsubscribe();
+    debug('state → idle');
+    writeAgentState('idle', null);
+    if (err.refused) {
+      // P1 #9a: a refused join (full, closed, or duplicate) means the session
+      // proceeds WITHOUT this node: a personal decline, not a task failure. Failing
+      // as owner aborted the live session. A claim this node holds stays for the
+      // session, which takes the parent over at recruit close.
+      log(`COLLAB DECLINED: session ${sessionId} refused this node's join (${err.message}) — task proceeds without ${NODE_ID}.`);
+      return;
+    }
+    log(`COLLAB JOIN FAILED: ${err.message} (session: ${sessionId})`);
     await natsRequest('mesh.tasks.fail', {
       task_id: task.task_id,
       node_id: NODE_ID,
       lease_token: task.lease_token,
       reason: `Failed to join collab session ${sessionId}: ${err.message}`,
     }).catch(err2 => warn(`mesh.tasks.fail: ${err2.message}`));
-    debug('state → idle');
-    writeAgentState('idle', null);
-    return;
-  }
-
-  if (!session) {
-    log(`COLLAB JOIN RETURNED NULL for session ${sessionId}`);
-    roundSub.unsubscribe();
-    // P1 #9a: a rejected join (full/closed/duplicate) means the session is
-    // proceeding WITHOUT this node — that is a personal decline, not a task
-    // failure. Failing the task here let a late-arriving node abort a healthy
-    // running grappe (the 2.4-era "already joined"/"full" aborts).
-    log(`COLLAB DECLINED: session ${sessionId} rejected this node's join (full, closed, or duplicate) — task proceeds without ${NODE_ID}.`);
-    debug('state → idle');
-    writeAgentState('idle', null);
     return;
   }
 

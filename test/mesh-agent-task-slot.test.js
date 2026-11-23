@@ -42,6 +42,10 @@ function fakeBus(held) {
     nc: {
       async request(subject, data) {
         calls.push({ subject, payload: JSON.parse(sc.decode(data)) });
+        // The daemon refuses a join it cannot take (full, closed, duplicate).
+        if (subject === 'mesh.collab.join' && !held.has(subject)) {
+          return { data: sc.encode(JSON.stringify({ ok: false, error: 'Cannot join: full, closed, or already joined' })) };
+        }
         let reply = null;
         if (held.has(subject)) reply = await new Promise((resolve) => gates.set(subject, resolve));
         else if (subject === 'mesh.tasks.get') reply = RECRUIT_TASK;

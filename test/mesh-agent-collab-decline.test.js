@@ -59,6 +59,8 @@ function fakeBus(task, { join = null } = {}) {
         } else if (subject === 'mesh.tasks.get') {
           reply = task;
         } else if (subject === 'mesh.collab.join') {
+          // No session to hand out: the daemon refuses the join (full, closed, duplicate).
+          if (!join) return { data: sc.encode(JSON.stringify({ ok: false, error: 'Cannot join: full, closed, or already joined' })) };
           reply = join;
         }
         return { data: sc.encode(JSON.stringify({ ok: true, data: reply })) };

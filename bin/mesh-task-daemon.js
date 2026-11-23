@@ -38,7 +38,7 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
-const { createTask, TaskStore, EDITABLE_TASK_FIELDS, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, EDITABLE_TASK_FIELDS, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET, isSessionOwner } = require('../lib/mesh-tasks');
 const { validateMetricCommand } = require('../lib/exec-safety');
 const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
@@ -269,7 +269,7 @@ function announceCollabSession(task, session) {
 // Every collab member keeps its own contribution branch while review is
 // pending, so every member hears the outcome, not only the claimer.
 async function reviewRecipients(task) {
-  const ids = new Set(task.owner ? [task.owner] : []);
+  const ids = new Set(task.owner && !isSessionOwner(task.owner) ? [task.owner] : []);
   if (task.collab_session_id && collabStore) {
     const session = await collabStore.get(task.collab_session_id);
     for (const n of session?.nodes || []) ids.add(n.node_id);
@@ -326,7 +326,7 @@ async function handleClaim(msg) {
     return respondError(msg, `Node ${node_id} already has an active task: ${active[0].task_id}`);
   }
 
-  const task = await store.claim(node_id, { acceptsCollab: accepts_collab !== false });
+  const task = await store.claim(node_id, { acceptsCollab: accepts_collab !== false, skip: collabParentClosed });
 
   if (task) {
     // Pre-dispatch revalidation: re-read the task we just claimed to confirm
@@ -888,11 +888,17 @@ async function detectStalls() {
   for (const task of stalled) {
     const lastSignal = task.last_activity || task.started_at;
     const silentMin = ((Date.now() - new Date(lastSignal)) / 60000).toFixed(1);
+    // A parent its collab session owns has no agent to ask: the session is its heartbeat.
+    const agent = isSessionOwner(task.owner) ? null : task.owner;
+    if (!agent && await collabSessionLive(task)) {
+      await store.touchActivity(task.task_id);
+      continue;
+    }
 
     log(`STALL SUSPECTED ${task.task_id}: no heartbeat for ${silentMin}m (threshold: ${STALL_MINUTES}m). Checking agent...`);
 
     // Alive check: ask the agent directly before killing — cheap insurance against false stall detection
-    if (task.owner) {
+    if (agent) {
       try {
         const reply = await nc.request(
           `mesh.agent.${task.owner}.alive`,
@@ -917,7 +923,7 @@ async function detectStalls() {
     // a reflection from a crashed node.
     // Uses findActiveSessionsByNode() — O(sessions) single pass instead of
     // the previous O(sessions × nodes) list-then-find pattern.
-    if (task.owner && collabStore) {
+    if (agent && collabStore) {
       try {
         const sessions = await collabStore.findActiveSessionsByNode(task.owner);
         for (const session of sessions) {
@@ -955,7 +961,7 @@ async function detectStalls() {
     await checkPlanProgress(task.task_id, 'failed');
 
     // Tell the agent's node to stop the task it no longer holds (fire-and-forget)
-    if (task.owner) {
+    if (agent) {
       log(`STALL NOTIFY: ${task.task_id} → ${task.owner}`);
       await publishAgentStop(task.owner, 'stall', {
         task_id: task.task_id,
@@ -1035,15 +1041,24 @@ async function enforceBudgets() {
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
 
-    // Tell the agent to stop the task it was failed for
-    log(`BUDGET NOTIFY: ${task.task_id} → ${task.owner}`);
-    await publishAgentStop(task.owner, 'budget_exceeded', {
-      task_id: task.task_id,
-      reason: `failed at ${elapsed}m of a ${task.budget_minutes}m budget`,
-      elapsed_minutes: parseFloat(elapsed),
-      budget_minutes: task.budget_minutes,
-    });
+    // Tell the agent to stop the task it was failed for; a session-owned parent's
+    // workers are its session's members.
+    const targets = isSessionOwner(task.owner) ? await sessionMemberIds(task.collab_session_id) : [task.owner];
+    for (const nodeId of targets) {
+      log(`BUDGET NOTIFY: ${task.task_id} → ${nodeId}`);
+      await publishAgentStop(nodeId, 'budget_exceeded', {
+        task_id: task.task_id,
+        reason: `failed at ${elapsed}m of a ${task.budget_minutes}m budget`,
+        elapsed_minutes: parseFloat(elapsed),
+        budget_minutes: task.budget_minutes,
+      });
+    }
   }
+}
+
+async function sessionMemberIds(sessionId) {
+  const session = sessionId && collabStore ? await collabStore.get(sessionId) : null;
+  return (session?.nodes || []).map((n) => n.node_id);
 }
 
 /**
@@ -1098,6 +1113,23 @@ async function collabSessionLive(task) {
   if (!task.collab_session_id || !collabStore) return false;
   const session = await collabStore.get(task.collab_session_id);
   return !!session && (session.status === COLLAB_STATUS.RECRUITING || session.status === COLLAB_STATUS.ACTIVE);
+}
+
+// A claimer of a collab parent must be able to join its session; one that no
+// longer takes members (full, or past recruiting) would refuse the claimer.
+async function collabParentClosed(task) {
+  if (!task.collaboration || !task.collab_session_id || !collabStore) return false;
+  const session = await collabStore.get(task.collab_session_id);
+  if (!session) return false;
+  return session.status !== COLLAB_STATUS.RECRUITING
+    || (!!session.max_nodes && session.nodes.length >= session.max_nodes);
+}
+
+async function adoptCollabParent(session) {
+  const task = await store.markSessionOwned(session.task_id, session.session_id, session.nodes.map((n) => n.node_id));
+  if (!task) return;
+  log(`COLLAB PARENT ${task.task_id} → ${task.owner} (budget deadline: ${task.budget_deadline})`);
+  publishEvent('started', task);
 }
 
 /**
@@ -2271,6 +2303,7 @@ async function startRecruitedSession(session_id) {
   }
 
   log(`COLLAB RECRUIT DONE ${session.session_id}: ${session.nodes.length} nodes joined. Starting round 1.`);
+  await adoptCollabParent(session);
   if (session.mode === 'circling_strategy' && session.circling) {
     // Circling requires exactly 3 nodes (1 worker + 2 reviewers).
     // Even if min_nodes was misconfigured, refuse to start with <3.
