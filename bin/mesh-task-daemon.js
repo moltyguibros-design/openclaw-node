@@ -1201,7 +1201,13 @@ async function handleCollabLeave(msg) {
     clearCirclingStepTimer(session_id);
     const aborted = await collabStore.markAborted(session_id, abortReason);
     publishCollabEvent('aborted', aborted || await collabStore.get(session_id));
-    if (aborted) await settleCollabParent(session.task_id, 'failed', `Collab aborted: ${abortReason}`);
+    // Every other early circling end releases the parent for another try; the
+    // other modes fail it, as their own below-quorum aborts do.
+    if (aborted && session.mode === COLLAB_MODE.CIRCLING_STRATEGY) {
+      await settleCollabParent(session.task_id, 'released', `Circling session aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+    } else if (aborted) {
+      await settleCollabParent(session.task_id, 'failed', `Collab aborted: ${abortReason}`);
+    }
   } else if (session.status === COLLAB_STATUS.ACTIVE && session.mode === COLLAB_MODE.SEQUENTIAL && before?.current_turn === node_id) {
     // The leaver held the turn: removeNode handed it on, so notify the next member
     // or, past the last turn, evaluate the round.

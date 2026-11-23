@@ -371,6 +371,22 @@ describe('round timeout for parallel / review / sequential (mesh-core #9)', () =
     const aborted = ctx.payloads.find(p => p.subject === 'mesh.events.collab.aborted');
     assert.equal(JSON.parse(new TextDecoder().decode(aborted.data)).session.status, COLLAB_STATUS.ABORTED);
   });
+
+  // Every other early end of a circling session releases its parent for another
+  // try; the leave path alone failed it.
+  it('a leave that drops a circling session below min_nodes releases the parent, like the other circling aborts', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await activeSession(ctx.collabStore, { mode: 'circling_strategy', min_nodes: 2, max_nodes: 2 }, ['a', 'b']);
+    const { token, hash } = issueMemberToken();
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.nodes.find(n => n.node_id === 'b').token_hash = hash; return sess; });
+    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', member_token: token, reason: 'gone' }));
+    assert.equal((await ctx.collabStore.get(s.session_id)).status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(ctx.released.map(r => r.id), [s.task_id]);
+    assert.match(ctx.released[0].reason, /^Circling session aborted: too few active nodes \(1 < 2\)$/);
+    assert.deepEqual(ctx.failed, []);
+    assert.ok(ctx.published.includes('mesh.events.released'), 'the bridge hears the release');
+  });
 });
 
 describe('P1 #8 — D11 guard: mock providers are gated, local providers enumerated', () => {
