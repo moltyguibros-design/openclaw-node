@@ -1497,6 +1497,75 @@ test('installer seats the operator\'s provider and never installs a vendor CLI u
   assert.match(llm, /\[e\] use an OpenAI-compatible endpoint/);
 });
 
+// dsh (engines node >=24.9.0) and Kimi Code (>=22.19.0) install on an older Node
+// with only an npm EBADENGINE warning, and the installer ships Node 22: it seated
+// the mind on a CLI whose authors do not support the Node it runs on.
+test('a provider CLI that needs a newer Node is neither installed nor reported seated; the remedy is printed', () => {
+  const comp = moduleSrc['components.sh'];
+  const start = comp.indexOf('    BIN="$(provider_binary "$PROVIDER")"');
+  const end = comp.indexOf('    export OPENCLAW_PROVIDER="$PROVIDER"');
+  assert.ok(start > 0 && end > start, 'the provider step must be found');
+  const block = comp.slice(start, end);
+  const envSh = moduleSrc['env.sh'];
+  const binaryFn = envSh.slice(envSh.indexOf('provider_binary() {'), envSh.indexOf('\n}\n', envSh.indexOf('provider_binary() {')) + 3);
+  const root = tmpDir('oc-provider-floor-');
+  mkdirSync(join(root, 'bin'));
+  const seat = (provider, nodeVersion, { onPath = false } = {}) => {
+    rmSync(join(root, 'npm.log'), { force: true });
+    writeFileSync(join(root, 'bin/node'), `#!/bin/sh\n[ "$1" = -v ] && echo ${nodeVersion}\n`, { mode: 0o755 });
+    writeFileSync(join(root, 'bin/npm'), `#!/bin/sh\necho "$*" >> "${root}/npm.log"\n`, { mode: 0o755 });
+    for (const bin of ['dsh', 'kimi']) rmSync(join(root, 'bin', bin), { force: true });
+    if (onPath) writeFileSync(join(root, 'bin', provider === 'deepseek' ? 'dsh' : provider), '#!/bin/sh\n', { mode: 0o755 });
+    const r = spawnSync('/bin/bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"
+DRY_RUN=false OS=macos PROVIDER=${provider}
+${binaryFn}
+${block}`, 'install.sh'], { encoding: 'utf8', env: { HOME: root, PATH: `${join(root, 'bin')}:/usr/bin:/bin` } });
+    assert.equal(r.status, 0, r.stderr);
+    return { out: r.stdout, npm: existsSync(join(root, 'npm.log')) ? readFileSync(join(root, 'npm.log'), 'utf8') : '' };
+  };
+
+  let { out, npm } = seat('deepseek', 'v22.23.5');
+  assert.equal(npm, '', 'npm installed a CLI the running Node is below the floor of');
+  assert.match(out, /@deepseek-ai\/dsh needs Node >=24\.9\.0, and this node runs v22\.23\.5/);
+  assert.match(out, /DEEPSEEK_PATH/);
+  assert.doesNotMatch(out, /Mind seated/);
+
+  ({ out, npm } = seat('deepseek', 'v22.23.5', { onPath: true }));
+  assert.match(out, /needs Node >=24\.9\.0/);
+  assert.doesNotMatch(out, /Mind seated/, 'a dsh already on PATH still runs on that Node');
+
+  ({ out, npm } = seat('kimi', 'v22.18.1'));
+  assert.equal(npm, '');
+  assert.match(out, /@moonshot-ai\/kimi-code needs Node >=22\.19\.0/);
+  assert.match(out, /KIMI_PATH/);
+  assert.doesNotMatch(out, /Mind seated/);
+
+  ({ out, npm } = seat('deepseek', 'v24.11.0'));
+  assert.equal(npm.trim(), 'install -g @deepseek-ai/dsh');
+  ({ out, npm } = seat('kimi', 'v22.19.0', { onPath: true }));
+  assert.match(out, /Mind seated: kimi \(kimi on PATH\)/);
+  ({ out, npm } = seat('openai', 'v22.12.0'));
+  assert.equal(npm.trim(), 'install -g @openai/codex', 'a CLI with no floor above the installer\'s Node installs as before');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('node_at_least compares the running Node with a MAJOR.MINOR.PATCH floor', () => {
+  const root = tmpDir('oc-node-at-least-');
+  mkdirSync(join(root, 'bin'));
+  const atLeast = (have, want) => {
+    writeFileSync(join(root, 'bin/node'), `#!/bin/sh\necho ${have}\n`, { mode: 0o755 });
+    return spawnSync('/bin/bash', ['-c', `source "${join(ROOT, 'scripts/install/helpers.sh')}"; node_at_least ${want}`], {
+      env: { PATH: `${join(root, 'bin')}:/usr/bin:/bin` },
+    }).status === 0;
+  };
+  for (const [have, want, ok] of [
+    ['v22.11.0', '22.12.0', false], ['v22.12.0', '22.12.0', true], ['v24.8.9', '24.9.0', false],
+    ['v24.9.0', '24.9.0', true], ['v25.0.0', '24.9.0', true], ['v22.19.0', '22.19.0', true],
+    ['v22.18.99', '22.19.0', false], ['v26.0.0-nightly2026', '24.9.0', true], ['', '22.12.0', false],
+  ]) assert.equal(atLeast(have, want), ok, `${have} >= ${want}`);
+  rmSync(root, { recursive: true, force: true });
+});
+
 // Virgin-Mac wave 2 (2026-09-08): the embedder prefetch failed and printed only
 // "prefetch failed", discarding core.mjs's precise cause (403 / offline / disk).
 // A cold embedder then fails MEM-L2-INJECT on the next gate run with no

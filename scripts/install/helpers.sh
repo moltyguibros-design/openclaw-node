@@ -38,6 +38,20 @@ run() {
 }
 DRY_RUN_ERRORS=0
 
+# node_at_least MAJOR.MINOR.PATCH — the node on PATH is that version or newer.
+node_at_least() {
+  local have
+  have="$(node -v 2>/dev/null)"; have="${have#v}"; have="${have%%-*}"
+  case "$have" in ''|*[!0-9.]*) return 1 ;; esac
+  local IFS=.
+  local h=($have) w=($1) i
+  for i in 0 1 2; do
+    [ "${h[i]:-0}" -gt "${w[i]:-0}" ] && return 0
+    [ "${h[i]:-0}" -lt "${w[i]:-0}" ] && return 1
+  done
+  return 0
+}
+
 # Heredoc-safe writer (review P4-3): `write_file "$dest" <<EOF … EOF`. The
 # raw `cat > "$dest" <<EOF` form bypassed run()'s dry-run guard, so
 # --dry-run was rewriting MEMORY.md, active-tasks.md, .env.local and the

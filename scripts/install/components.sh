@@ -300,8 +300,8 @@ else
       echo "    1) claude    (Claude Code CLI)"
       echo "    2) openai    (Codex CLI)"
       echo "    3) gemini    (Gemini CLI)"
-      echo "    4) deepseek  (DeepSeek dsh)"
-      echo "    5) kimi      (Kimi Code CLI)"
+      echo "    4) deepseek  (DeepSeek dsh; needs Node >=24.9.0)"
+      echo "    5) kimi      (Kimi Code CLI; needs Node >=22.19.0)"
       echo "    6) minimax   (minimax-cli)"
       echo "    7) aider"
       echo "    8) ollama    (local model — solo tasks only; grappe workers refuse it, D11)"
@@ -322,29 +322,35 @@ else
 
   if [ -n "$PROVIDER" ]; then
     BIN="$(provider_binary "$PROVIDER")"
-    if command -v "$BIN" >/dev/null 2>&1; then
+    BIN_VAR="$(echo "$PROVIDER" | tr '[:lower:]' '[:upper:]')_PATH"
+    # Install only the CLI the operator chose, only where the package is known.
+    # NODE_FLOOR is the package's published engines.node, above the Node 22 this
+    # installer ships: npm installs past it with only an EBADENGINE warning.
+    NODE_FLOOR=""
+    case "$PROVIDER" in
+      claude) PKG="@anthropic-ai/claude-code" ;;
+      openai) PKG="@openai/codex" ;;
+      gemini) PKG="@google/gemini-cli" ;;
+      deepseek) PKG="@deepseek-ai/dsh" NODE_FLOOR=24.9.0 ;;
+      kimi)   PKG="@moonshot-ai/kimi-code" NODE_FLOOR=22.19.0 ;;
+      *)      PKG="" ;;
+    esac
+    if [ -n "$NODE_FLOOR" ] && ! node_at_least "$NODE_FLOOR"; then
+      warn "$PKG needs Node >=$NODE_FLOOR, and this node runs $(node -v 2>/dev/null || echo 'no node') — the $PROVIDER mind is NOT seated"
+      warn "Upgrade Node to >=$NODE_FLOOR and re-run: bash $0 --update --provider=$PROVIDER"
+      warn "  or point $BIN_VAR at a '$BIN' that runs (one installed under Node >=$NODE_FLOOR)"
+    elif command -v "$BIN" >/dev/null 2>&1; then
       info "Mind seated: $PROVIDER ($BIN on PATH)"
-    else
-      # Install only the CLI the operator chose, only where the package is known.
-      case "$PROVIDER" in
-        claude) PKG="@anthropic-ai/claude-code" ;;
-        openai) PKG="@openai/codex" ;;
-        gemini) PKG="@google/gemini-cli" ;;
-        deepseek) PKG="@deepseek-ai/dsh" ;;
-        kimi)   PKG="@moonshot-ai/kimi-code" ;;
-        *)      PKG="" ;;
-      esac
-      if [ -n "$PKG" ]; then
-        info "Installing the $PROVIDER CLI ($PKG)..."
-        if [ "$OS" = "linux" ]; then
-          run sudo npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
-        else
-          run npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
-        fi
-        command -v "$BIN" >/dev/null 2>&1 && info "Mind seated: $PROVIDER ($BIN)" || warn "'$BIN' still not on PATH"
+    elif [ -n "$PKG" ]; then
+      info "Installing the $PROVIDER CLI ($PKG)..."
+      if [ "$OS" = "linux" ]; then
+        run sudo npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
       else
-        warn "$PROVIDER chosen but the '$BIN' CLI is not on PATH — install it (or set $(echo "$PROVIDER" | tr '[:lower:]' '[:upper:]')_PATH) and re-run: bash $0 --update"
+        run npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
       fi
+      command -v "$BIN" >/dev/null 2>&1 && info "Mind seated: $PROVIDER ($BIN)" || warn "'$BIN' still not on PATH"
+    else
+      warn "$PROVIDER chosen but the '$BIN' CLI is not on PATH — install it (or set $BIN_VAR) and re-run: bash $0 --update"
     fi
     export OPENCLAW_PROVIDER="$PROVIDER"
     export MESH_LLM_PROVIDER="$PROVIDER"
