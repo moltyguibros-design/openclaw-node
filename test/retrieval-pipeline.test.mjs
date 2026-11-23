@@ -420,6 +420,60 @@ describe('themeEntitySearch', () => {
   });
 });
 
+// Channels 4 and 5 hand getChunksForSessions their sessions in rank order and
+// it fills the limit from the first one; an unordered DISTINCT came out in
+// mention insertion order, so a frequently mentioned entity gave its oldest chat.
+describe('channels 4 and 5 rank sessions, not mention insertion order', () => {
+  let extractionDb, knowledgeDb;
+  beforeEach(() => {
+    extractionDb = createExtractionDb();
+    knowledgeDb = createKnowledgeDb();
+    const now = new Date().toISOString();
+    const entity = extractionDb.prepare(`INSERT INTO entities (name, type, first_seen, last_seen) VALUES (?, ?, ?, ?)`);
+    entity.run('NATS', 'technology', now, now);
+    entity.run('SQLite', 'technology', now, now);
+    const mention = extractionDb.prepare(`INSERT INTO mentions (entity_id, session_id, salience, created_at) VALUES (?, ?, ?, ?)`);
+    const chunk = knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (let day = 0; day < 100; day++) {
+      const sid = `sess-${String(day).padStart(3, '0')}`;
+      const at = new Date(Date.UTC(2026, 0, 1) + day * 86400000).toISOString();
+      mention.run(1, sid, 0.5, at);
+      mention.run(2, sid, 0.5, at);
+      for (let t = 0; t < 40; t++) chunk.run(sid, t, 'user', `turn ${t}`, `turn ${t}`);
+    }
+  });
+  afterEach(() => { extractionDb.close(); knowledgeDb.close(); });
+
+  it('channel 4 entity path puts the newest mentioning session first', () => {
+    const results = themeEntitySearch(extractionDb, knowledgeDb, 'tell me about NATS', 30);
+    assert.equal(results[0].session_id, 'sess-099');
+    assert.ok(results.every(r => r.session_id === 'sess-099'), 'the newest session fills the limit first');
+  });
+
+  it('channel 5 puts the newest session of an activated entity first', () => {
+    const graphCache = {
+      queryNeighbors(id) {
+        const edges = [{ source_id: 'concepts/nats', target_id: 'concepts/sqlite', weight: 1 }];
+        return { edges: edges.filter(e => e.source_id === id || e.target_id === id), neighbors: [] };
+      },
+    };
+    const results = activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS', 20);
+    assert.equal(results[0].session_id, 'sess-099');
+  });
+
+  it('channel 4 theme path ranks sessions by their best decision match', () => {
+    const now = new Date().toISOString();
+    extractionDb.prepare(`INSERT INTO themes (label, first_seen, last_seen) VALUES (?, ?, ?)`).run('vault cadence', now, now);
+    const decision = extractionDb.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at) VALUES (?, ?, ?, ?, ?)`);
+    decision.run('weak-match', 'Ship the release notes with a vault cadence aside among many other unrelated words about the deploy pipeline and the review queue', 'misc', 0.5, now);
+    decision.run('strong-match', 'Vault cadence', 'vault cadence', 0.5, now);
+    const chunk = knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (const sid of ['weak-match', 'strong-match']) chunk.run(sid, 0, 'user', sid, sid);
+    const results = themeEntitySearch(extractionDb, knowledgeDb, 'what was the vault cadence', 10);
+    assert.deepEqual(results.map(r => r.session_id), ['strong-match', 'weak-match']);
+  });
+});
+
 describe('toFtsQuery', () => {
   it('quotes terms and ORs them, dropping sub-2-char terms and stopwords', () => {
     assert.equal(toFtsQuery('use NATS for x federation'), '"use" OR "NATS" OR "federation"');
