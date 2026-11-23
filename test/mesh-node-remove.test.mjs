@@ -15,6 +15,11 @@ const Module = require('module');
 const fs = require('fs');
 const record = (entry) => fs.appendFileSync(process.env.FAKE_NATS_LOG, JSON.stringify(entry) + '\\n');
 const empty = () => (async function* () {})();
+// A JetStream delete leaves a DEL tombstone: a truthy entry whose value is an empty Uint8Array.
+const nodeEntry = {
+  tombstone: { operation: 'DEL', value: new Uint8Array(0) },
+  live: { operation: 'PUT', value: Buffer.from('{}') },
+}[process.env.FAKE_NODE_ENTRY] ?? null;
 const fakeNats = {
   StringCodec: () => ({ encode: (s) => Buffer.from(s), decode: (b) => Buffer.from(b).toString() }),
   connect: async () => ({
@@ -23,7 +28,7 @@ const fakeNats = {
     drain: async () => {},
     jetstream: () => ({ views: { kv: async (bucket) => ({
       keys: async () => empty(),
-      get: async (key) => { record({ bucket, op: 'get', key }); return null; },
+      get: async (key) => { record({ bucket, op: 'get', key }); return bucket === 'MESH_NODES' ? nodeEntry : null; },
       delete: async (key) => { record({ bucket, op: 'delete', key }); },
     }) } }),
   }),
@@ -32,7 +37,7 @@ const realLoad = Module._load;
 Module._load = function (request, ...rest) { return request === 'nats' ? fakeNats : realLoad.call(this, request, ...rest); };
 `;
 
-function runRemote(nodeArg) {
+function runRemote(nodeArg, nodeEntry = '') {
   const home = mkdtempSync(join(tmpdir(), 'mesh-node-remove-'));
   try {
     const preload = join(home, 'fake-nats.cjs');
@@ -40,7 +45,7 @@ function runRemote(nodeArg) {
     writeFileSync(preload, PRELOAD);
     const r = spawnSync(process.execPath, [SCRIPT, '--node', nodeArg, '--force'], {
       encoding: 'utf8', timeout: 30000,
-      env: { ...process.env, HOME: home, OPENCLAW_NODE_ID: 'lead-x', NODE_OPTIONS: `--require ${preload}`, FAKE_NATS_LOG: calls },
+      env: { ...process.env, HOME: home, OPENCLAW_NODE_ID: 'lead-x', NODE_OPTIONS: `--require ${preload}`, FAKE_NATS_LOG: calls, FAKE_NODE_ENTRY: nodeEntry },
     });
     const log = existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
     return { ...r, log };
@@ -58,6 +63,21 @@ describe('mesh-node-remove --node', () => {
     assert.deepEqual(nodes, [{ bucket: 'MESH_NODES', op: 'get', key: 'calos-vmware-virtual-platform' }]);
     assert.match(r.stdout, /No MESH_NODES entry for calos-vmware-virtual-platform/);
     assert.doesNotMatch(r.stdout, /Removed \S+ from MESH_NODES/);
+  });
+
+  it('treats a delete tombstone left by an earlier removal as no entry', () => {
+    const r = runRemote('ghost-node', 'tombstone');
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.log.filter((c) => c.bucket === 'MESH_NODES'), [{ bucket: 'MESH_NODES', op: 'get', key: 'ghost-node' }]);
+    assert.match(r.stdout, /No MESH_NODES entry for ghost-node/);
+    assert.doesNotMatch(r.stdout, /Removed \S+ from MESH_NODES/);
+  });
+
+  it('deletes a live registry entry and reports it', () => {
+    const r = runRemote('ghost-node', 'live');
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.log.filter((c) => c.bucket === 'MESH_NODES').map((c) => c.op), ['get', 'delete']);
+    assert.match(r.stdout, /Removed ghost-node from MESH_NODES registry/);
   });
 });
 

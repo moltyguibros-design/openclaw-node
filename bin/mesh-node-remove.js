@@ -128,7 +128,7 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
     try {
       const nodeKv = await openMeshKv(js, 'MESH_NODES', {}, { waitMs: 0 });
       const existing = await nodeKv.get(nodeId);
-      if (existing && existing.value) {
+      if (existing?.value?.length) {
         await nodeKv.delete(nodeId);
         ok(`Removed ${nodeId} from MESH_NODES registry`);
       } else {
