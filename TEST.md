@@ -179,4 +179,4 @@ These modules have no direct unit tests, or only for the functions named. Integr
 |--------|--------|
 | `mission-control/.../memory/entities.ts` | NLP-like entity extraction (only `extractEntitiesFromFact` is unit-tested) |
 | `mission-control/.../memory/extract.ts` | Heuristic-based fact extraction (only `storeExtractedFacts`, `getActiveItems`, `getItemsWithSource`, `searchItems`, `getExtractionStats` are unit-tested) |
-| `mission-control/.../hooks.ts` | Lifecycle hooks (only `addClusterMember`, `createCluster`, `createDependency`, `createMeshTask`, `createProject`, `createTask`, `deleteCluster`, `deleteTask`, `dispatchCollabTask`, `fetcher`, `interveneSession`, `memoryContentKey`, `removeClusterMember`, `updateClusterMember`, `updateMeshTask`, `updateTask` are unit-tested) |
+| `mission-control/.../hooks.ts` | Lifecycle hooks (only `addClusterMember`, `createCluster`, `createDependency`, `createMeshTask`, `createProject`, `createTask`, `deleteCluster`, `deleteTask`, `dispatchCollabTask`, `fetcher`, `interveneSession`, `memoryContentKey`, `removeClusterMember`, `updateMeshTask`, `updateTask` are unit-tested) |
