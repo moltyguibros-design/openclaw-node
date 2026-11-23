@@ -86,6 +86,27 @@ describe('scrubSecrets', () => {
     const text = 'sk-folding-cube and task-' + 'abcdefghijklmnopqrstuvwxyz';
     assert.equal(scrubSecrets(text), text);
   });
+
+  it('redacts a key glued after - or _, and a token run from its first sk-', () => {
+    const k = 'sk-' + 'proj-' + 'Ab1'.repeat(14);
+    assert.equal(scrubSecrets(`id-${k} x_${k}`), 'id-[REDACTED] x_[REDACTED]');
+    assert.equal(scrubSecrets(`a sk-short-${k} b`), 'a [REDACTED] b');
+    assert.equal(scrubSecrets(`sk-short and x ${k}`), 'sk-short and x [REDACTED]');
+  });
+
+  // Each `sk-` in one long token run used to rescan the rest of the run: seconds at 100 KB.
+  for (const [shape, text] of [
+    ['-sk- tokens', ('-sk-' + 'a'.repeat(19)).repeat(5000)],
+    ['bare sk- repeats', 'sk-'.repeat(35000)],
+  ]) {
+    it(`scrubs a 100 KB run of ${shape} in linear time`, () => {
+      const t0 = performance.now();
+      const out = scrubSecrets(text);
+      const ms = performance.now() - t0;
+      assert.equal(out, text);
+      assert.ok(ms < 250, `scrubSecrets took ${ms.toFixed(0)} ms`);
+    });
+  }
 });
 
 describe('logInjection', () => {

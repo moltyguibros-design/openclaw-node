@@ -309,6 +309,17 @@ describe('preCommitSecretScan', () => {
     assert.strictEqual(preCommitSecretScan(dir).blocked, true);
   });
 
+  it('scans a 100 KB line of -sk- tokens without stalling the agent', (t) => {
+    const line = ('-sk-' + 'a'.repeat(19)).repeat(5000);
+    const { dir } = repoWith({ 'gen.js': `${line}\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const t0 = performance.now();
+    const result = preCommitSecretScan(dir);
+    const ms = performance.now() - t0;
+    assert.strictEqual(result.blocked, false);
+    assert.ok(ms < 1500, `preCommitSecretScan took ${ms.toFixed(0)} ms`);
+  });
+
   it('passes a clean change', (t) => {
     const { dir } = repoWith({ 'notes.md': 'nothing sensitive here\n' });
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
