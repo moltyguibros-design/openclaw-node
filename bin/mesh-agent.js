@@ -541,6 +541,24 @@ const { info: log, warn, error: logError, debug } = _logger;
 
 const FOREMAN_ENABLED = process.env.MESH_FOREMAN !== '0';
 
+// One timeline per task, never rotated: startup drops those past the retention
+// window (0 keeps them all), as reconcileKeptBranches ages out kept branches.
+async function pruneForemanTimelines(now = Date.now()) {
+  const { foremanConfigFromEnv } = await import('../lib/foreman/index.mjs');
+  const { dir, retention_days: days } = foremanConfigFromEnv(process.env);
+  if (!dir || !(days > 0) || !fs.existsSync(dir)) return;
+  const cutoff = now - days * 86400000;
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.jsonl')) continue;
+    const file = path.join(dir, name);
+    if (fs.statSync(file).mtimeMs >= cutoff) continue;
+    fs.unlinkSync(file);
+    removed += 1;
+  }
+  if (removed) log(`FOREMAN: pruned ${removed} timeline(s) older than ${days}d from ${dir}`);
+}
+
 async function createTaskSupervisor(task, worktreePath) {
   if (!FOREMAN_ENABLED) return null;
   try {
@@ -2949,6 +2967,7 @@ async function main() {
   const stopSubs = listenForStops();
   log(`  Listening: mesh.agent.${NODE_ID}.${STOP_NOTICES.join(' / .')}`);
   await reconcileKeptBranches();
+  await pruneForemanTimelines().catch((err) => warn(`FOREMAN: timeline pruning failed: ${err.message}`));
 
   // Subscribe to collab recruit broadcasts — allows this node to join
   // collab sessions without being the claiming node
@@ -3026,5 +3045,6 @@ module.exports.__test = {
   agentConnectOptions, connectToBus, drainBus,
   dryRun,
   taskStartError,
+  pruneForemanTimelines,
 };
 // deploy-v7f0130b
