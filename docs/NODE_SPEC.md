@@ -142,7 +142,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 **Optional human steps (feature unlocks, not core):**
 - Agent brain: `install.sh --provider=NAME` (claude · openai · gemini · deepseek · kimi · minimax · aider · ollama), then sign in to that CLI once. The installer asks when no provider is chosen and never installs a vendor CLI unasked.
 - Gateway surface: `npm i -g openclaw`, add auth profile to `~/.openclaw/openclaw.json`, flip `openclaw-gateway` autostart. The unit runs `$(npm root -g)/openclaw/dist/index.js` as resolved when `install.sh` rendered it; re-run `install.sh --update` after changing your Node install.
-- Discord tool: put `DISCORD_BOT_TOKEN` in the env, flip `openclaw-mesh-tool-discord`.
+- Discord tool (lead only): it reads `~/.openclaw/openclaw.json`, not the env. Put the bot token in `channels.discord.token` there (on a first install, `DISCORD_BOT_TOKEN` in `openclaw.env` fills it; `install.sh --update` never rewrites an existing `openclaw.json`, it renders `openclaw.json.new` beside it for a manual merge) and set `channels.discord.enabled` to `true`: while it is `false`, as shipped, the tool exits at start and logs only "Discord integration is disabled; inactive." That switch also turns on the gateway's own Discord channel, whose `allowFrom` and `guilds` ship empty. Then enable the unit: `systemctl --user enable --now openclaw-mesh-tool-discord` (Linux) or `launchctl load -w ~/Library/LaunchAgents/ai.openclaw.mesh-tool-discord.plist` (macOS).
 - MC voice (TTS): `GOOGLE_API_KEY` in env.
 - Multi-machine: Tailscale (install.sh / bootstrap.sh install it with `--cluster-peers=…` or `--with-tailscale`) + `docs/MULTI_NODE_DEPLOY.md`.
 

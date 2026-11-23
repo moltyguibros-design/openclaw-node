@@ -112,6 +112,21 @@ test('README names the obsidian-sync.json path the installer writes and the read
   assert.doesNotMatch(readme, /workspace\/config\/obsidian-sync\.json/);
 });
 
+// NODE_SPEC said "put DISCORD_BOT_TOKEN in the env, flip the unit"; the tool reads its token from
+// openclaw.json and exits quietly while channels.discord.enabled is false, which is how it ships.
+test('NODE_SPEC Discord tool steps name the token and switch the tool reads', () => {
+  const tool = read('bin/mesh-tool-discord.js');
+  assert.match(tool, /const CONFIG_PATH = path\.join\(process\.env\.HOME, '\.openclaw', 'openclaw\.json'\);/);
+  assert.match(tool, /config\.channels\?\.discord\?\.enabled === false/);
+  assert.match(tool, /config\.channels\?\.discord\?\.token/);
+  assert.match(read('config/openclaw.json.template'), /"discord": \{\n\s+"enabled": false,\n\s+"token": "\$\{DISCORD_BOT_TOKEN\}"/);
+  const step = read('docs/NODE_SPEC.md').split('\n').find((l) => l.startsWith('- Discord tool'));
+  for (const s of ['openclaw.json', 'channels.discord.token', 'channels.discord.enabled', '`true`', 'allowFrom',
+    'systemctl --user enable --now openclaw-mesh-tool-discord', 'ai.openclaw.mesh-tool-discord.plist']) {
+    assert.ok(step.includes(s), `NODE_SPEC Discord tool step omits ${s}`);
+  }
+});
+
 test('NODE_SPEC and NODE_ACCEPTANCE match the service manifest, the probe axes and the MC build', () => {
   const nodeSpec = read('docs/NODE_SPEC.md');
   const topology = section(nodeSpec, '## §5 Service topology (what runs, what it needs)').text;
