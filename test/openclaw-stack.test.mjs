@@ -6,6 +6,7 @@ import os from 'node:os';
 import net from 'node:net';
 import {
   scanLaunchdUnits, scanSystemdUnits, probePort, classify, shortId, PORTS, PERIODIC,
+  selectUnitsToStart, readNatsCohort, summarize,
 } from '../bin/openclaw-stack.mjs';
 
 let tmp;
@@ -75,5 +76,53 @@ describe('classify — the honesty rules', () => {
     for (const id of [...Object.keys(PORTS), ...PERIODIC]) {
       assert.equal(id, shortId(`ai.openclaw.${id}.plist`));
     }
+  });
+});
+
+describe('selectUnitsToStart — up starts what the installer starts', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../services/service-manifest.json', import.meta.url), 'utf8'));
+  const installed = [
+    'nats', 'nats-1', 'nats-2', 'nats-3', 'gateway', 'mesh-agent', 'mesh-tool-discord',
+    'memory-daemon', 'mission-control', 'node-watch', 'observer',
+  ];
+  const leftOff = new Set(['gateway', 'mesh-agent', 'mesh-tool-discord', 'nats-1', 'nats-2', 'nats-3']);
+  const macUnits = () => {
+    for (const id of installed) fs.writeFileSync(path.join(tmp, `ai.openclaw.${id}.plist`), 'x');
+    return scanLaunchdUnits(tmp);
+  };
+  const linuxUnits = () => scanSystemdUnits(() => installed.flatMap((id) => (id === 'observer'
+    ? ['openclaw-observer.service static', 'openclaw-observer.timer enabled']
+    : [`openclaw-${id}.service ${leftOff.has(id) ? 'disabled' : 'enabled'}`])).join('\n'));
+  const ids = (units) => [...new Set(units.map((u) => u.id))].sort();
+
+  for (const [platform, scan] of [['darwin', macUnits], ['linux', linuxUnits]]) {
+    it(`${platform}: autostart:true units plus the single bus when no cohort is declared`, () => {
+      assert.deepEqual(ids(selectUnitsToStart(scan(), manifest, null)),
+        ['memory-daemon', 'mission-control', 'nats', 'node-watch', 'observer']);
+    });
+    it(`${platform}: a three-copy cohort starts nats-1..3 and not the single bus`, () => {
+      const cohort = ['ai.openclaw.nats-1', 'ai.openclaw.nats-2', 'ai.openclaw.nats-3'];
+      assert.deepEqual(ids(selectUnitsToStart(scan(), manifest, cohort)),
+        ['memory-daemon', 'mission-control', 'nats-1', 'nats-2', 'nats-3', 'node-watch', 'observer']);
+    });
+  }
+
+  it('readNatsCohort returns the declared labels, or null when the file is absent', () => {
+    assert.equal(readNatsCohort(tmp), null);
+    fs.mkdirSync(path.join(tmp, 'config'));
+    fs.writeFileSync(path.join(tmp, 'config', 'nats-writer-cohort.json'),
+      JSON.stringify({ schema: 1, activeLabels: ['ai.openclaw.nats'] }));
+    assert.deepEqual(readNatsCohort(tmp), ['ai.openclaw.nats']);
+  });
+
+  it('summarize does not list units left off on purpose as not running', () => {
+    const rows = [
+      { id: 'nats', status: 'LIVE' },
+      { id: 'memory-daemon', status: 'OFF' },
+      { id: 'gateway', status: 'OFF', manual: true },
+      { id: 'nats-1', status: 'OFF', manual: true },
+      { id: 'mesh-agent', status: 'LIVE', manual: true },
+    ];
+    assert.deepEqual(summarize(rows), { live: 2, total: 3, bad: ['memory-daemon'] });
   });
 });

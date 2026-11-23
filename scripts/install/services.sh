@@ -244,7 +244,7 @@ info "Smoke test: node $REPO_DIR/bin/openclaw-notify.mjs --test"
 info "Ledger (every event, clicked or not): ~/.openclaw/notifications/ledger.jsonl · UI: Mission Control /notifications"
 
 # One-click stack launcher: a claw-icon app/desktop entry that runs
-# `openclaw-stack up` (starts every installed unit + companion-bridge, probes,
+# `openclaw-stack up` (starts the autostart units + companion-bridge, probes,
 # reports via ledgered notification).
 if $SANDBOX; then
   : # sandbox — no launcher build
