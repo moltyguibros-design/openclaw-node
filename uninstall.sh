@@ -69,6 +69,7 @@ fi
 
 # Stop and remove services
 OS="$(uname -s)"
+LEGACY=()
 if [ "$OS" = "Linux" ]; then
   # --- Current services: openclaw-*.service under user systemd ---
   SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
@@ -84,14 +85,8 @@ if [ "$OS" = "Linux" ]; then
     done
     systemctl --user daemon-reload 2>/dev/null || true
   fi
-  # --- Legacy fallback: old system-level openclaw-agent ---
-  if systemctl is-active --quiet openclaw-agent 2>/dev/null; then
-    info "Stopping legacy mesh agent (openclaw-agent)..."
-    sudo systemctl stop openclaw-agent 2>/dev/null || true
-    sudo systemctl disable openclaw-agent 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/openclaw-agent.service
-    sudo systemctl daemon-reload 2>/dev/null || true
-    info "Legacy mesh agent service removed"
+  if systemctl is-active --quiet openclaw-agent 2>/dev/null || [ -e /etc/systemd/system/openclaw-agent.service ]; then
+    LEGACY+=("system service openclaw-agent (/etc/systemd/system/openclaw-agent.service)")
   fi
 elif [ "$OS" = "Darwin" ]; then
   # --- Current services: ai.openclaw.*.plist under ~/Library/LaunchAgents ---
@@ -106,21 +101,25 @@ elif [ "$OS" = "Darwin" ]; then
       info "Removed $PLIST_NAME"
     done
   fi
-  # --- Legacy fallback: old system-level com.openclaw.agent ---
-  LEGACY_PLIST="/Library/LaunchDaemons/com.openclaw.agent.plist"
-  if [ -f "$LEGACY_PLIST" ]; then
-    info "Stopping legacy mesh agent (com.openclaw.agent)..."
-    sudo launchctl unload "$LEGACY_PLIST" 2>/dev/null || true
-    sudo rm -f "$LEGACY_PLIST"
-    info "Legacy mesh agent LaunchDaemon removed"
+  if [ -e /Library/LaunchDaemons/com.openclaw.agent.plist ]; then
+    LEGACY+=("LaunchDaemon com.openclaw.agent (/Library/LaunchDaemons/com.openclaw.agent.plist)")
   fi
 fi
-# Remove mesh symlinks
 for cmd in mesh mesh-health mesh-repair; do
-  [ -L "/usr/local/bin/$cmd" ] && sudo rm -f "/usr/local/bin/$cmd" && info "Removed /usr/local/bin/$cmd"
+  if [ -L "/usr/local/bin/$cmd" ]; then
+    LEGACY+=("symlink /usr/local/bin/$cmd -> $(readlink "/usr/local/bin/$cmd")")
+  fi
 done
-# Remove mesh sudoers
-[ -f "/etc/sudoers.d/openclaw-mesh" ] && sudo rm -f "/etc/sudoers.d/openclaw-mesh" && info "Removed mesh sudoers rules"
+if [ -e /etc/sudoers.d/openclaw-mesh ]; then
+  LEGACY+=("sudoers fragment /etc/sudoers.d/openclaw-mesh")
+fi
+# The retired openclaw-mesh setup.sh created these as root; the runbook retires them with
+# the checks (target, visudo, open root shell) a blind removal would skip.
+if [ "${#LEGACY[@]}" -gt 0 ]; then
+  warn "Legacy openclaw-mesh leftovers found, left in place:"
+  for item in "${LEGACY[@]}"; do echo "    $item"; done
+  warn "Retire them by hand: $REPO_DIR/memory-plan/plans/node-state-recovery/audits/step12_jetstream/LEGACY_AGENT_RETIREMENT_RUNBOOK.md"
+fi
 
 # The stack launchers live outside $OPENCLAW_ROOT, so --purge does not reach them either.
 rm -rf "$HOME/Applications/OpenClaw Stack.app"

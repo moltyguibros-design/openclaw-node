@@ -198,3 +198,56 @@ test('uninstall removes the workspace skills dir when only repo-shipped skills w
     rmSync(fx.home, { recursive: true, force: true });
   }
 });
+
+// Leftovers of the retired openclaw-mesh setup are reported, never removed: the
+// legacy-agent runbook retires them with checks a blind sudo rm skips.
+function logTool({ stub }, name, body = 'exit 0') {
+  writeFileSync(join(stub, name), `#!/bin/sh\necho "$*" >> "$HOME/${name}.log"\n${body}\n`);
+  chmodSync(join(stub, name), 0o755);
+}
+const logOf = (home, name) => (existsSync(join(home, `${name}.log`)) ? readFileSync(join(home, `${name}.log`), 'utf8') : '');
+
+test('uninstall.sh never runs sudo and removes no system path', () => {
+  const src = readFileSync(UNINSTALL_SH, 'utf8');
+  assert.doesNotMatch(src, /\bsudo\s/);
+  assert.doesNotMatch(src, /rm -[rf]+ "?\/(etc|usr|Library)\//);
+});
+
+test('uninstall on Linux reports an active legacy openclaw-agent and leaves it running', linuxOnly, () => {
+  const fx = fixture();
+  try {
+    logTool(fx, 'sudo');
+    logTool(fx, 'systemctl');
+    const unit = putUnit(fx);
+    const r = runUninstall(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(unit), false);
+    assert.match(r.stdout, /Legacy openclaw-mesh leftovers found, left in place/);
+    assert.match(r.stdout, /system service openclaw-agent/);
+    assert.match(r.stdout, /LEGACY_AGENT_RETIREMENT_RUNBOOK\.md/);
+    assert.equal(logOf(fx.home, 'sudo'), '');
+    for (const line of logOf(fx.home, 'systemctl').split('\n').filter(Boolean)) {
+      assert.ok(line.startsWith('--user ') || line.startsWith('is-active '), line);
+    }
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+
+test('uninstall on macOS unloads the user LaunchAgents without sudo', linuxOnly, () => {
+  const fx = fixture();
+  try {
+    logTool(fx, 'sudo');
+    logTool(fx, 'launchctl');
+    logTool(fx, 'uname', 'echo Darwin');
+    putFiles(fx.home, 'Library/LaunchAgents', ['ai.openclaw.memory-daemon.plist']);
+    const r = runUninstall(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(join(fx.home, 'Library/LaunchAgents/ai.openclaw.memory-daemon.plist')), false);
+    assert.match(logOf(fx.home, 'launchctl'), /^unload .*ai\.openclaw\.memory-daemon\.plist$/m);
+    assert.equal(logOf(fx.home, 'sudo'), '');
+    assert.doesNotMatch(r.stdout, /Legacy openclaw-mesh leftovers/);
+  } finally {
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
