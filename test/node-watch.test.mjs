@@ -513,7 +513,7 @@ describe('node-watch disabled Discord lifecycle', () => {
     assert.equal(gradeMeshServices([{ ...discord, loaded: false }], { discordEnabled: false }).status, STATUS.OFF);
   });
 
-  it('Darwin target reads the loaded Discord HOME and preserves failure priority', { skip: process.platform !== 'darwin' }, async () => {
+  it('Darwin mesh probe reads the loaded Discord HOME and preserves failure priority', async () => {
     const observedHome = '/tmp/discord-loaded-home';
     const samples = [
       { name: 'false', body: '{"channels":{"discord":{"enabled":false}}}', status: STATUS.WORKING },
@@ -545,7 +545,7 @@ describe('node-watch disabled Discord lifecycle', () => {
           return { code: 0, stderr: '', stdout: `state = ${stopped ? 'not running' : 'running'}\n${stopped ? '' : 'pid = 42\n'}last exit code = ${isDiscord ? s.exit ?? 0 : 1}\n${isDiscord && s.noHome ? '' : `HOME => ${observedHome}\n`}` };
         },
       });
-      const r = await target('net.mesh').run(envFor(ctx));
+      const r = await probeMeshServices(ctx, { platform: 'darwin' });
       assert.equal(r.status, s.status, s.name);
       assert.equal(reads.length, s.noHome ? 0 : 1, s.name);
     }
