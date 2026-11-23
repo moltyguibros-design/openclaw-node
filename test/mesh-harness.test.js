@@ -287,8 +287,19 @@ describe('preCommitSecretScan', () => {
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const result = preCommitSecretScan(dir);
     assert.strictEqual(result.blocked, true);
-    assert.ok(result.findings.some(f => f.includes('password')));
+    assert.deepStrictEqual(result.findings, ['regex: password in config.js']);
+    assert.ok(!result.findings.some(f => f.includes('hunter2')));
     assert.strictEqual(git('diff', '--cached', '--name-only').toString(), '');
+  });
+
+  it('reports a key by pattern and file without copying the key', (t) => {
+    const key = 'sk-' + 'Ab1'.repeat(15);
+    const { dir } = repoWith({ 'k.js': `const k = "${key}";\n` });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const result = preCommitSecretScan(dir);
+    assert.strictEqual(result.blocked, true);
+    assert.deepStrictEqual(result.findings, ['regex: provider-key in k.js']);
+    assert.ok(!result.findings.some(f => f.includes(key)));
   });
 
   it('blocks an Anthropic-style key the regex fallback used to miss', (t) => {
