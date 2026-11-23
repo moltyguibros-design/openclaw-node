@@ -341,18 +341,12 @@ const MANIFEST = [
     targets: [DIRS.MC_PROJECT],
     servicesMac: ['ai.openclaw.mission-control'],
     servicesLinux: ['openclaw-mission-control'],
-    postInstall: (changedFiles) => {
-      if (changedFiles.some(f => /(^|\/)package(-lock)?\.json$/.test(f))) {
-        info('Running npm install for Mission Control...');
-        exec('npm install', { cwd: DIRS.MC_PROJECT, timeout: 300000 });
-        ok('npm install complete');
-      }
-      // The service runs `next start`, which serves the prebuilt .next — a
-      // restart without a rebuild keeps serving the old UI.
-      info('Building Mission Control (next build)...');
-      exec('npm run build', { cwd: DIRS.MC_PROJECT, timeout: 900000 });
-      ok('Mission Control built');
-    },
+    // The service runs `next start`, which serves the prebuilt .next — a restart
+    // without a rebuild keeps serving the old UI. install.sh's own steps: npm@10 ci
+    // and the better-sqlite3 rebuild under this deploy's node when the lockfile or
+    // node changed, and a build that puts the previous one back when it fails.
+    postInstall: (changedFiles, changes, { repoDir }) =>
+      runRepoScript(repoDir, 'scripts/install/mc-build.sh', [DIRS.MC_PROJECT, NODE_BIN_DIR], 1200000),
     validate: () => {
       const dbPath = path.join(DIRS.MC_PROJECT, 'data', 'mission-control.db');
       return fs.existsSync(dbPath);

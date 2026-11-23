@@ -40,9 +40,22 @@ const RT = {
   state: path.join(HOME, '.openclaw', '.deploy-state.json'),
 };
 
+// The preload makes os.platform() answer DEPLOY_TEST_PLATFORM, so the launchd
+// and the systemd restart paths both run on any host, and puts the deploy's
+// node in a dir of its own, as NODE_BIN is: the dir a deploy runs npm under,
+// which here holds no npm, so the stubs below answer instead of the real one.
+const PRELOAD = path.join(ROOT, 'platform.cjs');
+fs.writeFileSync(PRELOAD, "if (process.env.DEPLOY_TEST_PLATFORM) require('os').platform = () => process.env.DEPLOY_TEST_PLATFORM;\n" +
+  "if (process.env.DEPLOY_TEST_EXECPATH) process.execPath = process.env.DEPLOY_TEST_EXECPATH;\n");
+const NODEBIN = path.join(ROOT, 'nodebin');
+fs.mkdirSync(NODEBIN);
+fs.symlinkSync(process.execPath, path.join(NODEBIN, 'node'));
+
 // Before the listener loads: it reads REPO_DIR/HOME/role at require time and
 // hands this environment to the deploy script it spawns.
 Object.assign(process.env, {
+  NODE_OPTIONS: `--require ${PRELOAD}`,
+  DEPLOY_TEST_EXECPATH: path.join(NODEBIN, 'node'),
   HOME,
   OPENCLAW_REPO_DIR: NODE,
   OPENCLAW_NODE_ROLE: 'lead',
@@ -96,9 +109,12 @@ stub('npm', `case "$*" in
   "view openclaw version") echo "\${DEPLOY_TEST_NPM_OPENCLAW:-9.9.9}" ;;
   "prefix -g") echo "$DEPLOY_TEST_NPM_PREFIX" ;;
   "ci --omit=dev") echo "npm-path0 \${PATH%%:*}" >> "$DEPLOY_TEST_CALLS"; rm -rf node_modules; mkdir -p node_modules/nats ;;
+  "rebuild better-sqlite3") echo "npm-path0 \${PATH%%:*}" >> "$DEPLOY_TEST_CALLS" ;;
+  "run build") mkdir -p .next; echo partial > .next/BUILD_ID; [ -n "\${DEPLOY_TEST_BUILD_FAIL:-}" ] && exit 1; echo built > .next/BUILD_ID ;;
 esac`);
 stub('npx', `case "$*" in
   *" tsc -p packages/event-schemas/tsconfig.json") mkdir -p packages/event-schemas/dist; echo "built $(cat packages/event-schemas/src/events.ts)" > packages/event-schemas/dist/index.js ;;
+  "-y npm@10 ci") rm -rf node_modules; mkdir -p node_modules ;;
 esac`);
 // The banner the published CLI prints for --version.
 stub('openclaw', 'echo "OpenClaw ${DEPLOY_TEST_OPENCLAW:-1.0.0} (abcdef1)"');
@@ -111,7 +127,7 @@ if (IS_MAC) {
 
 // What a node's clone needs to run bin/mesh-deploy.js.
 const DEPLOY_SCRIPT_FILES = ['bin/mesh-deploy.js', 'lib/mesh-roles.js', 'lib/tracer.js', 'lib/obs-db.js', 'lib/node-id.js', 'lib/node-aliases.js',
-  'scripts/install/retired-files.txt'];
+  'scripts/install/retired-files.txt', 'scripts/install/mc-build.sh', 'scripts/install/deps.sh', 'scripts/install/helpers.sh'];
 git(ROOT, 'init', '-q', '--bare', '-b', 'main', ORIGIN);
 git(ROOT, 'init', '-q', '-b', 'main', SEED);
 git(SEED, 'remote', 'add', 'origin', ORIGIN);
@@ -156,6 +172,12 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
     }
     assert.equal(read(path.join(RT.bin, 'mesh-agent.js')), '// agent v0\n');
     assert.equal(read(path.join(RT.skills, 'retired', 'SKILL.md')), '# retired in v1\n');
+    // Mission Control as install.sh builds it: npm@10 ci and the native rebuild under the deploy's node.
+    for (const call of ['npx -y npm@10 ci', 'npm rebuild better-sqlite3', 'npm run build']) {
+      assert.ok(calls().includes(`${call} @ ${RT.mc}`), `${call}:\n${calls()}`);
+    }
+    assert.ok(calls().includes(`npm-path0 ${NODEBIN}`), calls());
+    assert.equal(read(path.join(RT.mc, '.next', 'BUILD_ID')), 'built\n');
     assert.equal(state().deployedSha, S0);
     assert.equal(state().lastSha, null, 'a same-sha reinstall is not a version to roll back to');
   });
@@ -183,6 +205,7 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
     assert.ok(!fs.existsSync(path.join(RT.skills, 'retired')), 'deleted skill removed and its empty dir pruned');
     assert.equal(read(path.join(RT.mc, 'src', 'app', 'page.tsx')), "export default () => 'v1';\n");
     assert.ok(calls().includes(`npm run build @ ${RT.mc}`), calls());
+    assert.ok(!calls().includes('npm@10 ci'), 'a source-only change keeps node_modules');
     assert.ok(calls().includes(restartOf('mesh-agent')), calls());
     assert.ok(calls().includes(restartOf('mission-control')), calls());
 
@@ -285,16 +308,7 @@ describe('pinned-sha deploy through the listener (bare origin + node clone)', ()
 // ── Independent nodes, bin/mesh-deploy.js run directly ──────────────────────
 // Each case below gets its own origin, clone and runtime HOME, and runs the
 // clone's deploy script as the listener does (`--local --to <sha>`) or as
-// `mesh deploy` does on the node itself (`--local`). The preload makes
-// os.platform() answer DEPLOY_TEST_PLATFORM, so the launchd and the systemd
-// restart paths both run on any host.
-const PRELOAD = path.join(ROOT, 'platform.cjs');
-write(ROOT, 'platform.cjs', "if (process.env.DEPLOY_TEST_PLATFORM) require('os').platform = () => process.env.DEPLOY_TEST_PLATFORM;\n" +
-  "if (process.env.DEPLOY_TEST_EXECPATH) process.execPath = process.env.DEPLOY_TEST_EXECPATH;\n");
-// A node binary in a dir of its own, as NODE_BIN is: what a deploy runs npm under.
-const NODEBIN = path.join(ROOT, 'nodebin');
-fs.mkdirSync(NODEBIN);
-fs.symlinkSync(process.execPath, path.join(NODEBIN, 'node'));
+// `mesh deploy` does on the node itself (`--local`).
 
 function makeNode(name, files) {
   const dir = path.join(ROOT, name);
@@ -966,7 +980,7 @@ describe('a deploy updates the workspace runtime the memory daemon and node-watc
 describe('a dependency or event-schemas change refreshes the node\'s dependencies (the deps component)', () => {
   const UNITS = 'openclaw-mesh-agent openclaw-memory-daemon openclaw-node-watch openclaw-mesh-deploy-listener';
   let fx, S1;
-  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS, DEPLOY_TEST_EXECPATH: path.join(NODEBIN, 'node') };
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: UNITS };
   before(() => {
     fx = makeNode('deps', {
       'bin/mesh-agent.js': '// agent v0\n',
@@ -974,8 +988,6 @@ describe('a dependency or event-schemas change refreshes the node\'s dependencie
       'package-lock.json': '{"lockfileVersion":3,"v":0}\n',
       'packages/event-schemas/tsconfig.json': '{}\n',
       'packages/event-schemas/src/events.ts': 'v0',
-      'scripts/install/deps.sh': fs.readFileSync(path.join(REPO, 'scripts/install/deps.sh')),
-      'scripts/install/helpers.sh': fs.readFileSync(path.join(REPO, 'scripts/install/helpers.sh')),
     });
     write(fx.node, 'node_modules/nats/package.json', '{}\n');
   });
@@ -1006,5 +1018,26 @@ describe('a dependency or event-schemas change refreshes the node\'s dependencie
     assert.equal(read(path.join(fx.node, 'packages/event-schemas/dist/index.js')), 'built v2\n');
     assert.equal(read(fx.rt('.openclaw/workspace/packages/event-schemas/dist/index.js')), 'built v2\n');
     assert.equal(git(fx.node, 'status', '--porcelain', '--untracked-files=no'), '', 'the deploy dirtied the checkout');
+  });
+});
+
+describe('a Mission Control build that fails keeps the previous build and fails the deploy', () => {
+  const env = { OPENCLAW_NODE_ROLE: 'lead', DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mission-control' };
+  let fx;
+  before(() => {
+    fx = makeNode('mc-build', {
+      'mission-control/package.json': '{ "name": "mission-control" }\n',
+      'mission-control/src/app/page.tsx': "export default () => 'v0';\n",
+    });
+    ranOk(fx.deploy(['--force'], env));
+  });
+
+  it('the failed build is replaced by the one it set aside, and the deploy exits non-zero', () => {
+    const S1 = fx.commit('v1', { 'mission-control/src/app/page.tsx': "export default () => 'v1';\n" });
+    const run = fx.deploy(['--from', fx.S0, '--to', S1], { ...env, DEPLOY_TEST_BUILD_FAIL: '1' });
+    assert.equal(run.status, 1, run.stdout);
+    assert.match(run.stdout, /Mission Control build FAILED — the previous build is still in place/);
+    assert.equal(read(fx.rt('.openclaw/workspace/projects/mission-control/.next/BUILD_ID')), 'built\n');
+    assert.ok(!fs.existsSync(fx.rt('.openclaw/workspace/projects/mission-control/.next.prev')));
   });
 });

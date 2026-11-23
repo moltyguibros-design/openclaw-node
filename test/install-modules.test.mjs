@@ -1779,7 +1779,7 @@ test('install --update redeploys Mission Control: exact sync, npm@10 ci, rebuild
   const comp = moduleSrc['components.sh'];
   const block = comp.slice(comp.indexOf('MC_DIR="$WORKSPACE/projects/mission-control"'),
     comp.indexOf('# Create .env.local for MC if not exists'));
-  assert.ok(block.includes('mc_build'), 'the Mission Control step must be found');
+  assert.ok(block.includes('mc_install_and_build "$MC_DIR" "$NODE_BIN_DIR"'), 'the Mission Control step must be found');
 
   const root = tmpDir('openclaw-mc-update-');
   const put = (rel, text) => { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), text); };
@@ -1794,6 +1794,7 @@ test('install --update redeploys Mission Control: exact sync, npm@10 ci, rebuild
   put(`${mc}/node_modules/.package-lock.json`, '{}\n');
   put(`${mc}/.next/BUILD_ID`, 'old build\n');
   put('nodebin/node', '');
+  for (const f of ['mc-build.sh', 'deps.sh', 'helpers.sh']) put(`repo/scripts/install/${f}`, readFileSync(join(ROOT, 'scripts/install', f), 'utf8'));
   const calls = join(root, 'calls.log');
   for (const name of ['npx', 'npm']) {
     put(`fakebin/${name}`, `#!/bin/sh
@@ -1833,11 +1834,33 @@ exit 0
     `npm run build PATH0=${nodeDir}`,
   ]);
 
+  writeFileSync(calls, '');
   const failed = install({ MC_TEST_BUILD_FAIL: '1' });
   assert.equal(failed.status, 0, failed.stderr);
   assert.match(failed.stdout, /WARN Mission Control build FAILED — the previous build is still in place/);
   assert.equal(read(`${mc}/.next/BUILD_ID`), 'new build\n', 'a failed build leaves the previous one in place');
   assert.equal(existsSync(join(root, mc, '.next.prev')), false);
+  assert.deepEqual(read('calls.log').trim().split('\n'), [`npm run build PATH0=${nodeDir}`],
+    'an unchanged lockfile and node: no reinstall');
+
+  // The fleet deploy's 'mc' component runs the same script on its own, and a
+  // failed build fails it (the deploy listener then rolls back).
+  writeFileSync(calls, '');
+  put('ws/projects/mission-control/package-lock.json', '{"lockfileVersion":3}\n');
+  const standalone = (env = {}) => spawnSync('bash', [join(root, 'repo/scripts/install/mc-build.sh'), join(root, mc), nodeDir], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}`, ...env },
+  });
+  const deployed = standalone();
+  assert.equal(deployed.status, 0, deployed.stderr + deployed.stdout);
+  assert.deepEqual(read('calls.log').trim().split('\n'), [
+    `npx -y npm@10 ci PATH0=${nodeDir}`,
+    `npm rebuild better-sqlite3 PATH0=${nodeDir}`,
+    `npm run build PATH0=${nodeDir}`,
+  ], 'a lockfile change reinstalls and rebuilds the native module under NODE_BIN_DIR');
+  const broken = standalone({ MC_TEST_BUILD_FAIL: '1' });
+  assert.equal(broken.status, 1, broken.stdout);
+  assert.match(broken.stdout, /Mission Control build FAILED — the previous build is still in place/);
+  assert.equal(read(`${mc}/.next/BUILD_ID`), 'new build\n');
 
   // The unit runs that same node: NODE_BIN's dir leads its PATH.
   const plist = readFileSync(join(ROOT, 'services/launchd/ai.openclaw.mission-control.plist'), 'utf8');

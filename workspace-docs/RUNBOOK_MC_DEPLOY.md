@@ -6,7 +6,9 @@ repo: it runs `npm start` from `~/.openclaw/workspace/projects/mission-control/`
 `./install.sh --update` performs steps 1-3 below (sync, `npx -y npm@10 ci`, the better-sqlite3
 rebuild under the unit's node, and a build that keeps the previous one if it fails) and is the
 normal deploy. It restarts the service only with `--enable-services`, so run step 4 after it
-otherwise. The manual steps are the same procedure, for diagnosis. Type-only changes need no deploy.
+otherwise. A fleet deploy (`mesh-deploy`'s `mc` component) runs the same steps 2-3 through
+`scripts/install/mc-build.sh` and then restarts the unit. The manual steps are the same
+procedure, for diagnosis. Type-only changes need no deploy.
 
 ## The two landmines (both bit us)
 1. **Lockfile npm-major skew** — CI and `npm ci` validate with npm 10 (bundled with Node 22); a lockfile
