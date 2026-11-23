@@ -738,6 +738,8 @@ async function launchctlBootout(uid, label, plistPath) {
   return { ok: true };
 }
 
+const TICK_RUNNING = 'a tick is running, retry after it exits';
+
 async function launchctlKickstart(uid, label) {
   const r = await exec('launchctl', ['kickstart', '-k', `gui/${uid}/${label}`]);
   if (r.err) return { ok: false, error: (r.stderr || r.err.message || 'kickstart failed').trim() };
@@ -1914,10 +1916,12 @@ async function handleRequest(req, res) {
         if (next.mode === 'chain' && (!Number.isFinite(next.throttle_seconds) || next.throttle_seconds < 10)) {
           return json(res, { error: 'throttle_seconds must be ≥ 10 (launchd minimum)' }, 400);
         }
+        // The reload below boots the job out, which kills a running tick mid-step.
+        const status = await launchdStatus(next.plist_label);
+        if (status.pid) return json(res, { error: TICK_RUNNING }, 409);
         try {
           const saved = writeAutomationConfig(plan, next);
           // If plist exists OR launchd loaded, rewrite plist; reload if loaded.
-          const status = await launchdStatus(saved.plist_label);
           if (fs.existsSync(saved.plist_path) || status.loaded) {
             fs.mkdirSync(path.dirname(saved.plist_path), { recursive: true });
             fs.writeFileSync(saved.plist_path, generatePlistXml(saved));
@@ -1965,6 +1969,8 @@ async function handleRequest(req, res) {
       if (!status.loaded) {
         return json(res, { error: 'launchd job not loaded — Load it first, or use the manual tick command' }, 400);
       }
+      // kickstart -k would kill the running tick mid-step.
+      if (status.pid) return json(res, { error: TICK_RUNNING }, 409);
       const r = await launchctlKickstart(process.getuid(), cfg.plist_label);
       if (!r.ok) return json(res, { error: r.error }, 500);
       return json(res, { ok: true, msg: 'kickstart fired — a new tick should start within a second' });

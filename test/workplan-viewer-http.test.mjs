@@ -565,3 +565,65 @@ test('history labels a sequentially numbered audit dir by its title step id', as
   const row = JSON.parse((await f.request('/api/plans/fixture/audits/1', { token: f.master })).text);
   assert.equal(row.dirName, 'step45_broadcast_schemas');
 });
+
+// A launchctl that keeps the job's loaded state and PID in files under root and logs every call.
+function statefulLaunchctl(root) {
+  const loaded = path.join(root, 'launchd-loaded');
+  const pid = path.join(root, 'launchd-pid');
+  const calls = path.join(root, 'launchctl-calls');
+  fs.writeFileSync(path.join(root, 'bin/launchctl'), `#!/bin/sh
+echo "$*" >> "${calls}"
+case "$1" in
+  list)
+    [ -n "$2" ] || { printf 'PID\\tStatus\\tLabel\\n'; exit 0; }
+    [ -f "${loaded}" ] || exit 113
+    printf '{\\n\\t"Label" = "%s";\\n' "$2"
+    [ -f "${pid}" ] && printf '\\t"PID" = %s;\\n' "$(cat "${pid}")"
+    printf '};\\n' ;;
+  bootstrap) touch "${loaded}" ;;
+  bootout)
+    [ -f "${loaded}" ] || { echo "Boot-out failed: 3: No such process" >&2; exit 3; }
+    rm -f "${loaded}" ;;
+esac
+exit 0
+`, { mode: 0o700 });
+  return {
+    calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : ''),
+    resetCalls: () => fs.rmSync(calls, { force: true }),
+    setPid: (value) => (value ? fs.writeFileSync(pid, String(value)) : fs.rmSync(pid, { force: true })),
+    selfPause: () => fs.rmSync(loaded, { force: true }),
+  };
+}
+
+function schedulerConfig(f) {
+  return { tick_command: path.join(f.root, 'tick.sh'), working_dir: f.root,
+    plist_label: 'fixture-only', plist_path: path.join(f.root, 'fixture.plist'),
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+}
+
+// kickstart -k and the bootout/bootstrap reload both killed a running tick mid-step.
+test('Fire-now and schedule changes refuse while the scheduled tick runs, and kill nothing', async t => {
+  let launchd;
+  const f = await fixture(t, { prepare: (root) => { launchd = statefulLaunchctl(root); return {}; } });
+  const opts = { token: f.master };
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: schedulerConfig(f) })).status, 200);
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  const saved = fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8');
+  launchd.setPid(4242);
+  launchd.resetCalls();
+
+  const fire = await f.request('/api/plans/fixture/automation/kickstart', { ...opts, method: 'POST' });
+  assert.equal(fire.status, 409);
+  assert.match(JSON.parse(fire.text).error, /a tick is running, retry after it exits/);
+  const change = await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: { interval_seconds: 3600 } });
+  assert.equal(change.status, 409);
+  assert.match(JSON.parse(change.text).error, /a tick is running, retry after it exits/);
+  assert.equal(fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8'), saved);
+  assert.doesNotMatch(launchd.calls(), /kickstart|bootout|bootstrap/);
+
+  launchd.setPid(null);
+  assert.equal((await f.request('/api/plans/fixture/automation/kickstart', { ...opts, method: 'POST' })).status, 200);
+  assert.match(launchd.calls(), /^kickstart -k gui\/\d+\/fixture-only$/m);
+  const client = (await f.request('/viewer-client.js')).text;
+  assert.ok(!client.includes('Most actions will refuse'), 'the client names exactly which actions refuse');
+});

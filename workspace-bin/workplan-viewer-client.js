@@ -815,7 +815,7 @@ async function renderAutomation() {
   // ── Section: Actions ──
   html += '<div class="section"><h3>Actions</h3>';
   if (state.lastLocked) {
-    html += '<div class="note">A tick is currently running. Watch the Live tab. Most actions will refuse while the lock is held.</div>';
+    html += '<div class="note">A tick is currently running. Watch the Live tab. "Run one tick" refuses until it exits; while the scheduler\'s own tick runs, "Fire scheduled tick now" and schedule changes refuse too, and "Stop scheduler" stops that tick.</div>';
   }
   html += '<div class="actions">';
   if (loaded) {
