@@ -487,13 +487,16 @@ async function recordHyperagentTask(task, { outcome, iterations, startedAt, note
     try {
       const { domain, subdomain } = taskTaxonomy(task);
       // Deterministic per task — recomputed here rather than threaded through
-      // six call sites. A refused provider override is still what the task
-      // asked for: the refusal governs running it, not describing it.
-      const workerProvider = taskProviderRefusal(task, CLI_PROVIDER, ENV_PROVIDER)
-        ? PROVIDERS[task.llm_provider]
-        : resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+      // six call sites. A refused or unknown provider is still what the task
+      // asked for: it governs running the task, not describing it.
+      let workerProvider;
+      try {
+        workerProvider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+      } catch {
+        workerProvider = PROVIDERS[task.llm_provider] ?? null;
+      }
       const providerName = workerProvider?.name ?? null;
-      const model = resolveModel(task, CLI_MODEL, workerProvider) ?? null;
+      const model = resolveModel(task, CLI_MODEL, workerProvider ?? { defaultModel: null }) ?? null;
       const row = store.logTelemetry({
         node_id: NODE_ID,
         soul_id: process.env.OPENCLAW_SOUL_ID || NODE_ID,
@@ -2336,20 +2339,37 @@ async function executeCollabTask(task) {
  * Execute a task with the Karpathy iteration pattern.
  * Try → measure → keep/discard → retry.
  */
+/**
+ * Why this node cannot even start `task` (a provider it refuses or does not have,
+ * a shell command the filter blocks), else null. Thrown inside the attempt loop,
+ * these reached the daemon only as a lease expiry minutes later.
+ */
+function taskStartError(task) {
+  try {
+    const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+    // The shell provider's argv is the task's command behind its security filter.
+    if (provider === PROVIDERS.shell) provider.buildArgs('', null, task);
+    return null;
+  } catch (err) {
+    return err.message;
+  }
+}
+
 async function executeTask(task) {
   const startedAt = Date.now();
   log(`EXECUTING: ${task.task_id} "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'}, max attempts: ${MAX_ATTEMPTS})`);
 
-  const providerRefusal = taskProviderRefusal(task, CLI_PROVIDER, ENV_PROVIDER);
-  if (providerRefusal) {
-    log(`REFUSED: ${providerRefusal}`);
+  const startError = taskStartError(task);
+  if (startError) {
+    log(`REFUSED: ${startError}`);
     await natsRequest('mesh.tasks.fail', {
       task_id: task.task_id,
       node_id: NODE_ID,
       lease_token: task.lease_token,
-      reason: providerRefusal,
+      reason: startError,
     }).catch(err => warn(`mesh.tasks.fail: ${err.message}`));
     writeAgentState('idle', null);
+    await recordHyperagentTask(task, { outcome: 'failure', iterations: 1, startedAt, notes: `Not started: ${startError}` });
     return;
   }
 
@@ -3005,5 +3025,6 @@ module.exports.__test = {
   parseReflection,
   agentConnectOptions, connectToBus, drainBus,
   dryRun,
+  taskStartError,
 };
 // deploy-v7f0130b
