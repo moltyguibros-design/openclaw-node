@@ -44,6 +44,15 @@ describe('HyperAgent rows per run', () => {
     assert.deepEqual(got.map((r) => [r.run_key, r.outcome]).sort(), [['lease-a', 'failure'], ['lease-b', 'success']]);
   });
 
+  it('a model named for a provider that takes none is not recorded as the run\'s model', async () => {
+    await agent.recordHyperagentTask({ task_id: 'T-dsh', title: 'dsh', llm_provider: 'deepseek', llm_model: 'm-named', lease_token: 'lease-d' },
+      { outcome: 'success', iterations: 1, startedAt: Date.now(), notes: 'A deepseek run whose task named a model dsh cannot take.' });
+    await agent.recordHyperagentTask({ task_id: 'T-kimi', title: 'kimi', llm_provider: 'kimi', llm_model: 'm-named', lease_token: 'lease-k' },
+      { outcome: 'success', iterations: 1, startedAt: Date.now(), notes: 'A kimi run whose task named a model kimi passes with -m.' });
+    assert.deepEqual((await rows('T-dsh')).map((r) => [r.provider, r.model]), [['deepseek', null]]);
+    assert.deepEqual((await rows('T-kimi')).map((r) => [r.provider, r.model]), [['kimi', 'm-named']]);
+  });
+
   it('a recruit, which holds no lease, keys its row on the collab session', async () => {
     const task = { task_id: 'T-collab', title: 'collab', collaboration: { mode: 'parallel' } };
     await agent.recordHyperagentTask(task, { outcome: 'success', iterations: 1, startedAt: Date.now(), notes: 'Recruited member of a parallel session.', sessionId: 'S-1' });

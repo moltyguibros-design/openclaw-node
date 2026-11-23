@@ -466,6 +466,7 @@ function writeAgentState(status, taskId, provider, model) {
 // Not resolveProvider/resolveModel: they throw, and the 'working' writes sit outside the task's try.
 function taskMind(task) {
   const provider = task.llm_provider || NODE_PROVIDER;
+  if (PROVIDERS[provider]?.acceptsModel === false) return [provider, null];
   return [provider, task.llm_model || CLI_MODEL || PROVIDERS[provider]?.defaultModel || null];
 }
 
@@ -1315,6 +1316,10 @@ function cleanupWorktree(worktreePath, keep = false) {
 async function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null) {
   const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
   const model = resolveModel(task, CLI_MODEL, provider);
+  const requestedModel = task.llm_model || CLI_MODEL;
+  if (provider.acceptsModel === false && requestedModel) {
+    warn(`${task.task_id}: ${provider.name} takes no model flag; ignoring '${requestedModel}', its own configured model runs`);
+  }
   const targetDir = worktreePath || WORKSPACE;
 
   // Clean per-agent temp cwd: avoids loading workspace config files AND

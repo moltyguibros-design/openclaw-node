@@ -270,6 +270,16 @@ describe('model defaults', () => {
     assert.equal(resolveModel({ llm_model: 'm7' }, null, PROVIDERS.openai), 'm7');
     assert.equal(resolveModel(null, 'm8', PROVIDERS.gemini), 'm8');
   });
+
+  // dsh has no model flag: a named model reached no argv, yet runLLM returned it
+  // and the agent state and HyperAgent telemetry recorded it as the run's model.
+  it('a provider that takes no model resolves none, whatever the task or --model names', () => {
+    assert.equal(PROVIDERS.deepseek.acceptsModel, false);
+    assert.equal(resolveModel({ llm_model: 'm9' }, null, PROVIDERS.deepseek), null);
+    assert.equal(resolveModel({}, 'm10', PROVIDERS.deepseek), null);
+    assert.equal(resolveModel({ llm_model: 'm11' }, null, PROVIDERS.kimi), 'm11');
+    assert.equal(resolveModel(null, 'm12', PROVIDERS.minimax), 'm12');
+  });
 });
 
 describe('installer offers every built-in provider', () => {
