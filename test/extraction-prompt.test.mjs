@@ -359,6 +359,20 @@ describe('extractStructured', () => {
     );
   });
 
+  it('scrubs a key out of the raw excerpt in its errors', async () => {
+    // Built at runtime so the committed file holds no secret-shaped line.
+    const key = 'sk-' + 'Ab1'.repeat(15);
+    const scrubbed = (pattern) => (err) => pattern.test(err.message) && !err.message.includes(key) && err.message.includes('[REDACTED]');
+    await assert.rejects(
+      () => extractStructured({ generate: async () => ({ content: `not json ${key}` }) }, []),
+      scrubbed(/LLM response is not valid JSON/),
+    );
+    await assert.rejects(
+      () => extractStructured({ model: 'llama3.1:8b', generate: async () => ({ content: JSON.stringify({ name: key }) }) }, []),
+      scrubbed(/no extraction fields/),
+    );
+  });
+
   it('an empty JSON object is stored as an empty extraction', async () => {
     const mockClient = {
       generate: async () => ({

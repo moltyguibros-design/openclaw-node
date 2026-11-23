@@ -299,6 +299,37 @@ describe('runFlush with LLM extraction', () => {
     assert.ok(memoryContent.includes('NATS JetStream'));
   });
 
+  it('scrubs a key out of the memory.extracted sample it returns', async () => {
+    const jsonlPath = path.join(tmpDir, 'key-session.jsonl');
+    const memoryMdPath = path.join(tmpDir, 'MEMORY-key.md');
+    fs.writeFileSync(jsonlPath, [
+      { type: 'user', message: { role: 'user', content: 'Which key does the staging gateway use?' }, timestamp: '2026-05-22T10:00:00Z' },
+      { type: 'assistant', message: { role: 'assistant', content: 'The one in the vault, until Friday.' }, timestamp: '2026-05-22T10:00:05Z' },
+    ].map(m => JSON.stringify(m)).join('\n'));
+    // Built at runtime so the committed file holds no secret-shaped line.
+    const key = 'sk-' + 'Ab1'.repeat(15);
+    const extraction = {
+      ...mockExtractionResult,
+      decisions: [{ decision: `Use ${key} for the staging gateway`, rationale: 'Until Friday', confidence: 0.8 }],
+    };
+    const mockClient = {
+      async generate() {
+        return { content: JSON.stringify(extraction), usage: null, finishReason: 'stop' };
+      },
+    };
+
+    const result = await runFlush(jsonlPath, memoryMdPath, {
+      vaultPath: path.join(tmpDir, 'vault-key'),
+      charBudget: 2200,
+      llmClient: mockClient,
+      extractionStore: store,
+    });
+
+    assert.equal(result.mode, 'llm');
+    assert.ok(result.extraction.decision_texts[0].includes('[REDACTED]'));
+    assert.ok(!result.extraction.decision_texts[0].includes(key));
+  });
+
   it('walks the vault once per flush: the concept backfill no longer runs the full coverage report', async () => {
     const jsonlPath = path.join(tmpDir, 'walk-session.jsonl');
     const memoryMdPath = path.join(tmpDir, 'MEMORY-walk.md');
