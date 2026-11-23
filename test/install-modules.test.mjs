@@ -36,6 +36,7 @@ const FLAGS = [
   '--role=',
   '--cluster-peers=',
   '--cluster-bind=',
+  '--with-tailscale',
   '--lead-pubkey=',
   '--provider=',
   '--project=',

@@ -144,7 +144,7 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 - Gateway surface: `npm i -g openclaw`, add auth profile to `~/.openclaw/openclaw.json`, flip `openclaw-gateway` autostart. The unit runs `$(npm root -g)/openclaw/dist/index.js` as resolved when `install.sh` rendered it; re-run `install.sh --update` after changing your Node install.
 - Discord tool: put `DISCORD_BOT_TOKEN` in the env, flip `openclaw-mesh-tool-discord`.
 - MC voice (TTS): `GOOGLE_API_KEY` in env.
-- Multi-machine: Tailscale + `docs/MULTI_NODE_DEPLOY.md`.
+- Multi-machine: Tailscale (install.sh / bootstrap.sh install it with `--cluster-peers=…` or `--with-tailscale`) + `docs/MULTI_NODE_DEPLOY.md`.
 
 **Running grappe work (single box, 3 logical agents):**
 ```bash

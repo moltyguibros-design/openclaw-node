@@ -55,6 +55,7 @@ SANDBOX=false
 NODE_ROLE=""
 CLUSTER_PEERS=""
 CLUSTER_BIND=""
+WITH_TAILSCALE=false
 LEAD_PUBKEY=""
 PROVIDER=""
 PROJECT_DIR=""
@@ -71,7 +72,8 @@ for arg in "$@"; do
     --verify-frontend)   VERIFY_FRONTEND=true ;;
     --sandbox)           SANDBOX=true; SKIP_LLM=true; SKIP_MESH=true; SKIP_FRONTEND=true ;;
     --role=*)            NODE_ROLE="${arg#--role=}" ;;
-    --cluster-peers=*)   CLUSTER_PEERS="${arg#--cluster-peers=}" ;;
+    --cluster-peers=*)   CLUSTER_PEERS="${arg#--cluster-peers=}"; WITH_TAILSCALE=true ;;
+    --with-tailscale)    WITH_TAILSCALE=true ;;
     --cluster-bind=*)    CLUSTER_BIND="${arg#--cluster-bind=}" ;;
     --lead-pubkey=*)     LEAD_PUBKEY="${arg#--lead-pubkey=}" ;;
     --provider=*)        PROVIDER="${arg#--provider=}" ;;
@@ -95,6 +97,8 @@ for arg in "$@"; do
       echo "                      --update re-renders the cluster config without the flags."
       echo "  --cluster-bind=IP   THIS machine's own tailnet/LAN address to bind (never"
       echo "                      0.0.0.0). Auto-detected from 'tailscale ip -4' if omitted."
+      echo "  --with-tailscale    Install Tailscale with the system deps (implied by"
+      echo "                      --cluster-peers). A single-node install does not need it."
       echo "  --provider=NAME     The node's mind: claude | openai | gemini | deepseek | kimi |"
       echo "                      minimax | aider | ollama | shell. Detected from PATH or asked"
       echo "                      interactively when omitted; never installed silently."

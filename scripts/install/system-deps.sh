@@ -29,10 +29,10 @@ if ! $UPDATE_ONLY; then
   if $DRY_RUN; then
     info "[dry-run] would run: bash $PREREQ_SCRIPT"
     info "[dry-run] checking current state instead (installs nothing):"
-    OPENCLAW_SKIP_LLM=$($SKIP_LLM && echo 1 || echo 0) \
+    OPENCLAW_SKIP_LLM=$($SKIP_LLM && echo 1 || echo 0) OPENCLAW_WITH_TAILSCALE=$($WITH_TAILSCALE && echo 1 || echo 0) \
       bash "$PREREQ_SCRIPT" --check || warn "[dry-run] prerequisites are NOT satisfied on this machine"
   else
-    if ! OPENCLAW_SKIP_LLM=$($SKIP_LLM && echo 1 || echo 0) bash "$PREREQ_SCRIPT"; then
+    if ! OPENCLAW_SKIP_LLM=$($SKIP_LLM && echo 1 || echo 0) OPENCLAW_WITH_TAILSCALE=$($WITH_TAILSCALE && echo 1 || echo 0) bash "$PREREQ_SCRIPT"; then
       error "System dependencies are incomplete — refusing to continue."
       error "A partial install is what produces the 'it said it worked' failures."
       echo ""

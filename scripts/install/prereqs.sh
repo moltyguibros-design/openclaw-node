@@ -4,6 +4,9 @@
 #   bash scripts/install/prereqs.sh           # install what is missing
 #   bash scripts/install/prereqs.sh --check   # verify only, change nothing
 #
+# OPENCLAW_WITH_TAILSCALE=1 (install.sh --cluster-peers / --with-tailscale) adds
+# Tailscale; a single-node install neither gets it nor is refused without it.
+#
 # Exit 0 only when every hard dependency is actually present. This is the single
 # implementation; system-deps.sh calls it rather than keeping its own per-OS
 # branches (which silently no-opped on macOS).
@@ -17,6 +20,8 @@ set -o pipefail
 
 CHECK_ONLY=false
 [ "${1:-}" = "--check" ] && CHECK_ONLY=true
+WITH_TAILSCALE=false
+[ "${OPENCLAW_WITH_TAILSCALE:-0}" = "1" ] && WITH_TAILSCALE=true
 
 if ! declare -f ok >/dev/null 2>&1; then
   _G='\033[0;32m'; _Y='\033[1;33m'; _R='\033[0;31m'; _N='\033[0m'
@@ -99,6 +104,8 @@ if [ "$PREREQ_OS" = macos ]; then
   # install.sh derives --cluster-bind from `tailscale ip -4`.
   if have tailscale; then
     ok "tailscale present"
+  elif ! $WITH_TAILSCALE; then
+    info "tailscale not installed: only a multi-machine cluster needs it (--cluster-peers / --with-tailscale)"
   elif $CHECK_ONLY; then
     error "tailscale MISSING (mesh clustering will not work)"
   else
@@ -190,6 +197,8 @@ else
 
   if have tailscale; then
     ok "tailscale present"
+  elif ! $WITH_TAILSCALE; then
+    info "tailscale not installed: only a multi-machine cluster needs it (--cluster-peers / --with-tailscale)"
   elif $CHECK_ONLY; then
     error "tailscale MISSING (mesh clustering will not work)"
   else
@@ -226,7 +235,7 @@ _chk "jq"            'command -v jq'
 _chk "rsync"         'command -v rsync'
 _chk "nats-server"   'command -v nats-server'
 [ "${OPENCLAW_SKIP_LLM:-0}" = "1" ] || _chk "ollama" 'command -v ollama'
-_chk "tailscale"     'command -v tailscale'
+$WITH_TAILSCALE && _chk "tailscale" 'command -v tailscale'
 echo ""
 
 exit $PREREQ_FAIL

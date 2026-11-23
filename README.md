@@ -26,8 +26,9 @@ curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/m
 (`--role=worker` for a worker; the first install refuses to guess it.) This is the **only** entrypoint that works on a machine with nothing on it. It assumes
 just `bash` + `curl` (stock on macOS and Ubuntu) and a sudo-capable user, then installs
 Homebrew (macOS), the Xcode Command Line Tools, Node 22, Python 3, Git, SQLite3, build
-tools, jq, nats-server, ollama and Tailscale — verifies each one is actually on `PATH` —
-and only then downloads the repo and runs `install.sh --enable-services`.
+tools, jq, nats-server and ollama (plus Tailscale with `--cluster-peers=…` or
+`--with-tailscale`) — verifies each one is actually on `PATH` — and only then downloads
+the repo and runs `install.sh --enable-services`.
 
 You are asked for your password once. Homebrew and apt install into system locations;
 that is not automatable away.
@@ -35,7 +36,7 @@ that is not automatable away.
 #### It runs in two waves
 
 **Wave 1 — binaries and a running node.** Homebrew, Xcode CLT, Node 22, Python 3, Git,
-SQLite3, jq, nats-server, ollama, Tailscale, then `install.sh --enable-services`. A few
+SQLite3, jq, nats-server, ollama (Tailscale only for a cluster), then `install.sh --enable-services`. A few
 hundred MB. No models.
 
 **Wave 2 — the LLM brain, only after you confirm.** The local model is 5–18 GB depending
@@ -117,7 +118,7 @@ What a node needs and what "running" means is specified in [docs/NODE_SPEC.md](d
 the verification matrix is [docs/INSTALL_TEST_PROTOCOL.md](docs/INSTALL_TEST_PROTOCOL.md).
 
 The installer will:
-1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22.12+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), **Tailscale** (needed for multi-machine clustering). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
+1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22.12+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), and **Tailscale** only with `--cluster-peers=…` or `--with-tailscale` (a single node does not need it). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
 2. Install the repo's runtime `node_modules` (the mesh daemons exec from the repo tree)
 3. Create the `~/.openclaw/` directory structure and copy scripts, libs (incl. mcp-knowledge), identity files, souls, and skills
 4. Generate configuration from templates — including the **single-node NATS bus** (`nats.conf`, loopback + generated token) and an env file with the **local-first memory-model defaults** (RAM-tiered `LLM_MODEL`); the agent provider (`MESH_LLM_PROVIDER`) is whatever you choose — `--provider=NAME`, the install prompt, or a CLI already on PATH
@@ -238,7 +239,7 @@ package manager's exit code.
 | `sqlite3` | Database engine |
 | `curl` | HTTP calls from scripts |
 | `jq` | JSON processing in test/workflow scripts |
-| `tailscale` | Mesh VPN. `install.sh` derives `--cluster-bind` from `tailscale ip -4`; without it multi-machine NATS clustering silently degrades to a single node. Installed but **not** authenticated — run `tailscale up` yourself. |
+| `tailscale` | Mesh VPN, multi-machine clusters only: installed with `--cluster-peers=…` or `--with-tailscale`, never on a single-node install. `install.sh` derives `--cluster-bind` from `tailscale ip -4`. Installed but **not** authenticated — run `tailscale up` yourself. |
 | `homebrew` | macOS package manager. Installed by `bootstrap.sh` only; it also pulls in the Xcode Command Line Tools, which is where the compiler comes from. |
 | `pyyaml` (pip) | Required by `bin/compile-boot` for YAML parsing |
 

@@ -17,7 +17,8 @@
 # back to wget when that is what exists.
 #
 # Everything else -- Homebrew, Xcode CLT, Node 22, Python 3, Git, SQLite3,
-# build tools, jq, nats-server, ollama, Tailscale -- is installed here.
+# build tools, jq, nats-server, ollama -- is installed here. Tailscale too, but only
+# for a multi-machine cluster: --cluster-peers=... or --with-tailscale.
 #
 # You will be asked for your password once. Homebrew and apt install into system
 # locations; that is not automatable away and should not be.
@@ -48,7 +49,13 @@ main() {
 REPO="${OPENCLAW_REPO:-moltyguibros-design/openclaw-node}"
 REF="${OPENCLAW_REF:-main}"
 USER_SKIP_LLM=false
-for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
+WITH_TAILSCALE=false
+for a in "$@"; do
+  case "$a" in
+    --skip-llm) USER_SKIP_LLM=true ;;
+    --with-tailscale|--cluster-peers=*) WITH_TAILSCALE=true ;;
+  esac
+done
 
 G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[1m'; N='\033[0m'
 ok()   { echo -e "${G}[+]${N} $*"; }
@@ -205,7 +212,7 @@ if [ "$OS" = macos ]; then
   # multi-machine NATS clustering silently degrades to a single node.
   if have tailscale; then
     ok "tailscale present"
-  else
+  elif $WITH_TAILSCALE; then
     brew install --cask tailscale-app </dev/null
     link_tailscale_cli
     have tailscale && ok "tailscale installed" || err "tailscale: CLI still not on PATH"
@@ -282,7 +289,7 @@ else
 
   if have tailscale; then
     ok "tailscale present"
-  else
+  elif $WITH_TAILSCALE; then
     curl -fsSL https://tailscale.com/install.sh | sh
     have tailscale && ok "tailscale installed" || err "tailscale not on PATH after install"
   fi
@@ -319,7 +326,7 @@ chk "nats-server"   'command -v nats-server'
 # Still installed under --skip-llm so llm-setup.sh works later, but a box that
 # asked for no LLM is not refused for lacking it (as prereqs.sh does).
 $USER_SKIP_LLM || chk "ollama" 'command -v ollama'
-chk "tailscale"     'command -v tailscale'
+$WITH_TAILSCALE && chk "tailscale" 'command -v tailscale'
 [ "$OS" = macos ] && chk "homebrew" 'command -v brew'
 
 if [ $FAIL -ne 0 ]; then
@@ -391,7 +398,7 @@ fi
 
 echo ""
 ok "done. Next:"
-echo "    tailscale up                 # authenticate the mesh (opens a browser)"
+$WITH_TAILSCALE && echo "    tailscale up                 # authenticate the mesh (opens a browser)"
 echo "    open http://localhost:3000   # Mission Control"
 exit 0
 
