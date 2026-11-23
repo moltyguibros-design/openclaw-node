@@ -50,9 +50,6 @@ export interface ParsedTask {
 export const KNOWN_MARKDOWN_KEYS: ReadonlySet<string> = new Set([
   "artifacts",
   "auto_priority",
-  "auto_start",
-  "auto_start_after",
-  "auto_start_before",
   "budget_minutes",
   "capacity_class",
   "cluster_id",
@@ -295,23 +292,6 @@ export function parseTasksMarkdown(content: string): ParsedTask[] {
           break;
         case "auto_priority":
           current.autoPriority = parseInt(value, 10) || 0;
-          currentArrayKey = null;
-          break;
-        // Backward compat for old auto_start format
-        case "auto_start":
-          if (value === "true" || value === "1") {
-            current.needsApproval = false;
-          }
-          currentArrayKey = null;
-          break;
-        case "auto_start_after":
-          if (value) {
-            current.triggerKind = "at";
-            current.triggerAt = value;
-          }
-          currentArrayKey = null;
-          break;
-        case "auto_start_before":
           currentArrayKey = null;
           break;
         // Mesh execution fields

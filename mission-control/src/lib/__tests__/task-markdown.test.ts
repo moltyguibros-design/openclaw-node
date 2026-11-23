@@ -312,3 +312,46 @@ Updated: 2026-09-06
     expect(out).not.toContain("hijack");
   });
 });
+
+// The retired auto_start line turned approval off and no MC write removed it, so a
+// re-import reverted the operator's "needs approval". It is now an inert extra field,
+// the rule the DB already follows for its legacy auto_start column.
+describe("legacy auto_start lines carry no meaning", () => {
+  const md = `## Live Tasks
+
+- task_id: T-LEGACY-1
+  title: Old auto task
+  status: queued
+  owner: main
+  success_criteria:
+  artifacts:
+  next_action: n/a
+  auto_start: true
+  auto_start_after: 2026-01-02T00:00:00Z
+  auto_start_before: 2026-01-03T00:00:00Z
+  updated_at: 2026-01-01T00:00:00Z
+`;
+
+  it("parses with approval required and no trigger, keeping the lines in extra", () => {
+    const [t] = parseTasksMarkdown(md);
+    expect(t.needsApproval).toBe(true);
+    expect(t.triggerKind).toBe("none");
+    expect(t.triggerAt).toBeNull();
+    expect(t.extra).toEqual({
+      auto_start: "true",
+      auto_start_after: "2026-01-02T00:00:00Z",
+      auto_start_before: "2026-01-03T00:00:00Z",
+    });
+  });
+
+  it("serializes the lines back untouched, and an approval toggle survives the re-parse", () => {
+    const [t] = parseTasksMarkdown(md);
+    const out = serializeTasksMarkdown([{ ...t, needsApproval: false }]);
+    expect(out).toContain("  auto_start: true");
+    expect(out).toContain("  auto_start_after: 2026-01-02T00:00:00Z");
+    expect(parseTasksMarkdown(out)[0].needsApproval).toBe(false);
+    const back = serializeTasksMarkdown([{ ...parseTasksMarkdown(out)[0], needsApproval: true }]);
+    expect(parseTasksMarkdown(back)[0].needsApproval).toBe(true);
+    expect(back).toContain("  auto_start: true");
+  });
+});

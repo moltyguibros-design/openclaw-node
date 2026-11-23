@@ -58,6 +58,26 @@ function bridgeEdit(id: string, edit: (blockText: string) => string) {
   fs.writeFileSync(file, content.slice(0, start) + edit(content.slice(start, end)) + content.slice(end));
 }
 
+describe("a legacy auto_start: true block", () => {
+  it("imports as needing approval, and MC's approval toggle sticks across re-imports", async () => {
+    fs.writeFileSync(file, FILE.replace("  next_action: n/a\n  updated_at", "  next_action: n/a\n  auto_start: true\n  updated_at"));
+    const { db, sync, set, get } = await load();
+    sync.syncTasksFromMarkdown(db);
+    expect(get("T-A")?.needsApproval).toBe(1);
+
+    set("T-A", { needsApproval: 0 });
+    sync.syncTasksToMarkdown(db);
+    sync.syncTasksFromMarkdown(db);
+    expect(get("T-A")?.needsApproval).toBe(0);
+
+    set("T-A", { needsApproval: 1 });
+    sync.syncTasksToMarkdown(db);
+    sync.syncTasksFromMarkdown(db);
+    expect(get("T-A")?.needsApproval).toBe(1);
+    expect(fs.readFileSync(file, "utf-8")).toContain("  auto_start: true\n");
+  });
+});
+
 describe("syncTasksToMarkdown writes only what MC changed", () => {
   it("keeps the bridge's edits to other tasks and to other fields of the same task", async () => {
     fs.writeFileSync(file, FILE);
