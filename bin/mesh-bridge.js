@@ -858,7 +858,8 @@ function writeLog(taskId, meshTask, finalStatus) {
 }
 
 // ── Tracer wrapping ──────────────────────────────────
-findDispatchable = tracer.wrap('findDispatchable', findDispatchable, { tier: 1, category: 'state_transition' });
+// Polled every DISPATCH_INTERVAL: recorded only when slow or failing.
+findDispatchable = tracer.wrap('findDispatchable', findDispatchable, { tier: 2, category: 'compute' });
 dispatchTask = tracer.wrapAsync('dispatchTask', dispatchTask, { tier: 1, category: 'state_transition' });
 reconcile = tracer.wrapAsync('reconcile', reconcile, { tier: 2, category: 'compute' });
 handleEvent = tracer.wrap('handleEvent', handleEvent, { tier: 1, category: 'state_transition' });
@@ -1014,8 +1015,8 @@ async function main() {
 
 module.exports = {
   formatTaskYaml,
-  // test/mesh-bridge-reconcile.test.mjs, test/mesh-bridge-review.test.mjs
-  __test: { reconcile: () => reconcile(), handleEvent: (...args) => handleEvent(...args), dispatched, lastHeartbeat, setNc(c) { nc = c; } },
+  // test/mesh-bridge-reconcile.test.mjs, test/mesh-bridge-review.test.mjs, test/poll-trace-tier.test.mjs
+  __test: { reconcile: () => reconcile(), handleEvent: (...args) => handleEvent(...args), findDispatchable: () => findDispatchable(), dispatched, lastHeartbeat, setNc(c) { nc = c; } },
 };
 
 if (require.main === module) {

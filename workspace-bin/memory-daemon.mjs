@@ -304,7 +304,8 @@ function _detectActivity(sources, activityWindowMs) {
   }
   return result;
 }
-const detectActivity = tracer.wrap('detectActivity', _detectActivity, { tier: 1 });
+// Runs every tick: smart mode keeps it only when slow or failing.
+const detectActivity = tracer.wrap('detectActivity', _detectActivity, { tier: 2, category: 'compute' });
 
 // ============================================================
 // MEMORY BUDGET (Hermes-inspired frozen snapshot)
@@ -1340,9 +1341,10 @@ function loadDaemonState() {
 
 // ── Tracer wrapping ──────────────────────────────────
 runPhase0Bootstrap = tracer.wrapAsync('runPhase0Bootstrap', runPhase0Bootstrap, { tier: 1, category: 'lifecycle' });
-runPhase1StatusSync = tracer.wrap('runPhase1StatusSync', runPhase1StatusSync, { tier: 1, category: 'lifecycle' });
-runHyperagentMaintenance = tracer.wrapAsync('runHyperagentMaintenance', runHyperagentMaintenance, { tier: 1, category: 'lifecycle' });
-runPhase2ThrottledWork = tracer.wrapAsync('runPhase2ThrottledWork', runPhase2ThrottledWork, { tier: 1, category: 'lifecycle' });
+// Per-tick work: recorded only when slow or failing, so the feed keeps real transitions.
+runPhase1StatusSync = tracer.wrap('runPhase1StatusSync', runPhase1StatusSync, { tier: 2, category: 'compute' });
+runHyperagentMaintenance = tracer.wrapAsync('runHyperagentMaintenance', runHyperagentMaintenance, { tier: 2, category: 'compute' });
+runPhase2ThrottledWork = tracer.wrapAsync('runPhase2ThrottledWork', runPhase2ThrottledWork, { tier: 2, category: 'compute' });
 handleTransitions = tracer.wrapAsync('handleTransitions', handleTransitions, { tier: 1, category: 'state_transition' });
 runSubprocess = tracer.wrapAsync('runSubprocess', runSubprocess, { tier: 2 });
 
@@ -1868,4 +1870,4 @@ if (process.env.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1') {
   });
 }
 
-export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData, synthesizedEventData };
+export { runNodeVaultMaintenance, handleFlushResult, sourceOfJsonl, extractedEventData, synthesizedEventData, detectActivity };
