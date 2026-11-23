@@ -181,13 +181,12 @@ describe('context engine', () => {
     assert.equal(received.length, before, 'no daemon calls');
   });
 
-  it('commitTurn is idempotent per advancementKey; ingest/afterTurn are no-ops', async () => {
+  it('lifecycle hooks are no-ops and say so', async () => {
     const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
     assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'committed' });
-    assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'duplicate' });
-    assert.deepEqual(await e.commitTurn({ advancementKey: 'k2', messages: [], sessionId: 's' }), { status: 'committed' });
-    assert.deepEqual(await e.ingest({ sessionId: 's', message: userMsg('x') }), { ingested: true });
-    assert.deepEqual(await e.ingestBatch({ sessionId: 's', messages: [userMsg('x'), userMsg('y')] }), { ingestedCount: 2 });
+    assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'committed' });
+    assert.deepEqual(await e.ingest({ sessionId: 's', message: userMsg('x') }), { ingested: false });
+    assert.equal('ingestBatch' in e, false);
     assert.equal(await e.afterTurn({ sessionId: 's', sessionFile: '/x', messages: [], prePromptMessageCount: 0 }), undefined);
   });
 

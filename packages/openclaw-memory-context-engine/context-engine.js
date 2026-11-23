@@ -78,12 +78,6 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
   const bypass = Array.isArray(config.bypassSessionPatterns) ? config.bypassSessionPatterns : [];
   const warn = (m) => (logger.warn ? logger.warn(m) : logger.info(m));
 
-  // commitTurn is retried by the host with the same advancementKey after a
-  // failure; the contract wants "duplicate" the second time. Nothing is
-  // written here, so a bounded in-memory set is the whole ledger.
-  const seenAdvancements = new Set();
-  const MAX_SEEN = 5000;
-
   // One warning per distinct failure reason, not one per turn: a daemon that
   // is down for an hour must not produce 400 identical log lines.
   let lastWarn = '';
@@ -122,19 +116,11 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
 
     // The daemon ingests from the session file, not from this hook.
     async ingest() {
-      return { ingested: true };
-    },
-    async ingestBatch({ messages }) {
-      return { ingestedCount: Array.isArray(messages) ? messages.length : 0 };
+      return { ingested: false };
     },
     async afterTurn() {},
 
-    async commitTurn({ advancementKey }) {
-      if (advancementKey && seenAdvancements.has(advancementKey)) return { status: 'duplicate' };
-      if (advancementKey) {
-        if (seenAdvancements.size >= MAX_SEEN) seenAdvancements.delete(seenAdvancements.values().next().value);
-        seenAdvancements.add(advancementKey);
-      }
+    async commitTurn() {
       return { status: 'committed' };
     },
 
