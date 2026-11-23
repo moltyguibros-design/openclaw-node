@@ -52,6 +52,10 @@ function createMockNc({ streamExists = false, config = null } = {}) {
             state: { messages: 0, bytes: 0, consumer_count: 0 },
           };
         },
+        update: async (_name, updateConfig) => ({
+          config: updateConfig,
+          state: { messages: 0, bytes: 0, consumer_count: 0 },
+        }),
       },
     }),
   };

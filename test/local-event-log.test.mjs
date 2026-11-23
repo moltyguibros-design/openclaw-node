@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { buildMemoryEvent, canonicalNodeId, createLocalEventLog, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
+import { buildMemoryEvent, canonicalNodeId, createLocalEventLog, eventStreamRetention, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
 import { MemoryBudget } from '../lib/memory-budget.mjs';
 import {
   MemoryEventSchema,
@@ -118,6 +118,8 @@ describe('local event stream naming', () => {
 // overlap another stream's, and reports a missing stream with err_code 10059.
 function mockJetStream() {
   const streams = new Map();
+  const states = new Map();
+  const updates = [];
   const published = [];
   const overlaps = (a, b) => {
     const pa = a.split('.'), pb = b.split('.');
@@ -133,7 +135,11 @@ function mockJetStream() {
       info: async (name) => {
         if (jsm.infoError) throw jsm.infoError;
         if (!streams.has(name)) throw Object.assign(new Error('stream not found'), { api_error: { code: 404, err_code: 10059 } });
-        return { config: streams.get(name) };
+        return { config: streams.get(name), state: states.get(name) ?? { messages: 0, bytes: 0, first_ts: '0001-01-01T00:00:00Z' } };
+      },
+      update: async (name, cfg) => {
+        updates.push({ name, cfg });
+        streams.set(name, cfg);
       },
       add: async (cfg) => {
         for (const other of streams.values()) {
@@ -156,7 +162,7 @@ function mockJetStream() {
     jetstreamManager: async () => jsm,
     jetstream: () => ({ publish: async (subject, data) => { published.push(subject); return { seq: published.length }; } }),
   };
-  return { nc, jsm, streams, published };
+  return { nc, jsm, streams, states, updates, published };
 }
 
 describe('createLocalEventLog subject partition', () => {
@@ -201,12 +207,65 @@ describe('createLocalEventLog subject partition', () => {
   });
 });
 
+describe('createLocalEventLog retention', () => {
+  const MONTH_NS = 30 * 24 * 60 * 60 * 1e9;
+  const MIB_256 = 256 * 1024 * 1024;
+  const unlimited = (name) => ({ name, subjects: [`local.${name.slice('local-events-'.length)}.>`], storage: 'file', num_replicas: 1, max_age: 0, max_bytes: -1, discard: 'old' });
+
+  it('a new stream is created with 30 days / 256 MiB, oldest discarded first', async () => {
+    const { nc, streams, updates } = mockJetStream();
+    await createLocalEventLog(nc, 'daedalus', { log: () => {} });
+    const cfg = streams.get('local-events-daedalus');
+    assert.equal(cfg.max_age, MONTH_NS);
+    assert.equal(cfg.max_bytes, MIB_256);
+    assert.equal(cfg.discard, 'old');
+    assert.equal(updates.length, 0);
+  });
+
+  it('an existing unlimited stream is updated in place once, keeping its config', async () => {
+    const { nc, streams, states, updates } = mockJetStream();
+    streams.set('local-events-daedalus', unlimited('local-events-daedalus'));
+    states.set('local-events-daedalus', { messages: 3, bytes: 900, first_ts: new Date(Date.now() - 86_400_000).toISOString() });
+    const logs = [];
+    await createLocalEventLog(nc, 'daedalus', { log: (m) => logs.push(m) });
+    await createLocalEventLog(nc, 'daedalus', { log: (m) => logs.push(m) });
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0], {
+      name: 'local-events-daedalus',
+      cfg: { ...unlimited('local-events-daedalus'), max_age: MONTH_NS, max_bytes: MIB_256, discard: 'old' },
+    });
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /local-events-daedalus/);
+  });
+
+  it('a stream that already has limits is left alone', async () => {
+    const { nc, streams, updates } = mockJetStream();
+    streams.set('local-events-daedalus', { ...unlimited('local-events-daedalus'), max_age: 7 * 24 * 60 * 60 * 1e9, max_bytes: 64 * 1024 * 1024 });
+    await createLocalEventLog(nc, 'daedalus', { log: () => {} });
+    assert.equal(updates.length, 0);
+  });
+
+  it('an unlimited stream holding older history is not trimmed: the command is logged instead', async () => {
+    const { nc, streams, states, updates } = mockJetStream();
+    streams.set('local-events-daedalus', unlimited('local-events-daedalus'));
+    states.set('local-events-daedalus', { messages: 55_173, bytes: 80_000_000, first_ts: '2026-07-14T12:00:00Z' });
+    const logs = [];
+    await createLocalEventLog(nc, 'daedalus', { log: (m) => logs.push(m) });
+    assert.equal(updates.length, 0, 'applying max_age would have expired stored history');
+    assert.equal(logs.length, 1);
+    assert.ok(logs[0].includes('nats stream edit local-events-daedalus --max-age 720h --max-bytes 268435456 --discard old'), logs[0]);
+  });
+});
+
 describe('local event consumers read only their node\'s subjects', () => {
   function consumerNc() {
     const added = [];
     const nc = {
       jetstreamManager: async () => ({
-        streams: { info: async () => ({}), add: async () => ({}) },
+        streams: {
+          info: async (name) => ({ config: { name, ...eventStreamRetention() }, state: { messages: 0, bytes: 0, first_ts: '0001-01-01T00:00:00Z' } }),
+          add: async () => ({}),
+        },
         consumers: {
           info: async () => { throw Object.assign(new Error('consumer not found'), { api_error: { err_code: 10014 } }); },
           add: async (stream, cfg) => { added.push({ stream, ...cfg }); },

@@ -5,6 +5,13 @@ import {
   evaluateIngestionPolicy,
   parseSharedSubject,
 } from '../bin/memory-subscriber.mjs';
+import { eventStreamRetention } from '../lib/local-event-log.mjs';
+
+// OPENCLAW_SHARED as the server reports it once it carries its retention.
+const SHARED_INFO = {
+  config: { name: 'OPENCLAW_SHARED', ...eventStreamRetention() },
+  state: { messages: 0, bytes: 0, first_ts: '0001-01-01T00:00:00Z' },
+};
 
 // ── parseSharedSubject ───────────────────────────────────
 
@@ -118,7 +125,7 @@ describe('createSubscriber consumer identity', () => {
     let added = null;
     const nc = {
       jetstreamManager: async () => ({
-        streams: { info: async () => ({ config: {} }) },
+        streams: { info: async () => SHARED_INFO },
         consumers: {
           info: async () => { throw new Error('consumer not found'); },
           add: async (_stream, cfg) => { added = cfg; },
@@ -148,7 +155,7 @@ describe('createSubscriber projection', () => {
   function fakeShared(messages) {
     return {
       jetstreamManager: async () => ({
-        streams: { info: async () => ({ config: {} }) },
+        streams: { info: async () => SHARED_INFO },
         consumers: { info: async () => ({}), add: async () => {} },
       }),
       jetstream: () => ({

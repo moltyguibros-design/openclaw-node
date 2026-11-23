@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const daemonSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'workspace-bin/memory-daemon.mjs'), 'utf8');
 
 test('an OPENCLAW_SHARED config mismatch exits the daemon only when federation is on', () => {
-  const block = daemonSrc.match(/await ensureSharedStream\(natsConn\);[\s\S]*?\} catch \(streamErr\)/)[0];
+  const block = daemonSrc.match(/await ensureSharedStream\(natsConn, \{ log \}\);[\s\S]*?\} catch \(streamErr\)/)[0];
   const mismatch = block.match(/if \(!verification\.valid\) \{[\s\S]*?\n      \} else \{/)[0];
   const exits = mismatch.match(/process\.exit\(1\)/g) || [];
   assert.equal(exits.length, 1);

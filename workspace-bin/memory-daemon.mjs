@@ -1459,7 +1459,7 @@ async function main() {
 
     // Initialize local event log for dual-write shadow mode
     try {
-      localEventLog = await createLocalEventLog(natsConn, NODE_ID);
+      localEventLog = await createLocalEventLog(natsConn, NODE_ID, { log });
       log(`Local event log initialized (stream: ${localEventLog.streamName})`);
     } catch (evtErr) {
       log(`Local event log unavailable (${evtErr.message}) — continuing without event log`);
@@ -1482,7 +1482,7 @@ async function main() {
     // on, since the stream protects nothing else and a crash loop for an
     // opt-in feature is worse than an idle, misconfigured stream.
     try {
-      await ensureSharedStream(natsConn);
+      await ensureSharedStream(natsConn, { log });
       const streamInfo = await inspectSharedStream(natsConn);
       const verification = verifySharedStreamConfig(streamInfo);
       if (!verification.valid) {
