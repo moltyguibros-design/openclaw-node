@@ -41,6 +41,7 @@ beforeEach(async () => {
   process.env.HOME = home;
   vi.stubEnv("DB_PATH", path.join(home, "mission-control.db"));
   vi.stubEnv("WORKSPACE_ROOT", path.join(home, ".openclaw", "workspace"));
+  vi.stubEnv("OPENCLAW_HUMAN_NAME", "Ada");
   vi.resetModules();
 
   soulsDir = path.join(home, ".openclaw", "souls");
@@ -66,13 +67,13 @@ afterEach(async () => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-async function approve() {
+async function approve(body: Record<string, unknown> = { action: "approve", reviewedBy: "operator" }) {
   const { PATCH } = await import("@/app/api/souls/[id]/evolution/route");
   return PATCH(
     new NextRequest("http://127.0.0.1/api/souls/s1/evolution?eventId=evt_1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "approve", reviewedBy: "operator" }),
+      body: JSON.stringify(body),
     }),
     { params: Promise.resolve({ id: "s1" }) },
   );
@@ -166,4 +167,42 @@ test("reject answers 404 for an unknown event or another soul's event", async ()
   expect((await reject("evt_missing")).status).toBe(404);
   expect((await reject("evt_1", "s2")).status).toBe(404);
   expect((await status()).review_status).toBe("pending");
+});
+
+const reviewer = async () => {
+  const { getRawDb } = await import("@/lib/db");
+  return (getRawDb().prepare("SELECT reviewed_by FROM soul_evolution_log WHERE event_id = 'evt_1'").get() as { reviewed_by: string | null }).reviewed_by;
+};
+
+test("an approval from Mission Control with no reviewer is recorded as the operator (HUMAN_NAME)", async () => {
+  initSoulsRepo();
+  expect((await approve({ action: "approve" })).status).toBe(200);
+  expect(await reviewer()).toBe("Ada");
+  expect(git("log", "-1", "--format=%B")).toMatch(/^Reviewer: Ada$/m);
+});
+
+test("a reject with no reviewer is recorded as the operator", async () => {
+  const { PATCH } = await import("@/app/api/souls/[id]/evolution/route");
+  const res = await PATCH(
+    new NextRequest("http://127.0.0.1/api/souls/s1/evolution?eventId=evt_1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "reject" }),
+    }),
+    { params: Promise.resolve({ id: "s1" }) },
+  );
+  expect(res.status).toBe(200);
+  expect(await reviewer()).toBe("Ada");
+});
+
+test("a named reviewer (an agent through bin/mc-api) is recorded as given", async () => {
+  initSoulsRepo();
+  expect((await approve({ action: "approve", reviewedBy: "daedalus" })).status).toBe(200);
+  expect(await reviewer()).toBe("daedalus");
+});
+
+test("the Souls page sends no hardcoded reviewer and its guide's parent soul exists", () => {
+  const page = fs.readFileSync(path.join(__dirname, "..", "..", "app", "souls", "page.tsx"), "utf8");
+  expect(page).not.toContain("main-agent");
+  expect(page).toContain('"parentSoul": "daedalus"');
 });

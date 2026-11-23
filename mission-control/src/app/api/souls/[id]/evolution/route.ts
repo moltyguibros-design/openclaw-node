@@ -7,7 +7,7 @@ import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { isSafeId } from "@/lib/safe-path";
-import { SOULS_DIR } from "@/lib/config";
+import { HUMAN_NAME, SOULS_DIR } from "@/lib/config";
 
 const execFileAsync = promisify(execFile);
 
@@ -210,7 +210,10 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { action, reviewedBy } = body;
+    const { action } = body;
+    // The Souls page sends no reviewer: a click there is the operator's. An
+    // agent reviewing through bin/mc-api names itself.
+    const reviewedBy: string = body.reviewedBy || HUMAN_NAME;
     if (action !== "approve" && action !== "reject") {
       return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }

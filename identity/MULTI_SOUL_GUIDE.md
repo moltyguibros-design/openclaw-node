@@ -222,6 +222,8 @@ bin/mc-api PATCH '/api/souls/blockchain-auditor/evolution?eventId=evt_002' '{"ac
 bin/mc-api PATCH '/api/souls/blockchain-auditor/evolution?eventId=evt_002' '{"action":"reject","reviewedBy":"daedalus"}'
 ```
 
+`reviewedBy` is recorded on the event and in the approval commit's `Reviewer:` line. A review without it, such as a click on the Souls page, is recorded under the operator's name (`OPENCLAW_HUMAN_NAME`).
+
 ### Evolution Git History
 
 Every approved evolution creates a git commit:

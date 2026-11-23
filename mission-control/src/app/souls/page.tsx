@@ -273,7 +273,7 @@ touch ~/.openclaw/souls/my-soul/evolution/events.jsonl`}
     },
     "specializations": ["domain1", "domain2"],
     "evolutionEnabled": true,
-    "parentSoul": "main-agent"
+    "parentSoul": "daedalus"
   }'`}
             </pre>
             <p className="text-xs text-muted-foreground mt-2">
@@ -322,7 +322,7 @@ export default function SoulsPage() {
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, reviewedBy: "main-agent" }),
+        body: JSON.stringify({ action }),
       }
     );
 
