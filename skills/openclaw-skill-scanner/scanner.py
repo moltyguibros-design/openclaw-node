@@ -73,7 +73,7 @@ PATTERNS = [
         "base64_decode_exec",
         "critical",
         re.compile(
-            r"""base64[._](?:b64)?decode\s*\([^\n]*?\)[\s\S]{0,200}?\b(?:exec|eval|system|popen|subprocess)\b""",
+            r"""base64[._](?:b64)?decode\s*\([\s\S]{0,120}?\)[\s\S]{0,200}?\b(?:exec|eval|system|popen|subprocess)\b""",
             re.IGNORECASE | re.DOTALL,
         ),
         "Base64 decode piped into code execution",
@@ -200,7 +200,7 @@ PATTERNS = [
         "env_exfil",
         "high",
         re.compile(
-            r"""\b(?:open|read|load)[^\n]{0,80}?\.env\b[\s\S]{0,300}?(?:requests?\.|urllib|\b(?:http|curl|wget|socket|send|post|fetch))""",
+            r"""\b(?:open|read|load)[\s\S]{0,80}?\.env\b[\s\S]{0,300}?(?:requests?\.|urllib|\b(?:http|curl|wget|socket|send|post|fetch))""",
             re.IGNORECASE | re.DOTALL,
         ),
         "Reading .env file with network send capability",
@@ -209,7 +209,7 @@ PATTERNS = [
         "api_key_grab",
         "high",
         re.compile(
-            r"""(?:os\.environ|process\.env)[^\n]{0,80}?(?:API.?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[\s\S]{0,300}?(?:requests?\.|urllib|\b(?:http|curl|fetch|send|post|socket))""",
+            r"""(?:os\.environ|process\.env)[\s\S]{0,80}?(?:API.?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[\s\S]{0,300}?(?:requests?\.|urllib|\b(?:http|curl|fetch|send|post|socket))""",
             re.IGNORECASE | re.DOTALL,
         ),
         "API key/secret read and potential exfiltration",
