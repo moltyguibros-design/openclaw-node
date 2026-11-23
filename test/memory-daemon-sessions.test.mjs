@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { repo, daemonFixture as fixture, transcript, runDaemon, calls, daemonLog } from './helpers/memory-daemon-harness.mjs';
+import { extractActivity } from '../lib/observer.mjs';
 
 test('interval synthesis flushes every active session, not only the newest transcript', () => {
   const fx = fixture();
@@ -21,9 +22,12 @@ test('interval synthesis flushes every active session, not only the newest trans
       { sessionId: 'aaaa1111', state: 'ACTIVE' }, { sessionId: 'bbbb2222', state: 'ACTIVE' }, { sessionId: 'cccc3333', state: 'IDLE' },
     ]);`);
     const log = daemonLog(fx);
-    assert.match(log, /interval synthesis \[[a-z-]+\] aaaa1111:/, 'the older active session gets its own synthesis');
-    assert.match(log, /interval synthesis \[[a-z-]+\] bbbb2222:/);
+    assert.match(log, /interval synthesis \[[a-z-]+\]: .* \(session aaaa1111\)/, 'the older active session gets its own synthesis');
+    assert.match(log, /interval synthesis \[[a-z-]+\]: .* \(session bbbb2222\)/);
     assert.doesNotMatch(log, /cccc3333/);
+    // The observer's memory-activity feed still parses each synthesis line.
+    const synthesis = extractActivity(log).filter((e) => e.kind === 'synthesis');
+    assert.equal(synthesis.length, 2);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
@@ -39,9 +43,9 @@ test('a NATS extract request flushes each live session, idle ones included', () 
       { sessionId: 'aaaa1111', state: 'IDLE' }, { sessionId: 'bbbb2222', state: 'ACTIVE' }, { sessionId: 'dddd4444', state: 'BOOT' },
     ], config);`);
     const log = daemonLog(fx);
-    assert.match(log, /nats-triggered flush \[[a-z-]+\] aaaa1111:/);
-    assert.match(log, /nats-triggered flush \[[a-z-]+\] bbbb2222:/);
-    assert.doesNotMatch(log, /flush \[[a-z-]+\] dddd4444/, 'the newest file belongs to a session still booting');
+    assert.match(log, /nats-triggered flush \[[a-z-]+\]: .* \(session aaaa1111\)/);
+    assert.match(log, /nats-triggered flush \[[a-z-]+\]: .* \(session bbbb2222\)/);
+    assert.doesNotMatch(log, /dddd4444/, 'the newest file belongs to a session still booting');
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }

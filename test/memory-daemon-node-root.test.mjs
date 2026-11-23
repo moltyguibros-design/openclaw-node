@@ -56,7 +56,7 @@ for (const [label, nativeApi] of [['Ollama-native API', 'true'], ['OpenAI-compat
         LLM_NATIVE_API: nativeApi,
         LLM_MODEL: 'test-model',
       });
-      assert.match(daemonLog(fx), /nats-triggered flush \[llm\] aaaa1111:/);
+      assert.match(daemonLog(fx), /nats-triggered flush \[llm\]: .* \(session aaaa1111\)/);
       const vault = path.join(fx.node, 'obsidian-local');
       const notes = fs.readdirSync(vault, { recursive: true }).filter((f) => f.endsWith('.md'));
       assert.ok(notes.some((f) => f.startsWith('sessions')), `no session note in the node vault: ${notes}`);

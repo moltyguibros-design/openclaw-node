@@ -942,7 +942,7 @@ async function runPhase2ThrottledWork(config, sessions) {
             const result = await serializeFlush(() => runFlushInWorker(jsonl, memoryMd, {
               charBudget: budget.charBudget,
             }));
-            log(`  Phase 2: interval synthesis [${result.mode || 'regex'}] ${sessionId.slice(0, 8)}: ${result.facts} facts found, ${result.added} added`);
+            log(`  Phase 2: interval synthesis [${result.mode || 'regex'}]: ${result.facts} facts found, ${result.added} added (session ${sessionId.slice(0, 8)})`);
             handleFlushResult(result, {
               trigger: 'Phase 2: interval synthesis',
               sessionId,
@@ -987,7 +987,7 @@ async function runRequestedFlush(sessions, config) {
           contextWindowTokens: config.contextWindowTokens || 200000,
         }));
         if (!result.skippedByCheck) {
-          log(`  nats-triggered flush [${result.mode || 'regex'}] ${sessionId.slice(0, 8)}: ${result.facts} facts, ${result.added} added, ${result.merged} merged`);
+          log(`  nats-triggered flush [${result.mode || 'regex'}]: ${result.facts} facts, ${result.added} added, ${result.merged} merged (session ${sessionId.slice(0, 8)})`);
           handleFlushResult(result, {
             trigger: 'nats-triggered flush',
             sessionId,

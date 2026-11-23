@@ -129,7 +129,7 @@ describe('only the live parts of the budget remain', () => {
       transcript(fx, 'aaaa1111', 10);
       runDaemon(fx, `await daemon.runRequestedFlush([{ sessionId: 'aaaa1111', state: 'ACTIVE' }], config);`);
       const log = daemonLog(fx);
-      assert.match(log, /nats-triggered flush \[regex\] aaaa1111: \d+ facts, [1-9]\d* added/);
+      assert.match(log, /nats-triggered flush \[regex\]: \d+ facts, [1-9]\d* added, \d+ merged \(session aaaa1111\)/);
       assert.doesNotMatch(log, /memory-budget/);
     } finally {
       removeFixture(fx);
