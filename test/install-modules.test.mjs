@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1116,9 +1116,73 @@ test('env.sh builds the event-schemas dist the memory daemon needs at startup', 
   const env = moduleSrc['env.sh'];
   assert.match(env, /packages\/event-schemas\/dist\/index\.js/);
   assert.match(env, /npx --yes --package typescript@5 tsc -p packages\/event-schemas\/tsconfig\.json/);
-  assert.match(env, /event-schemas build produced no dist\/index\.js[^\n]*\n\s*exit 1/);
+  assert.match(env, /event-schemas build produced no dist\/index\.js[^\n]*\n\s*return 1/);
+  assert.match(env, /^build_event_schemas "\$REPO_DIR" \|\| exit 1$/m);
   // The daemon's loader is the reason this matters: it fails loud on a missing dist.
   assert.match(readFileSync(join(ROOT, 'lib/event-schemas.mjs'), 'utf8'), /event-schemas dist missing/);
+});
+
+// Both steps ran only when their sentinel (node_modules/nats, dist/index.js) was
+// missing, so `git pull && install.sh --update` never applied a dependency bump
+// or a schema change on a persistent checkout.
+test('install --update reinstalls changed dependencies and rebuilds a stale event-schemas dist', () => {
+  const env = moduleSrc['env.sh'];
+  const block = env.slice(env.indexOf('# ── Repo runtime dependencies ──'), env.indexOf('# ── Resolve the agent provider'));
+  assert.ok(block.length > 0, 'the dependency block must be found');
+  const root = tmpDir('openclaw-deps-');
+  const repo = join(root, 'repo');
+  const put = (rel, text) => { mkdirSync(dirname(join(repo, rel)), { recursive: true }); writeFileSync(join(repo, rel), text); };
+  put('package.json', '{"name":"r","dependencies":{"nats":"^2"}}\n');
+  put('package-lock.json', '{"lockfileVersion":3,"v":1}\n');
+  put('packages/event-schemas/tsconfig.json', '{}\n');
+  put('packages/event-schemas/src/events.ts', 'export const a = 1;\n');
+  const calls = join(root, 'calls.log');
+  mkdirSync(join(root, 'fakebin'));
+  writeFileSync(join(root, 'fakebin', 'npm'), `#!/bin/sh
+echo "npm $*" >> "${calls}"
+rm -rf node_modules && mkdir -p node_modules/nats
+`, { mode: 0o755 });
+  // Like tsc on unchanged sources: an existing output is left as it is.
+  writeFileSync(join(root, 'fakebin', 'npx'), `#!/bin/sh
+echo "npx $*" >> "${calls}"
+mkdir -p packages/event-schemas/dist
+[ -f packages/event-schemas/dist/index.js ] || echo built > packages/event-schemas/dist/index.js
+`, { mode: 0o755 });
+  const run = () => {
+    writeFileSync(calls, '');
+    const r = spawnSync('bash', ['-c', `set -euo pipefail
+DRY_RUN=false; info() { :; }; error() { echo "ERR $*"; }; run() { "$@"; }
+REPO_DIR=${JSON.stringify(repo)}
+${block}`], { encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'fakebin')}:${process.env.PATH}` } });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    return readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean);
+  };
+  const tsc = 'npx --yes --package typescript@5 tsc -p packages/event-schemas/tsconfig.json';
+  const dist = join(repo, 'packages/event-schemas/dist/index.js');
+  const age = (rel, secondsAgo) => { const t = Date.now() / 1000 - secondsAgo; utimesSync(join(repo, rel), t, t); };
+
+  assert.deepEqual(run(), ['npm ci --omit=dev', tsc]);
+  assert.ok(existsSync(join(repo, 'node_modules/.openclaw-deps.sha')), 'the install records what it installed from');
+  assert.deepEqual(run(), [], 'nothing changed, nothing reinstalled');
+
+  put('package-lock.json', '{"lockfileVersion":3,"v":2}\n');
+  assert.deepEqual(run(), ['npm ci --omit=dev'], 'a lockfile change reinstalls');
+  put('package.json', '{"name":"r","dependencies":{"nats":"^3"}}\n');
+  assert.deepEqual(run(), ['npm ci --omit=dev'], 'a package.json change reinstalls');
+
+  age('packages/event-schemas/dist/index.js', 100);
+  age('packages/event-schemas/src/events.ts', 10);
+  assert.deepEqual(run(), [tsc], 'a source newer than the dist rebuilds it');
+  assert.deepEqual(run(), [], 'the rebuilt dist counts as fresh even when tsc left it untouched');
+
+  rmSync(join(repo, 'package-lock.json'));
+  assert.deepEqual(run(), ['npm install --omit=dev'], 'no lockfile (the npm tarball): npm install');
+
+  rmSync(join(repo, 'packages/event-schemas/src'), { recursive: true });
+  age('packages/event-schemas/dist/index.js', 100);
+  assert.deepEqual(run(), [], 'without src/ the shipped dist is kept');
+  rmSync(dist);
+  assert.deepEqual(run(), [tsc], 'a missing dist is still built');
 });
 
 // Provider-agnostic install (2026-09-08). The runtime drives nine providers

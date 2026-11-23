@@ -26,33 +26,68 @@ info "nats-server: $NATS_SERVER_BIN"
 
 # ── Repo runtime dependencies ──
 # The mesh daemons exec from the repo tree and require the repo's node_modules
-# (`nats` above all). The npx path ships them; the git-clone path does not.
-if [ ! -d "$REPO_DIR/node_modules/nats" ]; then
-  info "Installing repo runtime dependencies (npm install --omit=dev)..."
-  (cd "$REPO_DIR" && run npm install --omit=dev) || { error "repo npm install failed — mesh daemons cannot run"; exit 1; }
-else
-  info "Repo node_modules present"
-fi
+# (`nats` above all). The npx path ships them; the git-clone path does not. A
+# persistent checkout updated by `git pull && install.sh --update` keeps its
+# node_modules, so the install also reruns when package.json or the lockfile
+# differs from what node_modules was installed from. npm's own
+# node_modules/.package-lock.json cannot be that record: it has no root entry
+# and, under --omit=dev, no dev deps, so it never equals package-lock.json.
+repo_deps_sha() {
+  local f
+  for f in package.json package-lock.json; do
+    if [ -f "$1/$f" ]; then cat "$1/$f"; fi
+  done | if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1
+}
+
+install_repo_deps() {
+  local repo="$1" want cmd=install
+  want="$(repo_deps_sha "$repo")"
+  if [ -d "$repo/node_modules/nats" ] && [ "$(cat "$repo/node_modules/.openclaw-deps.sha" 2>/dev/null)" = "$want" ]; then
+    info "Repo node_modules match package.json + package-lock.json"
+    return 0
+  fi
+  # npm pack never ships the lockfile.
+  if [ -f "$repo/package-lock.json" ]; then cmd=ci; fi
+  info "Installing repo runtime dependencies (npm $cmd --omit=dev)..."
+  (cd "$repo" && run npm "$cmd" --omit=dev) || return 1
+  if ! $DRY_RUN; then printf '%s\n' "$want" > "$repo/node_modules/.openclaw-deps.sha"; fi
+}
 
 # The memory daemon imports packages/event-schemas/dist and exits at startup
 # without it. dist/ is gitignored and --omit=dev leaves no compiler behind, so a
 # git checkout has none (the npm tarball now gets it from prepack). On the first
 # virgin-Mac run the tarball had none either: the daemon died silently and the
 # acceptance gate failed five rows downstream (no DBs, no inject token, no event
-# stream). Build it here.
-SCHEMAS_DIST="$REPO_DIR/packages/event-schemas/dist/index.js"
-if [ ! -f "$SCHEMAS_DIST" ]; then
-  info "Building event-schemas (memory daemon refuses to start without its dist)..."
-  (cd "$REPO_DIR" && run npx --yes --package typescript@5 tsc -p packages/event-schemas/tsconfig.json) \
-    || { error "event-schemas build failed — the memory daemon cannot start"; exit 1; }
-  if ! $DRY_RUN && [ ! -f "$SCHEMAS_DIST" ]; then
-    error "event-schemas build produced no dist/index.js — the memory daemon cannot start"
-    exit 1
+# stream). It is also rebuilt when a source file is newer than the dist, which
+# is what a pulled or checked-out schema change leaves; a tree with no src/
+# keeps the dist it shipped with.
+event_schemas_stale() {
+  local pkg="$1/packages/event-schemas"
+  [ -f "$pkg/dist/index.js" ] || return 0
+  [ -d "$pkg/src" ] && [ -n "$(find "$pkg/src" -newer "$pkg/dist/index.js" -print -quit)" ]
+}
+
+build_event_schemas() {
+  local repo="$1"
+  if ! event_schemas_stale "$repo"; then
+    info "event-schemas dist up to date"
+    return 0
   fi
+  info "Building event-schemas (memory daemon refuses to start without its dist)..."
+  (cd "$repo" && run npx --yes --package typescript@5 tsc -p packages/event-schemas/tsconfig.json) \
+    || { error "event-schemas build failed — the memory daemon cannot start"; return 1; }
+  if $DRY_RUN; then return 0; fi
+  if [ ! -f "$repo/packages/event-schemas/dist/index.js" ]; then
+    error "event-schemas build produced no dist/index.js — the memory daemon cannot start"
+    return 1
+  fi
+  # tsc can leave an unchanged output's mtime alone; the staleness test needs the build time.
+  touch "$repo/packages/event-schemas/dist/index.js"
   info "event-schemas built"
-else
-  info "event-schemas dist present"
-fi
+}
+
+install_repo_deps "$REPO_DIR" || { error "repo npm install failed — mesh daemons cannot run"; exit 1; }
+build_event_schemas "$REPO_DIR" || exit 1
 
 # ── Resolve the agent provider (the node's mind) ──
 # The runtime is provider-agnostic (lib/llm-providers.js): the mind is whatever
