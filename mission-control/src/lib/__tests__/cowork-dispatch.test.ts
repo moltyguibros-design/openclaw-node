@@ -51,13 +51,23 @@ function dispatch(nodes: unknown[]) {
   return post({ nodes });
 }
 
-async function seedCluster(status: string, defaults: { mode?: string; convergence?: string; maxRounds?: number } = {}) {
+async function seedCluster(
+  status: string,
+  defaults: { mode?: string; convergence?: string; threshold?: number; maxRounds?: number } = {}
+) {
   const raw = await openDb();
   raw
     .prepare(
-      "INSERT INTO clusters (id, name, status, updated_at, default_mode, default_convergence, max_rounds) VALUES ('c', 'C', ?, ?, ?, ?, ?)"
+      "INSERT INTO clusters (id, name, status, updated_at, default_mode, default_convergence, convergence_threshold, max_rounds) VALUES ('c', 'C', ?, ?, ?, ?, ?, ?)"
     )
-    .run(status, new Date().toISOString(), defaults.mode ?? "parallel", defaults.convergence ?? "unanimous", defaults.maxRounds ?? 5);
+    .run(
+      status,
+      new Date().toISOString(),
+      defaults.mode ?? "parallel",
+      defaults.convergence ?? "unanimous",
+      defaults.threshold ?? 66,
+      defaults.maxRounds ?? 5
+    );
   const member = raw.prepare("INSERT INTO cluster_members (cluster_id, node_id) VALUES ('c', ?)");
   member.run("a");
   member.run("b");
@@ -128,4 +138,11 @@ test("a manual dispatch without settings uses parallel / unanimous / 5 rounds", 
   expect(spec.mode).toBe("parallel");
   expect(spec.convergence.type).toBe("unanimous");
   expect(spec.max_rounds).toBe(5);
+});
+
+test("a majority cluster's convergence threshold applies when the body omits convergence", async () => {
+  await seedCluster("active", { convergence: "majority", threshold: 80 });
+  const res = await post({ clusterId: "c" });
+  const spec = collabOf((await res.json()).taskId);
+  expect(spec.convergence).toMatchObject({ type: "majority", threshold: 0.8 });
 });

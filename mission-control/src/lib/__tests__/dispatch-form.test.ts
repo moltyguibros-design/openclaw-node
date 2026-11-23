@@ -18,6 +18,16 @@ vi.mock("@/lib/hooks", () => ({
         maxRounds: 3,
         members: [{ nodeId: "worker1", role: "lead" }],
       },
+      {
+        id: "c2",
+        name: "Beta",
+        color: null,
+        defaultMode: "parallel",
+        defaultConvergence: "majority",
+        convergenceThreshold: 80,
+        maxRounds: 5,
+        members: [{ nodeId: "worker2", role: "worker" }],
+      },
     ],
   }),
   fetcher: vi.fn(),
@@ -53,6 +63,13 @@ describe("Cowork cluster defaults and roles", () => {
     expect(selectedButton(html, "coordinator")).toBe(true);
     expect(selectedButton(html, "unanimous")).toBe(false);
     expect(html).toMatch(/<input type="number" min="1" max="20"[^>]*value="3"/);
+  });
+
+  it("a majority cluster's threshold pre-fills the threshold slider", () => {
+    const html = renderToStaticMarkup(createElement(DispatchForm, { initialClusterId: "c2" }));
+    expect(selectedButton(html, "majority")).toBe(true);
+    expect(html).toMatch(/<input type="range" min="50" max="100"[^>]*value="80"/);
+    expect(html).toContain("80%");
   });
 
   it("without a cluster the form starts at parallel / unanimous / 5 rounds", () => {

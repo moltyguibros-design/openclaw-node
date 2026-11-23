@@ -49,6 +49,7 @@ export function DispatchForm({ initialClusterId }: { initialClusterId?: string |
     setDefaultsFrom(selectedCluster.id);
     setMode(selectedCluster.defaultMode);
     setConvergenceType(selectedCluster.defaultConvergence);
+    setThreshold(selectedCluster.convergenceThreshold);
     setMaxRounds(selectedCluster.maxRounds);
   }
 

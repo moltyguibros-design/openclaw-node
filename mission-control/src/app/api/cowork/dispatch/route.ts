@@ -73,7 +73,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const conv = convergence ?? { type: cluster?.defaultConvergence ?? "unanimous" };
+  const conv = convergence ?? {
+    type: cluster?.defaultConvergence ?? "unanimous",
+    threshold: cluster?.convergenceThreshold,
+  };
 
   // Build collaboration spec (bridge reads this from markdown)
   const collabSpec = {
