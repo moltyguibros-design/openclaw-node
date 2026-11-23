@@ -175,7 +175,13 @@ function provisionTrust(join, nodeId) {
     ok(`Node identity: ${self.publicKeyBase64}`);
   }
 
-  const sets = {};
+  // A join builds a worker (agent + deploy listener only). Saving the role is what lets a
+  // hand-run deploy pass requireNodeRole; a role this node already saved is kept.
+  const role = process.env.OPENCLAW_NODE_ROLE
+    || require('../lib/nats-resolve').readEnvFileKey(path.join(os.homedir(), '.openclaw', 'openclaw.env'), 'OPENCLAW_NODE_ROLE')
+    || 'worker';
+  const sets = { OPENCLAW_NODE_ROLE: role };
+  process.env.OPENCLAW_NODE_ROLE = role;
   if (join.natsAuth) {
     sets.OPENCLAW_NATS_AUTH = join.natsAuth;
     process.env.OPENCLAW_NATS_AUTH = join.natsAuth;

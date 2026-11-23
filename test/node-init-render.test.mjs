@@ -202,15 +202,15 @@ describe('node-init join-token trust provisioning', () => {
 
   function withHome(fn) {
     const home = mkdtempSync(join(tmpdir(), 'openclaw-init-'));
-    const saved = { HOME: process.env.HOME, MESH_JOIN_TOKEN: process.env.MESH_JOIN_TOKEN, OPENCLAW_IDENTITY_DIR: process.env.OPENCLAW_IDENTITY_DIR, D: process.env.OPENCLAW_DEPLOY_TRUSTED_KEYS, O: process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS, A: process.env.OPENCLAW_NATS_AUTH };
+    const saved = { HOME: process.env.HOME, MESH_JOIN_TOKEN: process.env.MESH_JOIN_TOKEN, OPENCLAW_IDENTITY_DIR: process.env.OPENCLAW_IDENTITY_DIR, D: process.env.OPENCLAW_DEPLOY_TRUSTED_KEYS, O: process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS, A: process.env.OPENCLAW_NATS_AUTH, R: process.env.OPENCLAW_NODE_ROLE };
     process.env.HOME = home;
     process.env.OPENCLAW_IDENTITY_DIR = join(home, '.openclaw');
-    delete process.env.OPENCLAW_DEPLOY_TRUSTED_KEYS; delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS; delete process.env.OPENCLAW_NATS_AUTH;
+    delete process.env.OPENCLAW_DEPLOY_TRUSTED_KEYS; delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS; delete process.env.OPENCLAW_NATS_AUTH; delete process.env.OPENCLAW_NODE_ROLE;
     mkdirSync(join(home, '.openclaw'), { recursive: true });
     try { return fn(home); } finally {
       process.env.HOME = saved.HOME; process.env.OPENCLAW_IDENTITY_DIR = saved.OPENCLAW_IDENTITY_DIR;
       if (saved.MESH_JOIN_TOKEN === undefined) delete process.env.MESH_JOIN_TOKEN; else process.env.MESH_JOIN_TOKEN = saved.MESH_JOIN_TOKEN;
-      for (const [k, v] of [['OPENCLAW_DEPLOY_TRUSTED_KEYS', saved.D], ['OPENCLAW_OPERATOR_TRUSTED_KEYS', saved.O], ['OPENCLAW_NATS_AUTH', saved.A]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+      for (const [k, v] of [['OPENCLAW_DEPLOY_TRUSTED_KEYS', saved.D], ['OPENCLAW_OPERATOR_TRUSTED_KEYS', saved.O], ['OPENCLAW_NATS_AUTH', saved.A], ['OPENCLAW_NODE_ROLE', saved.R]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
       rmSync(home, { recursive: true, force: true });
     }
   }
@@ -278,6 +278,25 @@ describe('node-init join-token trust provisioning', () => {
       // Idempotent: a second run adds nothing.
       provisionTrust({ leadNodeId: 'lead-1', leadPubkey: LEAD_KEY, natsAuth: 'nkey' }, 'worker-7');
       assert.equal(readFileSync(join(home, '.openclaw', 'openclaw.env'), 'utf8'), env);
+    });
+  });
+
+  // A join provisions a worker (only the agent and deploy listener are installed); the role
+  // lived only in those two units, so a hand-run deploy refused with "OPENCLAW_NODE_ROLE is not set".
+  it('provisionTrust saves the worker role in openclaw.env and the units render the same role', () => {
+    const { requireNodeRole } = require('../lib/mesh-roles.js');
+    withHome((home) => {
+      const envFile = join(home, '.openclaw', 'openclaw.env');
+      provisionTrust({ leadNodeId: 'lead-1', leadPubkey: LEAD_KEY, natsAuth: 'nkey' }, 'worker-7');
+      assert.match(readFileSync(envFile, 'utf8'), /^OPENCLAW_NODE_ROLE=worker$/m);
+      assert.equal(requireNodeRole({ env: {}, envFile }), 'worker');
+      assert.equal(serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: { nats: 'nats://a:4222' } }).OPENCLAW_NODE_ROLE, 'worker');
+
+      delete process.env.OPENCLAW_NODE_ROLE;
+      writeFileSync(envFile, 'OPENCLAW_NODE_ROLE=lead\n');
+      provisionTrust({ leadNodeId: 'lead-1', leadPubkey: LEAD_KEY, natsAuth: 'nkey' }, 'worker-7');
+      assert.equal(requireNodeRole({ env: {}, envFile }), 'lead', 'a role this node already saved is kept on a re-run');
+      assert.equal(process.env.OPENCLAW_NODE_ROLE, 'lead');
     });
   });
 

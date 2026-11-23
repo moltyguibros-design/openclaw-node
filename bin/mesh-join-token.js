@@ -6,7 +6,8 @@
  * Run this on the lead node. It produces a base64-encoded token containing
  * everything a new node needs to join the mesh:
  *   - NATS URL
- *   - Mesh node role (worker by default)
+ *   - Mesh node role (always worker: the join path installs only the worker
+ *     agent and deploy listener; a lead is set up with install.sh --role=lead)
  *   - Default LLM provider
  *   - Token expiry
  *   - The lead's node id + identity pubkey (raw base64 ed25519) and the NATS
@@ -16,7 +17,6 @@
  *
  * Usage:
  *   node bin/mesh-join-token.js                        # generate with defaults
- *   node bin/mesh-join-token.js --role worker           # explicit role
  *   node bin/mesh-join-token.js --provider deepseek     # set default LLM
  *   node bin/mesh-join-token.js --expires 24h           # custom expiry (default: 48h)
  *   node bin/mesh-join-token.js --one-liner             # output curl | sh one-liner
@@ -46,7 +46,10 @@ function getArg(flag, defaultVal) {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : defaultVal;
 }
 
-const ROLE = getArg('--role', 'worker');
+if (args.includes('--role')) {
+  console.error('mesh-join-token: --role is not supported; join tokens always provision a worker. Set up a lead with install.sh --role=lead.');
+  process.exit(2);
+}
 // Default = the lead's own provider (env chain), not a hardcoded vendor.
 const PROVIDER = getArg('--provider', resolveEnvKey('MESH_LLM_PROVIDER') || 'claude');
 const EXPIRES = getArg('--expires', '48h');
@@ -117,7 +120,7 @@ const generateToken = tracer.wrap('generateToken', function generateToken() {
   const payload = {
     v: CURRENT_VERSION,             // token version (v4: lead identity + nats_auth)
     nats: NATS_URL,                 // NATS server URL
-    role: ROLE,                     // node role
+    role: 'worker',                 // node role (joins are always workers)
     provider: PROVIDER,             // default LLM provider
     repo: REPO,                     // mesh code repo URL
     lead: os.hostname(),            // lead node hostname (for reference)

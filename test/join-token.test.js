@@ -62,6 +62,7 @@ test('bin/mesh-join-token.js emits a v4 payload carrying the lead pubkey and aut
   assert.doesNotMatch(r.stderr, /loopback/);
   assert.equal(payload.lead_node_id, 'lead-x');
   assert.equal(payload.nats_auth, 'nkey');
+  assert.equal(payload.role, 'worker', 'a join provisions a worker');
   const pub = fs.readFileSync(path.join(home, '.openclaw', 'identity.pub'), 'utf8');
   assert.ok(pub.includes('BEGIN PUBLIC KEY'));
   assert.equal(payload.lead_identity_pubkey.length, 44, 'raw base64 ed25519 pubkey, not PEM');
@@ -83,6 +84,20 @@ test('bin/mesh-join-token.js warns on stderr when the token would carry a loopba
   assert.equal(decodeJoinToken(token).payload.nats, 'nats://127.0.0.1:4222');
   assert.match(r.stderr, /loopback/);
   assert.doesNotMatch(r.stdout, /loopback/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('bin/mesh-join-token.js refuses --role: a join token can only provision a worker', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_NATS=nats://10.9.9.9:4222\nOPENCLAW_NODE_ID=lead-x\n');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/mesh-join-token.js'), '--no-ssh', '--role', 'lead'], {
+    encoding: 'utf8', env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('OPENCLAW_'))), HOME: home, OPENCLAW_IDENTITY_DIR: path.join(home, '.openclaw'), OPENCLAW_NODE_ID: 'lead-x' },
+  });
+  assert.equal(r.status, 2, r.stdout);
+  assert.match(r.stderr, /always provision a worker/);
+  assert.doesNotMatch(r.stdout, /Token:/);
+  assert.equal(fs.existsSync(path.join(home, '.openclaw', '.mesh-secret')), false, 'refused before any secret is created');
   fs.rmSync(home, { recursive: true, force: true });
 });
 
