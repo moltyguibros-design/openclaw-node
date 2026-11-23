@@ -74,6 +74,25 @@ describe('local event stream on an upgraded node (real nats-server)', { skip }, 
     assert.match(logs.join('\n'), /local-events-daedalus: retention set/);
   });
 
+  // The server stamps messages with its own clock, so the client clock is moved
+  // 40 days ahead to read the stream as a long-lived node's: older than max_age.
+  it('a stream without retention whose history is older than 30 days gets the limits too', async (t) => {
+    await jsm.streams.add({ name: 'local-events-daedalus', subjects: ['local.daedalus.>'], storage: StorageType.File, num_replicas: 1 });
+    await nc.jetstream().publish('local.daedalus.session.events.s1.memory.session_started', new TextEncoder().encode('{}'));
+    const logs = [];
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 40 * 24 * 3600 * 1000 });
+    try {
+      await createLocalEventLog(nc, 'daedalus', { log: (m) => logs.push(m) });
+    } finally {
+      t.mock.timers.reset();
+    }
+    const { config } = await jsm.streams.info('local-events-daedalus');
+    assert.equal(config.max_age, EVENT_STREAM_MAX_AGE_NS);
+    assert.equal(config.max_bytes, EVENT_STREAM_MAX_BYTES);
+    assert.equal(config.discard, 'old');
+    assert.match(logs.join('\n'), /local-events-daedalus: retention set \(max_age 720h, max_bytes 268435456, discard old\); trimmed its messages from /);
+  });
+
   const LOCAL = 'local-events-daedalus';
   const addLocalStream = () => jsm.streams.add({ name: LOCAL, subjects: ['local.daedalus.>'], storage: StorageType.File, num_replicas: 1, ...eventStreamRetention() });
   const publishEvent = (id) => nc.jetstream().publish(`local.daedalus.memory.events.${id}.memory.ingested`,

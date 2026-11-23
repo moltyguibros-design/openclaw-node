@@ -245,15 +245,30 @@ describe('createLocalEventLog retention', () => {
     assert.equal(updates.length, 0);
   });
 
-  it('an unlimited stream holding older history is not trimmed: the command is logged instead', async () => {
+  // Every production stream predates retention by more than a month, so a
+  // stream holding older history is the case the limits exist for.
+  it('an unlimited stream holding history older than 30 days still gets the limits, and the log says what is trimmed', async () => {
     const { nc, streams, states, updates } = mockJetStream();
     streams.set('local-events-daedalus', unlimited('local-events-daedalus'));
     states.set('local-events-daedalus', { messages: 55_173, bytes: 80_000_000, first_ts: '2026-07-14T12:00:00Z' });
     const logs = [];
     await createLocalEventLog(nc, 'daedalus', { log: (m) => logs.push(m) });
-    assert.equal(updates.length, 0, 'applying max_age would have expired stored history');
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0].cfg, { ...unlimited('local-events-daedalus'), max_age: MONTH_NS, max_bytes: MIB_256, discard: 'old' });
     assert.equal(logs.length, 1);
-    assert.ok(logs[0].includes('nats stream edit local-events-daedalus --max-age 720h --max-bytes 268435456 --discard old'), logs[0]);
+    assert.match(logs[0], /^local-events-daedalus: retention set \(max_age 720h, max_bytes 268435456, discard old\); trimmed its messages from 2026-07-14T12:00:00Z to /);
+  });
+
+  it('an unlimited stream over 256 MiB gets the limits, and the log says how many bytes are trimmed', async () => {
+    const { nc, streams, states, updates } = mockJetStream();
+    streams.set('local-events-daedalus', unlimited('local-events-daedalus'));
+    states.set('local-events-daedalus', { messages: 400_000, bytes: MIB_256 + 1000, first_ts: new Date(Date.now() - 86_400_000).toISOString() });
+    const logs = [];
+    await createLocalEventLog(nc, 'daedalus', { log: (m) => logs.push(m) });
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].cfg.max_bytes, MIB_256);
+    assert.equal(logs.length, 1);
+    assert.ok(logs[0].endsWith(`; trimmed the oldest 1000 of its ${MIB_256 + 1000} bytes`), logs[0]);
   });
 });
 
