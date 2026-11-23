@@ -280,6 +280,18 @@ test('render_unit keeps the installed unit when the render or the plist lint fai
   assert.deepEqual(readdirSync(dir).filter((f) => f.includes('.render.')), []);
 });
 
+// The Linux gateway ran in ~/openclaw, which no documented install creates, so systemd
+// failed its start with 200/CHDIR before node ran. The plist sets no working directory.
+test('no unit runs in the ~/openclaw copy', () => {
+  for (const dir of ['services/systemd', 'services/launchd']) {
+    for (const f of readdirSync(join(ROOT, dir))) {
+      const src = readFileSync(join(ROOT, dir, f), 'utf8');
+      assert.doesNotMatch(src, /^WorkingDirectory=-?\$\{HOME\}\/openclaw\b/m, `${dir}/${f}`);
+      assert.doesNotMatch(src, /<key>WorkingDirectory<\/key>\s*<string>\$\{HOME\}\/openclaw\b/, `${dir}/${f}`);
+    }
+  }
+});
+
 // The gateway units hardcoded /usr/local/lib/node_modules/openclaw, which is not
 // where npm -g installs on Apple-Silicon Homebrew (/opt/homebrew/lib) or NodeSource (/usr/lib).
 test('gateway units run the openclaw package npm -g actually installed', () => {
