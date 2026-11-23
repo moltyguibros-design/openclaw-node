@@ -100,6 +100,18 @@ describe('backfillDigests: the one-time catch-up over existing session notes', (
     assert.ok(digest(vault, '2026-06-07-weekly').includes('[[sessions/2026-06-03-topic-aaaa0002]]'));
   });
 
+  // sessions/ is in the operator's vault, so a hand-written note can carry any date.
+  it('skips a session note whose date is not a calendar day instead of aborting the catch-up', async () => {
+    const vault = tmpDir('digest-catchup-malformed-');
+    writeSessionNote(vault, '2026-11-20', 'ffff0001');
+    writeSessionNote(vault, 'Nov 2026', 'ffff0002');
+    writeSessionNote(vault, '"2026-02-30"', 'ffff0003');
+    writeSessionNote(vault, '"2026-13-01"', 'ffff0004');
+    const r = await backfillDigests({ vaultPath: vault, now: Date.parse('2026-11-30T12:00:00Z') });
+    assert.deepEqual(r, { daily: 1, weekly: 1 });
+    assert.deepEqual(readdirSync(join(vault, 'daily')).sort(), ['2026-11-20.md', '2026-11-22-weekly.md']);
+  });
+
   it('runs as consolidate --backfill-digests without a cycle', () => {
     const dir = tmpDir('digest-cli-');
     const vault = join(dir, 'vault');
