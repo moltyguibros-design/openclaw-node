@@ -12,9 +12,7 @@ When spawning a sub-agent as a specific soul (e.g., blockchain-auditor, lore-wri
    ```
    Reads the soul's SOUL.md, PRINCIPLES.md, learned genes, permissions, handoff context → outputs full preamble to stdout.
 
-2. Check recommended subagent_type (printed to stderr):
-   - Soul has Write/Edit/Bash in tools → `general-purpose`
-   - Soul only has read-only tools → `Explore`
+2. Check the recommended subagent_type (printed to stderr): `Explore` when the soul's `tools` list names none of Write/Edit/Bash, otherwise `general-purpose`. Every shipped soul lists one of them, so every soul gets `general-purpose` and the full tool set; this picks an agent profile, it does not scope tools (see Permission Scoping).
 
 3. Call the Task tool:
    ```
@@ -163,7 +161,7 @@ Default sub-agent restrictions:
 - No file deletion (use `trash`)
 - No writing to SOUL.md, PRINCIPLES.md, AGENTS.md, MEMORY.md (genome files = human-approved only)
 
-Soul-specific permissions: `capabilities.json`, enforced by `soul-prompt`.
+Soul-specific tool lists and restricted actions in `capabilities.json` are printed into the preamble by `soul-prompt` and are advisory: nothing stops a soul beyond the model following them. Only memory access is enforced (`lib/soul-memory-access.mjs`).
 
 ## Handoff Templates
 

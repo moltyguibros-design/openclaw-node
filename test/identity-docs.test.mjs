@@ -86,6 +86,16 @@ test('HEARTBEAT.md never lets the unattended agent push or commit work it did no
   assert.match(text, /`uncommitted_work`: report it; commit only your own changes/);
 });
 
+// soul-prompt only prints a soul's tool list and restricted actions into its
+// preamble; every shipped soul lists Bash or Write, so all start with full tools.
+test('DELEGATION.md presents soul tool lists as advisory, not enforced', () => {
+  const text = docs.find(([f]) => f === 'DELEGATION.md')[1];
+  assert.doesNotMatch(text, /enforced by `?soul-prompt`?/);
+  assert.match(text, /advisory/);
+  assert.match(text, /lib\/soul-memory-access\.mjs/);
+  assert.doesNotMatch(text, /only has read-only tools/);
+});
+
 // memory-maintenance stopped archiving daily files in June (checkArchival went with the
 // hourly daily-log writer) and exits 0 on warnings.
 test('identity docs describe memory-maintenance as it runs: no archival, no exit 1', () => {
