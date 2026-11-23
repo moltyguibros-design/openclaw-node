@@ -63,7 +63,7 @@
   "scripts": {
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath config/git-hooks || true",
     "pretest": "npm run --workspaces --if-present build",
-    "test": "node --test test/*.test.js test/*.test.mjs",
+    "test": "OPENCLAW_OBS_DB=:memory: node --test test/*.test.js test/*.test.mjs",
     "test:unit": "npm test",
     "test:strict": "OPENCLAW_REQUIRE_MESH=1 npm test",
     "test:mc": "cd mission-control && npx vitest run src/lib/__tests__/",
