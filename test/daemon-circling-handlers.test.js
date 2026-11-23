@@ -55,11 +55,13 @@ function harness() {
   const published = [];
   const completed = [];
   const released = [];
+  const failed = [];
   const store = {
     async get(taskId) { return { task_id: taskId, title: 'circling task', description: 'do the thing', scope: [] }; },
     // The daemon publishes 'completed' only for a transition that happened.
     async markCompleted(taskId, result) { completed.push({ taskId, result }); return { task_id: taskId, status: 'completed', result }; },
     async markReleased(taskId, reason) { released.push({ taskId, reason }); return false; },
+    async markFailed(taskId, reason) { failed.push({ taskId, reason }); return false; },
   };
   const nc = {
     publish(subject, data) { published.push({ subject, payload: JSON.parse(sc.decode(data)) }); },
@@ -75,7 +77,7 @@ function harness() {
     return reply;
   }
   const roundNotices = (sid) => published.filter(p => p.subject.startsWith(`mesh.collab.${sid}.node.`));
-  return { collabStore, published, completed, released, reflect, roundNotices };
+  return { collabStore, published, completed, released, failed, reflect, roundNotices };
 }
 
 function makeCirclingSession(overrides = {}) {
@@ -322,6 +324,107 @@ describe('Daemon Circling: handleCirclingStepTimeout', () => {
     const s = await h.collabStore.get(sid);
     assert.ok(s.nodes.every(n => n.status !== 'dead'));
     assert.equal(s.status, COLLAB_STATUS.ACTIVE);
+  });
+});
+
+// A session can end mid-step (its parent cancelled, failed, released, or a member
+// left below min_nodes); the step timer armed for that step must not act on it.
+describe('Daemon Circling: a step timer on a session that already ended', () => {
+  let h;
+  beforeEach(() => { h = harness(); });
+
+  const STEP_TIMEOUT_MS = 10 * 60 * 1000;
+  const deadMarks = (s) => s.audit_log.filter(e => e.event === 'node_marked_dead');
+  const collabEvents = (from) => h.published.slice(from).filter(p => p.subject.startsWith('mesh.events.collab.'));
+  const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(r => setImmediate(r)); };
+
+  async function atStep2() {
+    const sid = await makeActiveSession(h.collabStore);
+    for (const n of ['node-worker', 'node-revA', 'node-revB']) await h.reflect({ session_id: sid, ...ok(n) });
+    assert.equal((await h.collabStore.get(sid)).circling.current_step, 2, 'step 2 started and armed its timer');
+    return sid;
+  }
+
+  it('a timeout on a session aborted mid-step marks no node dead and publishes nothing', async () => {
+    const sid = await makeActiveSession(h.collabStore);
+    await h.reflect({ session_id: sid, ...ok('node-worker') });
+    await h.reflect({ session_id: sid, ...ok('node-revA') });
+    await h.collabStore.markAborted(sid, 'parent cancelled');
+    const before = h.published.length;
+
+    await daemon.__test.handleCirclingStepTimeout(sid, { phase: 'circling', subround: 1, step: 1 });
+
+    const s = await h.collabStore.get(sid);
+    assert.equal(s.status, COLLAB_STATUS.ABORTED);
+    assert.ok(s.nodes.every(n => n.status !== 'dead'));
+    assert.deepEqual(deadMarks(s), []);
+    assert.deepEqual(collabEvents(before), []);
+    assert.deepEqual(h.released, []);
+  });
+
+  it('a timeout on an aborted finalization session completes neither it nor its parent', async () => {
+    const sid = await makeActiveSession(h.collabStore);
+    const s = await h.collabStore.get(sid);
+    s.circling.phase = 'finalization';
+    s.circling.current_subround = 2;
+    s.circling.current_step = 0;
+    await h.collabStore.put(s);
+    await h.collabStore.startRound(sid);
+    await h.collabStore.submitReflection(sid, { node_id: 'node-worker', vote: 'converged', confidence: 0.9, summary: 'Done', circling_step: 0 });
+    await h.collabStore.markAborted(sid, 'parent cancelled');
+    const before = h.published.length;
+
+    await daemon.__test.handleCirclingStepTimeout(sid, { phase: 'finalization', subround: 2, step: 0 });
+
+    const after = await h.collabStore.get(sid);
+    assert.equal(after.status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(deadMarks(after), []);
+    assert.deepEqual(h.completed, []);
+    assert.deepEqual(collabEvents(before), []);
+  });
+
+  it('a member leaving below min_nodes clears the step timer', async () => {
+    const sid = await atStep2();
+    let reply;
+    await daemon.__test.handleCollabLeave({
+      data: sc.encode(JSON.stringify({ session_id: sid, node_id: 'node-revB', member_token: tokenFor('node-revB').token, reason: 'test' })),
+      respond(data) { reply = JSON.parse(sc.decode(data)); },
+    });
+    assert.equal(reply.ok, true, JSON.stringify(reply));
+    assert.equal((await h.collabStore.get(sid)).status, COLLAB_STATUS.ABORTED);
+    const before = h.published.length;
+
+    mock.timers.tick(STEP_TIMEOUT_MS + 1);
+    await flush();
+
+    assert.deepEqual(deadMarks(await h.collabStore.get(sid)), []);
+    assert.deepEqual(collabEvents(before), []);
+  });
+
+  it('failing the parent task clears the step timer', async () => {
+    const sid = await atStep2();
+    const parent = { task_id: 'test-task', owner: 'node-worker', collab_session_id: sid };
+    daemon.__test.setContext({
+      store: {
+        async get() { return parent; },
+        async markFailed(taskId, reason) { return { ...parent, status: 'failed', result: { error: reason } }; },
+        async markReleased() { return false; },
+      },
+    });
+    let reply;
+    await daemon.__test.handleFail({
+      data: sc.encode(JSON.stringify({ task_id: 'test-task', node_id: 'node-worker', reason: 'gave up' })),
+      respond(data) { reply = JSON.parse(sc.decode(data)); },
+    });
+    assert.equal(reply.ok, true, JSON.stringify(reply));
+    assert.equal((await h.collabStore.get(sid)).status, COLLAB_STATUS.ABORTED);
+    const before = h.published.length;
+
+    mock.timers.tick(STEP_TIMEOUT_MS + 1);
+    await flush();
+
+    assert.deepEqual(deadMarks(await h.collabStore.get(sid)), []);
+    assert.deepEqual(collabEvents(before), []);
   });
 });
 

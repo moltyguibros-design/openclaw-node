@@ -290,6 +290,7 @@ async function reviewRecipients(task) {
  */
 async function cleanupTaskCollabSession(task, reason) {
   if (!task.collab_session_id || !collabStore) return;
+  clearCirclingStepTimer(task.collab_session_id);
   try {
     // markAborted returns null if session doesn't exist or is already completed/aborted.
     // Non-null means we actually transitioned the session to aborted.
@@ -1165,6 +1166,7 @@ async function handleCollabLeave(msg) {
   // If below min_nodes and still active, abort
   if (session.status === COLLAB_STATUS.ACTIVE && session.nodes.length < session.min_nodes) {
     const abortReason = `Below min_nodes: ${session.nodes.length} < ${session.min_nodes}`;
+    clearCirclingStepTimer(session_id);
     const aborted = await collabStore.markAborted(session_id, abortReason);
     publishCollabEvent('aborted', aborted || await collabStore.get(session_id));
     if (aborted) await settleCollabParent(session.task_id, 'failed', `Collab aborted: ${abortReason}`);
@@ -2027,7 +2029,7 @@ async function handleCirclingStepTimeout(sessionId, stepSnapshot) {
   circlingStepTimers.delete(sessionId);
 
   const session = await collabStore.get(sessionId);
-  if (!session || !session.circling) return;
+  if (!session || !session.circling || session.status !== COLLAB_STATUS.ACTIVE) return;
 
   const { phase, current_subround, current_step } = session.circling;
 
