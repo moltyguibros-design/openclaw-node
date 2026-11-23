@@ -29,6 +29,7 @@ fi
 
 OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
 WORKSPACE="$OPENCLAW_ROOT/workspace"
+BOOTSTRAP_SRC="$HOME/.openclaw-src/openclaw-node"
 PURGE=false
 
 for arg in "$@"; do
@@ -50,9 +51,12 @@ echo "OpenClaw Node Uninstaller"
 echo ""
 
 if $PURGE; then
-  warn "PURGE mode: removing ALL OpenClaw data"
+  PURGE_TARGETS=("$OPENCLAW_ROOT" "$HOME/openclaw")
+  [ -d "$BOOTSTRAP_SRC" ] && PURGE_TARGETS+=("$BOOTSTRAP_SRC")
+  warn "PURGE mode: this deletes:"
+  for target in "${PURGE_TARGETS[@]}"; do echo "    $target"; done
   echo ""
-  read -r -p "Are you sure? This deletes ~/.openclaw entirely. [y/N] " confirm || confirm=""
+  read -r -p "Are you sure? [y/N] " confirm || confirm=""
   case "$confirm" in
     y|Y) ;;
     *) info "Aborted, nothing changed."; exit 0 ;;
@@ -123,6 +127,11 @@ if $PURGE; then
   rm -rf "$HOME/openclaw"
   info "Removed $OPENCLAW_ROOT"
   info "Removed $HOME/openclaw (mesh shared folder + agent)"
+  if [ -d "$BOOTSTRAP_SRC" ]; then
+    rm -rf "$BOOTSTRAP_SRC"
+    rmdir "$HOME/.openclaw-src" 2>/dev/null || true
+    info "Removed $BOOTSTRAP_SRC (bootstrap source tree)"
+  fi
 else
   info "Removing scripts and services (keeping memory data)..."
   rm -rf "$WORKSPACE/bin"

@@ -26,6 +26,7 @@ function fixture() {
   put('.openclaw/workspace/memory/keep.md');
   put('openclaw/bin/x');
   put('openclaw/lib/x');
+  put('.openclaw-src/openclaw-node/node_modules/@huggingface/transformers/.cache/x');
 
   const stub = join(home, 'stub-bin');
   mkdirSync(stub);
@@ -72,6 +73,7 @@ test('uninstall removes launchers and installed code trees, keeps memory, never 
       'openclaw/lib',
     ]) assert.equal(existsSync(join(fx.home, rel)), false, rel);
     assert.equal(existsSync(join(fx.home, '.openclaw/workspace/memory/keep.md')), true);
+    assert.equal(existsSync(join(fx.home, '.openclaw-src/openclaw-node/node_modules')), true);
     assert.equal(existsSync(join(fx.home, 'lsof-called')), false);
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
@@ -105,7 +107,11 @@ test('uninstall --purge also removes the launchers outside OPENCLAW_ROOT', linux
     assert.equal(existsSync(unit), false);
     assert.equal(existsSync(join(fx.home, '.openclaw')), false);
     assert.equal(existsSync(join(fx.home, 'openclaw')), false);
+    assert.equal(existsSync(join(fx.home, '.openclaw-src')), false);
     for (const rel of LAUNCHERS) assert.equal(existsSync(join(fx.home, rel)), false, rel);
+    for (const rel of ['.openclaw', 'openclaw', '.openclaw-src/openclaw-node']) {
+      assert.ok(r.stdout.includes(`    ${join(fx.home, rel)}\n`), `the prompt names ${rel}`);
+    }
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
   }
@@ -123,6 +129,7 @@ test('uninstall --purge answered N or EOF changes nothing', linuxOnly, () => {
         ...LAUNCHERS,
         '.openclaw/workspace/bin',
         'openclaw/bin',
+        '.openclaw-src/openclaw-node/node_modules',
       ]) assert.equal(existsSync(join(fx.home, rel)), true, `${JSON.stringify(input)}: ${rel}`);
       assert.equal(existsSync(unit), true, JSON.stringify(input));
     } finally {
