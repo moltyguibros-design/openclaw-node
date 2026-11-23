@@ -144,4 +144,27 @@ describe('collab max rounds without convergence (mesh-core#16)', () => {
     assert.equal(fresh.mode, 'parallel');
     assert.ok(h.published.some((p) => p.subject === `mesh.collab.${fresh.session_id}.recruit`));
   });
+
+  it('a claim landing right after the re-queue keeps its lease and gets the fresh session (gap-2#1)', async () => {
+    const h = harness();
+    const sid = await maxedOutSession(h);
+    const markRejected = h.store.markRejected.bind(h.store);
+    let claim;
+    h.store.markRejected = async (...args) => {
+      const task = await markRejected(...args);
+      claim = await h.rpc('handleClaim', { node_id: 'd' });
+      return task;
+    };
+    const reply = await h.rpc('handleTaskReject', signed({ task_id: 'C-1', reason: 'still racy' }));
+    assert.equal(reply.ok, true, reply.error);
+
+    const stored = await h.store.get('C-1');
+    assert.equal(stored.status, 'claimed');
+    assert.equal(stored.owner, 'd');
+    assert.equal(stored.lease_token, claim.data.lease_token);
+    assert.notEqual(claim.data.collab_session_id, sid);
+    assert.equal((await h.collabStore.get(claim.data.collab_session_id)).status, 'recruiting');
+    const told = h.published.filter((p) => p.subject.startsWith('mesh.agent.') && p.subject.endsWith('.rejected')).map((p) => p.subject).sort();
+    assert.deepEqual(told, ['mesh.agent.a.rejected', 'mesh.agent.b.rejected', 'mesh.agent.c.rejected']);
+  });
 });

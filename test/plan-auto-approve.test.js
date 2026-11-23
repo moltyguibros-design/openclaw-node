@@ -54,7 +54,8 @@ async function harness() {
     publish(subject, data) { events.push(subject); },
     request: async () => { throw new Error('no agent on the test bus'); },
   };
-  daemon.__test.setContext({ nc, store, planStore, collabStore: new CollabStore(new MockKV()) });
+  const collabStore = new CollabStore(new MockKV());
+  daemon.__test.setContext({ nc, store, planStore, collabStore });
   async function rpc(handler, payload) {
     let reply;
     await daemon.__test[handler]({
@@ -64,7 +65,7 @@ async function harness() {
     return reply;
   }
   assert.equal((await rpc('handleSubmit', { task_id: 'PARENT', title: 'parent' })).ok, true);
-  return { store, planStore, events, rpc };
+  return { store, planStore, collabStore, events, rpc };
 }
 
 const planRequest = (extra = {}) => ({
@@ -103,6 +104,32 @@ describe('requires_approval:false', () => {
     assert.equal(r.ok, true, r.error);
     assert.equal(r.data.status, 'draft');
     assert.equal(r.data.requires_approval, true);
+  });
+
+  it('a collab_mesh subtask is stored once, so a claim landing mid-dispatch keeps its lease (gap-2#1)', async () => {
+    const h = await harness();
+    assert.equal((await h.rpc('handleClaim', { node_id: 'planner' })).data.task_id, 'PARENT');
+    const put = h.store.put.bind(h.store);
+    let claim;
+    h.store.put = async (task) => {
+      await put(task);
+      if (!task.plan_id || claim) return;
+      claim = 'pending';
+      claim = await h.rpc('handleClaim', { node_id: 'w' });
+    };
+    const r = await h.rpc('handlePlanCreate', signOperatorRequest(planRequest({
+      requires_approval: false,
+      subtasks: [{ subtask_id: 'P-C1', title: 'c1', metric: 'npm test', delegation: { mode: 'collab_mesh', collaboration: { mode: 'parallel', min_nodes: 2 } } }],
+    }), { identity: operator, nodeId: 'operator' }));
+    assert.equal(r.ok, true, r.error);
+    const id = `${r.data.plan_id}-P-C1`;
+    assert.equal(claim.data.task_id, id);
+
+    const stored = await h.store.get(id);
+    assert.equal(stored.status, 'claimed');
+    assert.equal(stored.owner, 'w');
+    assert.equal(stored.lease_token, claim.data.lease_token);
+    assert.ok(await h.collabStore.get(claim.data.collab_session_id), 'the claim reply names the stored session');
   });
 
   it('a signed create that asks for approval still waits for it', async () => {

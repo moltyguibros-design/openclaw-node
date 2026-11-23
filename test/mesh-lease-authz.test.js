@@ -531,3 +531,29 @@ describe('a collab_mesh plan subtask moves its plan when its session ends it', (
     assert.equal((await h.store.get('PARENT')).status, 'completed', 'the finished plan closes its parent task');
   });
 });
+
+describe('a claim landing mid-submit keeps its lease (gap-2#1)', () => {
+  it('a collab task is stored once, already linked to its session', async () => {
+    const h = harness();
+    const put = h.store.put.bind(h.store);
+    let injected = false;
+    let claim;
+    h.store.put = async (task) => {
+      await put(task);
+      if (task.task_id !== 'C-9' || injected) return;
+      injected = true;
+      claim = await h.rpc('handleClaim', { node_id: 'w' });
+    };
+    const sub = await h.rpc('handleSubmit', { task_id: 'C-9', title: 'c', collaboration: { mode: 'parallel', min_nodes: 2, max_nodes: 2 } });
+    assert.equal(sub.ok, true, sub.error);
+    assert.equal(claim.data.owner, 'w');
+
+    const stored = await h.store.get('C-9');
+    assert.equal(stored.status, 'claimed');
+    assert.equal(stored.owner, 'w');
+    assert.equal(stored.lease_token, claim.data.lease_token);
+    assert.equal(claim.data.collab_session_id, (await h.collabStore.findByTaskId('C-9')).session_id);
+    const start = await h.rpc('handleStart', { task_id: 'C-9', node_id: 'w', lease_token: claim.data.lease_token });
+    assert.equal(start.ok, true, start.error);
+  });
+});

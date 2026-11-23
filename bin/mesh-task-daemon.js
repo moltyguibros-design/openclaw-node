@@ -234,23 +234,23 @@ async function handleSubmit(msg) {
     }
   }
 
+  // The task is claimable from its first write, so it carries its session
+  // from then on: a second put of this copy would erase a claim made between.
+  if (session) {
+    await collabStore.put(session);
+    task.collab_session_id = session.session_id;
+  }
   await store.put(task);
 
   log(`SUBMIT ${task.task_id}: "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'})`);
   publishEvent('submitted', task);
 
-  if (session) await openCollabSession(task, session);
+  if (session) announceCollabSession(task, session);
 
   respond(msg, task);
 }
 
-async function openCollabSession(task, session) {
-  await collabStore.put(session);
-
-  // Store session_id back in task for agent discovery
-  task.collab_session_id = session.session_id;
-  await store.put(task);
-
+function announceCollabSession(task, session) {
   log(`  → COLLAB SESSION ${session.session_id} auto-created (mode: ${session.mode})`);
   publishCollabEvent('created', session);
 
@@ -781,23 +781,33 @@ async function handleTaskReject(msg) {
   // → re-run → re-merge, forever). Operator signature required.
   if (!(await authorize(msg, params, null, { action: 'reject' }))) return;
 
-  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer', { maxRejections: MAX_REJECTIONS });
+  // The old session is completed, so a re-queued collab task needs a fresh
+  // one: a claimer joining the finished session is refused and walks away.
+  // It is stored before the re-queue links it, so the task is never claimable
+  // with the old session or rewritten after a claim.
+  const before = await store.get(task_id);
+  let fresh = null;
+  if (before && before.status === TASK_STATUS.PENDING_REVIEW && before.collaboration && collabStore
+      && (before.rejection_count || 0) + 1 < MAX_REJECTIONS) {
+    const previous = before.collab_session_id ? await collabStore.get(before.collab_session_id) : null;
+    const spec = previous ? { ...before.collaboration, mode: previous.mode } : before.collaboration;
+    fresh = createSession(before.task_id, spec);
+    await collabStore.put(fresh);
+  }
+
+  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer', { maxRejections: MAX_REJECTIONS, collabSessionId: fresh?.session_id });
+  if (fresh && task?.status !== TASK_STATUS.QUEUED) await collabStore.markAborted(fresh.session_id, 'Reject did not re-queue the task');
   if (!task) return respondError(msg, `Task ${task_id} not found or not in pending_review status`);
 
   // The owning agent kept the task branch unmerged while review was pending
   // (P4-4); tell it to drop that branch. Best-effort — the next attempt's
   // worktree creation deletes a stale branch of the same name anyway.
-  for (const node of await reviewRecipients(task)) {
+  // Read from the pre-reject record: the re-queued one names the fresh session.
+  for (const node of await reviewRecipients(before)) {
     nc.publish(`mesh.agent.${node}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
   }
 
-  // The old session is completed, so a re-queued collab task needs a fresh
-  // one: a claimer joining the finished session is refused and walks away.
-  if (task.status === TASK_STATUS.QUEUED && task.collaboration && collabStore) {
-    const previous = task.collab_session_id ? await collabStore.get(task.collab_session_id) : null;
-    const spec = previous ? { ...task.collaboration, mode: previous.mode } : task.collaboration;
-    await openCollabSession(task, createSession(task.task_id, spec));
-  }
+  if (fresh && task.status === TASK_STATUS.QUEUED) announceCollabSession(task, fresh);
 
   if (task.status === TASK_STATUS.FAILED) {
     log(`REJECTED ${task_id} (${task.rejection_count}× — cap ${MAX_REJECTIONS} reached): ${reason || 'no reason'} — FAILED, not re-queued`);
@@ -2813,31 +2823,16 @@ async function advancePlanWave(planId) {
           ...inheritedRouting,
         });
         if (subtaskRole) log(`  → AUTO-ROLE ${st.subtask_id}: ${subtaskRole} (matched from scope)`);
+        const session = st.delegation.collaboration && collabStore
+          ? createSession(meshTask.task_id, st.delegation.collaboration)
+          : null;
+        if (session) {
+          await collabStore.put(session);
+          meshTask.collab_session_id = session.session_id;
+        }
         await store.put(meshTask);
         publishEvent('submitted', meshTask);
-
-        // Auto-create collab session if needed
-        if (st.delegation.collaboration && collabStore) {
-          const session = createSession(meshTask.task_id, st.delegation.collaboration);
-          await collabStore.put(session);
-
-          // Store session_id back in mesh task for agent discovery
-          meshTask.collab_session_id = session.session_id;
-          await store.put(meshTask);
-
-          log(`  → COLLAB SESSION ${session.session_id} for subtask ${st.subtask_id}`);
-          publishCollabEvent('created', session);
-
-          log(`RECRUIT: broadcasting for session ${session.session_id}`);
-          nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
-            session_id: session.session_id,
-            task_id: meshTask.task_id,
-            mode: session.mode,
-            min_nodes: session.min_nodes,
-            max_nodes: session.max_nodes,
-            task_title: meshTask.title,
-          })));
-        }
+        if (session) announceCollabSession(meshTask, session);
 
         log(`  → MESH ${st.subtask_id}: "${st.title}" (${st.delegation.mode})`);
         break;
