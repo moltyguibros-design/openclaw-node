@@ -312,9 +312,9 @@ else
       echo "    1) claude    (Claude Code CLI)"
       echo "    2) openai    (Codex CLI)"
       echo "    3) gemini    (Gemini CLI)"
-      echo "    4) deepseek"
-      echo "    5) kimi"
-      echo "    6) minimax"
+      echo "    4) deepseek  (DeepSeek dsh)"
+      echo "    5) kimi      (Kimi Code CLI)"
+      echo "    6) minimax   (minimax-cli)"
       echo "    7) aider"
       echo "    8) ollama    (local model — solo tasks only; grappe workers refuse it, D11)"
       echo "    9) none for now (seat it later with: bash install.sh --update --provider=NAME)"
@@ -342,6 +342,8 @@ else
         claude) PKG="@anthropic-ai/claude-code" ;;
         openai) PKG="@openai/codex" ;;
         gemini) PKG="@google/gemini-cli" ;;
+        deepseek) PKG="@deepseek-ai/dsh" ;;
+        kimi)   PKG="@moonshot-ai/kimi-code" ;;
         *)      PKG="" ;;
       esac
       if [ -n "$PKG" ]; then

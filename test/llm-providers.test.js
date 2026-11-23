@@ -5,8 +5,16 @@
  * Uses node:test (no external deps). Run: node test/llm-providers.test.js
  */
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+
+// Built-ins only: an operator's ~/.openclaw/mesh-providers.json must not leak into PROVIDERS.
+process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-providers-home-'));
+for (const k of ['CLAUDE_PATH', 'OPENAI_PATH', 'GEMINI_PATH', 'DEEPSEEK_PATH', 'KIMI_PATH', 'MINIMAX_PATH', 'OLLAMA_PATH', 'AIDER_PATH']) delete process.env[k];
 const { resolveProvider, resolveModel, PROVIDERS } = require('../lib/llm-providers');
 
 describe('resolveProvider', () => {
@@ -51,7 +59,7 @@ describe('resolveProvider', () => {
   });
 
   it('resolves all built-in providers', () => {
-    for (const name of ['claude', 'openai', 'gemini', 'deepseek', 'shell', 'ollama', 'aider']) {
+    for (const name of ['claude', 'openai', 'gemini', 'deepseek', 'kimi', 'minimax', 'shell', 'ollama', 'aider']) {
       const provider = resolveProvider({ llm_provider: name }, null, name);
       assert.equal(provider.name, name);
     }
@@ -193,5 +201,98 @@ describe('non-claude provider argv', () => {
   it('ollama runs `ollama run MODEL PROMPT`, disabling thinking only for thinking families', () => {
     assert.deepEqual(PROVIDERS.ollama.buildArgs('p', 'llama3'), ['run', 'llama3', 'p']);
     assert.deepEqual(PROVIDERS.ollama.buildArgs('p', 'qwen3:8b'), ['run', '--think=false', 'qwen3:8b', 'p']);
+  });
+});
+
+// Checked against each published CLI's own parser (tarballs read, never run):
+// Kimi Code CLI (npm @moonshot-ai/kimi-code, bin kimi: commander root with
+// -p/--prompt, -m/--model, --add-dir, no root --cwd, and "Cannot combine --prompt
+// with --yolo"; prompt mode works in process.cwd() and auto-approves), DeepSeek's
+// harness (npm @deepseek-ai/dsh, bin dsh: `dsh --profile headless "job"` in the
+// invoking directory, headless reads --add-dir, no model flag), and minimax-cli
+// (crate minimax-cli, bin minimax: `exec [--model M] [--auto] PROMPT`, where --auto
+// runs the tool agent in current_dir; root -p sends one request with no tools).
+describe('deepseek, kimi and minimax argv', () => {
+  const PROMPT = '# Task\n--not-a-flag';
+
+  it('kimi runs Kimi Code prompt mode inside the target, model only when one is named', () => {
+    assert.deepEqual(PROVIDERS.kimi.buildArgs(PROMPT, 'm4', {}, '/wt', null), ['-p', PROMPT, '-m', 'm4']);
+    assert.deepEqual(PROVIDERS.kimi.buildArgs(PROMPT, null, {}, '/wt', null), ['-p', PROMPT]);
+    assert.deepEqual(PROVIDERS.kimi.buildArgs('p', null, {}, '/wt', '/ws'), ['-p', 'p', '--add-dir', '/ws']);
+    assert.deepEqual(PROVIDERS.kimi.buildArgs('p', null, {}, '/ws', '/ws'), ['-p', 'p']);
+    const args = PROVIDERS.kimi.buildArgs(PROMPT, 'm4', {}, '/wt', '/ws');
+    for (const flag of ['--cwd', '--model', '--yolo', '--auto']) assert.ok(!args.includes(flag), `${flag} is not in Kimi Code prompt mode`);
+    assert.equal(PROVIDERS.kimi.spawnCwd('/wt'), '/wt');
+    assert.equal(PROVIDERS.kimi.binary, 'kimi');
+  });
+
+  it('kimi: the legacy kimi-cli deprecation notice is a refused run, a real answer is not', () => {
+    const en = 'kimi-cli is no longer maintained. Please use the new Kimi Code CLI. Install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash\n';
+    const zh = 'kimi-cli 已停止维护，请使用新版 Kimi Code CLI。安装：curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash\n';
+    for (const out of [en, zh, `kimi, version 1.52.0\n${en}`]) assert.match(PROVIDERS.kimi.parseOutput(out).refused, /legacy kimi-cli/);
+    assert.equal(PROVIDERS.kimi.parseOutput('Done: edited src/a.js'), null);
+    assert.equal(PROVIDERS.kimi.parseOutput(`Notes:\n${en}`), null, 'an answer that quotes the notice is still an answer');
+  });
+
+  it('deepseek runs dsh headless inside the target; dsh has no model flag', () => {
+    assert.equal(PROVIDERS.deepseek.binary, 'dsh');
+    assert.deepEqual(PROVIDERS.deepseek.buildArgs(PROMPT, 'm5', {}, '/wt', null), ['--profile', 'headless', PROMPT]);
+    assert.deepEqual(PROVIDERS.deepseek.buildArgs('p', null, {}, '/wt', '/ws'), ['--profile', 'headless', '--add-dir', '/ws', 'p']);
+    assert.deepEqual(PROVIDERS.deepseek.buildArgs('p', null, {}, '/ws', '/ws'), ['--profile', 'headless', 'p']);
+    assert.equal(PROVIDERS.deepseek.spawnCwd('/wt'), '/wt');
+  });
+
+  it('minimax runs the exec tool agent (--auto) inside the target, prompt last after --', () => {
+    assert.equal(PROVIDERS.minimax.binary, 'minimax');
+    assert.deepEqual(PROVIDERS.minimax.buildArgs(PROMPT, 'm6', {}, '/wt', null), ['exec', '--auto', '--model', 'm6', '--', PROMPT]);
+    assert.deepEqual(PROVIDERS.minimax.buildArgs(PROMPT, null, {}, '/wt', null), ['exec', '--auto', '--', PROMPT]);
+    const args = PROVIDERS.minimax.buildArgs(PROMPT, 'm6', {}, '/wt', '/ws');
+    for (const flag of ['-p', '--cwd']) assert.ok(!args.includes(flag), `${flag} would send a tool-less one-shot or be rejected`);
+    assert.equal(PROVIDERS.minimax.spawnCwd('/wt'), '/wt');
+  });
+
+  it('an explicit *_PATH still names the binary', () => {
+    const src = 'const p = require(process.argv[1]).PROVIDERS; process.stdout.write([p.deepseek.binary, p.kimi.binary, p.minimax.binary].join(" "))';
+    const r = spawnSync(process.execPath, ['-e', src, require.resolve('../lib/llm-providers')], {
+      encoding: 'utf8', env: { ...process.env, DEEPSEEK_PATH: '/opt/d', KIMI_PATH: '/opt/k', MINIMAX_PATH: '/opt/m' },
+    });
+    assert.equal(r.stdout, '/opt/d /opt/k /opt/m', r.stderr);
+  });
+});
+
+describe('model defaults', () => {
+  it('a CLI that has its own configured model gets no forced default', () => {
+    for (const name of ['openai', 'gemini', 'deepseek', 'kimi', 'minimax', 'aider']) {
+      assert.equal(resolveModel(null, null, PROVIDERS[name]), null, name);
+    }
+    assert.ok(!PROVIDERS.openai.buildArgs('p', null, {}, '/wt').includes('--model'));
+    assert.ok(!PROVIDERS.gemini.buildArgs('p', null, {}, '/wt').includes('--model'));
+    assert.equal(resolveModel({ llm_model: 'm7' }, null, PROVIDERS.openai), 'm7');
+    assert.equal(resolveModel(null, 'm8', PROVIDERS.gemini), 'm8');
+  });
+});
+
+describe('installer offers every built-in provider', () => {
+  const ROOT = path.join(__dirname, '..');
+  const env = fs.readFileSync(path.join(ROOT, 'scripts/install/env.sh'), 'utf8');
+  const comp = fs.readFileSync(path.join(ROOT, 'scripts/install/components.sh'), 'utf8');
+  const builtins = Object.keys(PROVIDERS);
+
+  it('KNOWN_PROVIDERS, the menu and PATH detection list every provider', () => {
+    const known = env.match(/^KNOWN_PROVIDERS="([^"]+)"/m)[1].split(' ');
+    assert.deepEqual([...known].sort(), [...builtins].sort());
+    const detected = env.match(/for p in ([\w ]+); do/)[1].split(' ');
+    for (const name of builtins.filter((n) => !['shell', 'ollama'].includes(n))) {
+      assert.ok(detected.includes(name), `${name} is detected on PATH`);
+      assert.match(comp, new RegExp(`\\) PROVIDER=${name} ;;`), `${name} is in the install menu`);
+    }
+  });
+
+  it('PATH detection looks for the binary each provider spawns', () => {
+    const fn = env.match(/^provider_binary\(\) \{[\s\S]*?^\}/m)[0];
+    for (const name of builtins.filter((n) => n !== 'shell')) {
+      const r = spawnSync('bash', ['-c', `${fn}\nprovider_binary "$1"`, 'x', name], { encoding: 'utf8' });
+      assert.equal(r.stdout.trim(), path.basename(PROVIDERS[name].binary), name);
+    }
   });
 });

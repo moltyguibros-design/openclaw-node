@@ -123,4 +123,13 @@ describe('runLLM through the shared runner (lib/llm-run)', () => {
     assert.equal(result.exitCode, 0);
     assert.equal(result.outcome, 'empty');
   });
+
+  it('a CLI that exits 0 without running the prompt (legacy kimi-cli) is a failed run, not a finished task', async () => {
+    const notice = 'kimi-cli is no longer maintained. Please use the new Kimi Code CLI. Install: curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash';
+    registerProvider('kimi-legacy-stub', { ...PROVIDERS.kimi, binary: process.execPath, buildArgs: () => ['-e', `console.log(${JSON.stringify(notice)})`] });
+    const result = await agent.__test.runLLM('prompt', { task_id: 'RUN-3', llm_provider: 'kimi-legacy-stub', budget_minutes: 1 }, TMP);
+    assert.equal(result.outcome, 'refused');
+    assert.notEqual(result.exitCode, 0);
+    assert.match(result.stderr, /legacy kimi-cli/);
+  });
 });

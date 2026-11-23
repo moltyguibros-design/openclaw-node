@@ -166,6 +166,18 @@ describe('runProvider', () => {
     assert.equal(run.cost.estimatedCostUsd, 0.01);
   });
 
+  it('refused: exit 0 that the provider\'s parser says ran nothing is exit status 1, reason on stderr', async () => {
+    const run = await runProvider(stub({
+      parseOutput: (raw) => (raw.startsWith('deprecated') ? { refused: 'the CLI only printed a deprecation notice' } : null),
+      buildArgs: () => ['-e', "process.stdout.write('deprecated, install the new one')"],
+    }), { prompt: 'p', timeoutMs: 10000, cwd: TMP });
+    assert.equal(run.exitCode, 0);
+    assert.equal(run.outcome, 'refused');
+    assert.equal(run.exitStatus, 1);
+    assert.equal(run.stdout, 'deprecated, install the new one');
+    assert.match(run.stderr, /only printed a deprecation notice/);
+  });
+
   it('passes the prompt, model, task and dirs to buildArgs and applies cleanEnv', async () => {
     let seen;
     const run = await runProvider(stub({

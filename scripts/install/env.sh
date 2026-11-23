@@ -62,9 +62,10 @@ fi
 KNOWN_PROVIDERS="claude openai gemini deepseek kimi minimax aider ollama shell"
 provider_binary() {
   case "$1" in
-    openai) echo codex ;;
-    shell)  echo sh ;;
-    *)      echo "$1" ;;
+    openai)   echo codex ;;
+    deepseek) echo dsh ;;
+    shell)    echo sh ;;
+    *)        echo "$1" ;;
   esac
 }
 PROVIDER="${PROVIDER:-${OPENCLAW_PROVIDER:-}}"

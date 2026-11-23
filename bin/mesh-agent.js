@@ -1338,7 +1338,9 @@ async function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs =
   if (supervisor) supervisor.workerExited({ exitCode: run.exitCode, signal: run.signal });
   if (run.outcome !== 'ok') log(`[${provider.name}] run outcome: ${run.outcome} (exit status ${run.exitStatus})`);
   if (run.truncated) warn(`${task.task_id}: ${provider.name} output exceeded the 1MB capture cap; its middle was dropped and it carries no verdict`);
-  return { exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr, truncated: run.truncated, provider: provider.name, model, cost: run.cost, outcome: run.outcome };
+  // A refused run exited 0 without doing the work: every caller must see it fail.
+  const exitCode = run.outcome === 'refused' ? run.exitStatus : run.exitCode;
+  return { exitCode, stdout: run.stdout, stderr: run.stderr, truncated: run.truncated, provider: provider.name, model, cost: run.cost, outcome: run.outcome };
 }
 
 // ── Metric Evaluation ─────────────────────────────────
@@ -2788,7 +2790,7 @@ async function main() {
   log(`  Node ID:     ${NODE_ID}`);
   log(`  NATS:        ${NATS_URL}`);
   log(`  LLM:         ${defaultProvider.name} (${defaultProvider.binary})`);
-  log(`  Model:       ${defaultModel || '(per-task)'}`);
+  log(`  Model:       ${defaultModel || "(per-task, else the CLI's configured default)"}`);
   log(`  Workspace:   ${WORKSPACE}`);
   log(`  Max attempts: ${MAX_ATTEMPTS}`);
   log(`  Poll interval: ${POLL_INTERVAL / 1000}s`);
