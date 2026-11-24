@@ -3,6 +3,10 @@
  * a real fleet trigger. bin/mesh-deploy.js documents --dry-run, --status,
  * --rollback, --local and --to under the same `mesh deploy` name; mesh.js
  * silently ignored them, so `mesh deploy --dry-run` deployed the fleet.
+ *
+ * The trigger carries origin's tip of the deploy branch, as mesh-deploy's own
+ * fleet trigger does: mesh.js sent the lead checkout's HEAD and branch, so a
+ * lead behind origin deployed stale code and one on a work branch sent it.
  */
 
 const { describe, it, after } = require('node:test');
@@ -10,18 +14,48 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawnSync, execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-deploy-opts-'));
+const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-deploy-opts-')));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+const git = (cwd, ...args) => execFileSync('git', args, {
+  cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
+}).trim();
+
+// origin: main at B, stable at A. The lead cloned at A, then committed C on a
+// work branch it never pushed. A repo with no origin stands beside it.
+const origin = path.join(tmp, 'origin.git');
+const seed = path.join(tmp, 'seed');
+const lead = path.join(tmp, 'lead');
+const orphan = path.join(tmp, 'orphan');
+git(tmp, 'init', '-q', '--bare', '-b', 'main', origin);
+git(tmp, 'init', '-q', '-b', 'main', seed);
+git(seed, 'remote', 'add', 'origin', origin);
+git(seed, 'commit', '-q', '--allow-empty', '-m', 'A');
+git(seed, 'push', '-q', 'origin', 'main', 'main:stable');
+const shaA = git(seed, 'rev-parse', 'HEAD');
+git(tmp, 'clone', '-q', origin, lead);
+git(seed, 'commit', '-q', '--allow-empty', '-m', 'B');
+git(seed, 'push', '-q', 'origin', 'main');
+const shaB = git(seed, 'rev-parse', 'HEAD');
+git(lead, 'checkout', '-q', '-b', 'wip');
+git(lead, 'commit', '-q', '--allow-empty', '-m', 'C');
+const shaC = git(lead, 'rev-parse', 'HEAD');
+git(tmp, 'init', '-q', '-b', 'main', orphan);
+git(orphan, 'commit', '-q', '--allow-empty', '-m', 'O');
+
+const baseEnv = () => {
+  const e = { ...process.env, HOME: tmp, OPENCLAW_REPO_DIR: lead, OPENCLAW_NODE_ID: 'lead-x', OPENCLAW_OBS_DB: path.join(tmp, 'obs.db') };
+  delete e.OPENCLAW_DEPLOY_BRANCH;
+  return e;
+};
 
 const mesh = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin', 'mesh.js'), 'deploy', ...args], {
   encoding: 'utf8',
-  env: {
-    ...process.env, HOME: tmp, OPENCLAW_REPO_DIR: ROOT, OPENCLAW_NODE_ID: 'lead-x',
-    OPENCLAW_OBS_DB: path.join(tmp, 'obs.db'), OPENCLAW_NATS: 'nats://127.0.0.1:1',
-  },
+  env: { ...baseEnv(), OPENCLAW_NATS: 'nats://127.0.0.1:1' },
 });
 
 // A bus whose MESH_NODES registry holds only w1, and where w1 reports success;
@@ -44,7 +78,7 @@ fs.writeFileSync(busStub, `
   };
   const nc = {
     subscribe: () => ({ unsubscribe() {} }),
-    publish: (subject) => record({ publish: subject }),
+    publish: (subject, data) => record({ publish: subject, data: data && new TextDecoder().decode(data) }),
     flush: async () => {},
     close: async () => {},
     jetstream: () => ({ views: { kv: async (name) => {
@@ -57,17 +91,15 @@ fs.writeFileSync(busStub, `
     return request === 'nats' ? { ...mod, connect: async () => nc } : mod;
   };
 `);
-const meshOnBus = (...args) => {
+const meshOnBus = (args, env = {}) => {
   fs.rmSync(busLog, { force: true });
   const r = spawnSync(process.execPath, [path.join(ROOT, 'bin', 'mesh.js'), 'deploy', ...args], {
     encoding: 'utf8',
-    env: {
-      ...process.env, HOME: tmp, OPENCLAW_REPO_DIR: ROOT, OPENCLAW_NODE_ID: 'lead-x',
-      OPENCLAW_OBS_DB: path.join(tmp, 'obs.db'), NODE_OPTIONS: `--require ${busStub}`,
-    },
+    env: { ...baseEnv(), NODE_OPTIONS: `--require ${busStub}`, ...env },
   });
   const bus = fs.existsSync(busLog) ? fs.readFileSync(busLog, 'utf8').trim().split('\n').map(JSON.parse) : [];
-  return { ...r, bus };
+  const triggers = bus.filter((e) => e.publish === 'mesh.deploy.trigger').map((e) => JSON.parse(e.data));
+  return { ...r, bus, triggers };
 };
 
 describe('mesh deploy options', () => {
@@ -82,7 +114,7 @@ describe('mesh deploy options', () => {
   }
 
   it('--node <unknown> is refused before the marker or the trigger is written', () => {
-    const r = meshOnBus('--node', 'no-such-node');
+    const r = meshOnBus(['--node', 'no-such-node']);
     assert.equal(r.status, 2, r.stdout + r.stderr);
     assert.match(r.stderr, /unknown node no-such-node — known: w1/);
     assert.deepEqual(r.bus.filter((e) => !e.publish?.startsWith('openclaw.trace.')), []);
@@ -91,7 +123,7 @@ describe('mesh deploy options', () => {
   // A targeted deploy replaced the fleet-wide catch-up marker, so a node that
   // missed an earlier fleet-wide deploy never caught up.
   it('--node <registered> publishes the trigger and leaves the catch-up marker alone', () => {
-    const r = meshOnBus('--node', 'w1');
+    const r = meshOnBus(['--node', 'w1']);
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.ok(r.bus.some((e) => e.publish === 'mesh.deploy.trigger'), JSON.stringify(r.bus));
     assert.deepEqual(r.bus.filter((e) => e.put), [], 'a targeted deploy wrote the latest marker');
@@ -100,7 +132,7 @@ describe('mesh deploy options', () => {
   });
 
   it('a fleet-wide deploy writes the catch-up marker', () => {
-    const r = meshOnBus();
+    const r = meshOnBus([]);
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.deepEqual(r.bus.filter((e) => e.put).map((e) => e.put).sort(), ['MESH_DEPLOY_LATEST', 'MESH_DEPLOY_RESULTS']);
   });
@@ -110,5 +142,37 @@ describe('mesh deploy options', () => {
     assert.match(r.stdout, /Deploying .* \[FORCE\]/, r.stdout + r.stderr);
     assert.match(r.stdout, /Components: mc/);
     assert.match(r.stdout, /Targets: w1/);
+  });
+});
+
+describe('mesh deploy trigger sha', () => {
+  it("signs and publishes origin's tip of main, not the lead's HEAD or work branch, and leaves the checkout alone", () => {
+    const r = meshOnBus(['--force', '--component', 'mc', '--node', 'w1']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.triggers.length, 1, JSON.stringify(r.bus));
+    const [t] = r.triggers;
+    assert.ok(shaB.startsWith(t.sha) && t.sha.length >= 7, `trigger sha ${t.sha} is not origin/main ${shaB} (lead HEAD ${shaC})`);
+    assert.equal(t.branch, 'main');
+    assert.deepEqual([t.force, t.components, t.nodes], [true, ['mc'], ['w1']]);
+    assert.ok(t.signature && t.signer_pubkey, 'the trigger went out unsigned');
+    assert.match(r.stdout, new RegExp(`Deploying ${t.sha} \\(main\\) \\[FORCE\\]`));
+    assert.equal(git(lead, 'rev-parse', 'HEAD'), shaC, 'the trigger moved the lead checkout');
+    assert.equal(git(lead, 'symbolic-ref', '--short', 'HEAD'), 'wip');
+  });
+
+  it('OPENCLAW_DEPLOY_BRANCH names the branch whose tip it sends', () => {
+    const r = meshOnBus([], { OPENCLAW_DEPLOY_BRANCH: 'stable' });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(r.triggers.length, 1, JSON.stringify(r.bus));
+    assert.ok(shaA.startsWith(r.triggers[0].sha), `trigger sha ${r.triggers[0].sha} is not origin/stable ${shaA}`);
+    assert.equal(r.triggers[0].branch, 'stable');
+  });
+
+  it('a checkout whose origin cannot be fetched publishes nothing', () => {
+    const r = meshOnBus([], { OPENCLAW_REPO_DIR: orphan });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /origin\/main/);
+    assert.doesNotMatch(r.stdout, /Deploying/);
+    assert.deepEqual(r.bus.filter((e) => !e.publish?.startsWith('openclaw.trace.')), []);
   });
 });

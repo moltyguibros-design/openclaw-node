@@ -12,11 +12,20 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawnSync, execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-node-id-'));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+// `mesh deploy` resolves origin's tip of main before it names its targets.
+const lead = path.join(tmp, 'lead');
+const git = (...args) => execFileSync('git', args, { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env,
+  GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
+git('init', '-q', '--bare', '-b', 'main', path.join(tmp, 'origin.git'));
+git('clone', '-q', path.join(tmp, 'origin.git'), lead);
+git('-C', lead, 'commit', '-q', '--allow-empty', '-m', 'A');
+git('-C', lead, 'push', '-q', 'origin', 'HEAD:main');
 
 function env(extra) {
   const e = {
@@ -35,7 +44,7 @@ const strip = s => s.replace(/\x1b\[[0-9;]*m/g, '');
 describe('mesh CLIs use lib/node-id.js', () => {
   it('mesh deploy --node self targets OPENCLAW_NODE_ID', () => {
     const r = spawnSync(process.execPath, [path.join(ROOT, 'bin', 'mesh.js'), 'deploy', '--node', 'self'], {
-      encoding: 'utf8', env: env({ OPENCLAW_NODE_ID: 'node-x' }),
+      encoding: 'utf8', env: env({ OPENCLAW_NODE_ID: 'node-x', OPENCLAW_REPO_DIR: lead }),
     });
     assert.match(r.stdout, /Targets: node-x\n/, r.stdout + r.stderr);
   });

@@ -162,8 +162,8 @@ function isAncestor(ancestor, descendant) {
 }
 
 // The diff base: the sha mesh-deploy last deployed here in full, not HEAD.
-// HEAD moves without deploying — on the lead the repo is a working checkout
-// and `mesh deploy` publishes its HEAD, so a HEAD-based diff is always empty.
+// HEAD moves without deploying — on the lead the repo is a working checkout —
+// so a HEAD-based diff misses what changed since the last deploy.
 function deployedBase() {
   let recorded = null;
   try { recorded = JSON.parse(fs.readFileSync(DEPLOY_STATE, 'utf8')).deployedSha; } catch { /* not recorded yet */ }

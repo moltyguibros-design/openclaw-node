@@ -18,6 +18,7 @@ const { execFileSync, spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trigger-branch-')));
 const REPO = path.join(tmp, 'repo');
+const ORIGIN = path.join(tmp, 'origin.git');
 process.env.HOME = tmp;
 process.env.OPENCLAW_IDENTITY_DIR = path.join(tmp, '.openclaw');
 process.env.OPENCLAW_OBS_DB = path.join(tmp, 'obs.db');
@@ -34,10 +35,13 @@ describe('deploy trigger branch on a detached lead', () => {
   let sha;
   before(() => {
     fs.mkdirSync(REPO);
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', ORIGIN]);
     git('init', '-q', '-b', 'main');
+    git('remote', 'add', 'origin', ORIGIN);
     fs.writeFileSync(path.join(REPO, 'f'), 'x\n');
     git('add', 'f');
     git('commit', '-q', '-m', 'c');
+    git('push', '-q', 'origin', 'main');
     sha = git('rev-parse', '--short', 'HEAD');
   });
   after(() => fs.rmSync(tmp, { recursive: true, force: true }));

@@ -218,6 +218,14 @@ function triggerBranch(repoDir) {
   return b === 'HEAD' ? (process.env.OPENCLAW_DEPLOY_BRANCH || 'main') : b;
 }
 
+// The short sha a fleet trigger carries: origin's tip of the branch, fetched
+// now. The lead's HEAD is a working checkout, behind origin or ahead of it.
+function originTip(repoDir, branch) {
+  if (!/^[a-zA-Z0-9._/-]+$/.test(branch) || branch.startsWith('-')) throw new Error(`Unsafe branch name: ${branch}`);
+  execFileSync('git', ['fetch', 'origin', branch], { cwd: repoDir, stdio: ['ignore', 'ignore', 'pipe'], timeout: 60000 });
+  return execFileSync('git', ['rev-parse', '--short', `origin/${branch}^{commit}`], { cwd: repoDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
 const noResults = expected => ({ expected, succeeded: 0, skipped: 0, failed: 0, missing: 0, stillDeploying: 0 });
 
 // A node that has not written its 'deploying' status by then is offline or has
@@ -430,8 +438,7 @@ async function main() {
       await showStatus(nc);
     } else {
       const branch = statusBranch(REPO_DIR);
-      execFileSync('git', ['fetch', 'origin', branch], { cwd: REPO_DIR, stdio: 'ignore', timeout: 60000 });
-      const sha = execFileSync('git', ['rev-parse', '--short', `origin/${branch}^{commit}`], { cwd: REPO_DIR, encoding: 'utf8' }).trim();
+      const sha = originTip(REPO_DIR, branch);
       const outcome = await fleetDeploy(nc, {
         components: components.length > 0 ? components : null,
         targetNodes: targetNodes.length > 0 ? targetNodes : null,
@@ -444,7 +451,7 @@ async function main() {
   }
 }
 
-module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch, queryNodeStatus, statusBranch };
+module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch, queryNodeStatus, statusBranch, originTip };
 
 // Standalone mode
 if (require.main === module) {

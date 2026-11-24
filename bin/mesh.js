@@ -373,11 +373,11 @@ async function cmdHealth(args) {
 /**
  * mesh deploy [--force] [--component <name>] [--node <name>] — trigger fleet deploy.
  *
- * Publishes mesh.deploy.trigger to NATS. All nodes with mesh-deploy-listener
+ * Publishes mesh.deploy.trigger to NATS for origin's tip of the deploy branch
+ * (OPENCLAW_DEPLOY_BRANCH, default main). All nodes with mesh-deploy-listener
  * will pull from git and self-deploy. Polls MESH_DEPLOY_RESULTS for status.
  */
 async function cmdDeploy(args) {
-  const { execSync } = require('child_process');
   // Prefer openclaw-node (git repo) over openclaw (runtime)
   const defaultRepo = fs.existsSync(path.join(os.homedir(), 'openclaw-node', '.git'))
     ? path.join(os.homedir(), 'openclaw-node')
@@ -413,14 +413,16 @@ async function cmdDeploy(args) {
     }
   }
 
-  // Get current SHA and branch
-  let sha, branch;
+  // The sha mesh-deploy's fleet trigger carries, never this checkout's HEAD.
+  // Like its remote-only deploy, unpushed commits are left out, not refused:
+  // nothing here installs from or moves this checkout.
+  const { originTip, discoverNodes } = require('./fleet-deploy');
+  const branch = process.env.OPENCLAW_DEPLOY_BRANCH || 'main';
+  let sha;
   try {
-    sha = execSync('git rev-parse --short HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
-    branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoDir, encoding: 'utf8' }).trim();
-    if (branch === 'HEAD') branch = process.env.OPENCLAW_DEPLOY_BRANCH || 'main';
-  } catch {
-    console.error(`Error: Cannot read git state from ${repoDir}`);
+    sha = originTip(repoDir, branch);
+  } catch (err) {
+    console.error(`Error: cannot resolve origin/${branch} in ${repoDir}: ${err.message.trim()}`);
     process.exit(1);
   }
 
@@ -431,7 +433,7 @@ async function cmdDeploy(args) {
 
   const nc = await natsConnect();
   // The fleet registry, not the alias table: aliases only ever named the two original VMs.
-  const known = await require('./fleet-deploy').discoverNodes(nc);
+  const known = await discoverNodes(nc);
   const unknown = unknownNodes(targetNodes, known);
   if (unknown.length > 0) {
     console.error(`mesh deploy: unknown node ${unknown.join(', ')} — known: ${known.map(n => n.nodeId).join(', ') || 'none'}`);
