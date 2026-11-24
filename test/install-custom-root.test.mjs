@@ -261,6 +261,45 @@ test('every entry point accepts ~/.openclaw however it is spelled', () => {
   assert.equal(isDefaultOpenclawRoot(sb.dir, sb.home), false, 'an existing directory that is not ~/.openclaw');
 });
 
+// With HOME ending in '/', "$HOME/.openclaw" is spelled <home>//.openclaw. On a fresh machine
+// there is no ~/.openclaw to resolve a symlink against, so only the spelling can decide.
+test('every entry point accepts ~/.openclaw spelled with doubled slashes before it exists', () => {
+  const { isDefaultOpenclawRoot, customRootRefusal } = createRequire(import.meta.url)('../lib/openclaw-root.js');
+  const cases = [
+    ['HOME/ and "$HOME/.openclaw"', (sb) => [`${sb.home}/`, `${sb.home}//.openclaw`]],
+    ['HOME/ and "$HOME/.openclaw/"', (sb) => [`${sb.home}/`, `${sb.home}//.openclaw/`]],
+    ['an inner // in OPENCLAW_ROOT', (sb) => [sb.home, `${sb.dir}//home/.openclaw`]],
+    ['an inner // in HOME', (sb) => [`${sb.dir}//home`, `${sb.home}/.openclaw`]],
+  ];
+  const entryPoints = {
+    'install.sh': [(env) => spawnSync('bash', [INSTALL_SH, '--help'], { encoding: 'utf8', env }), /^Usage: bash install\.sh/m],
+    'bootstrap.sh': [(env) => spawnSync('bash', [join(ROOT, 'bootstrap.sh'), '--role=worker', '--skip-llm'], { encoding: 'utf8', timeout: 60_000, env }), /platform:/],
+    'mesh-install.sh': [(env) => spawnSync('bash', [join(ROOT, 'mesh-install.sh')], { encoding: 'utf8', timeout: 60_000, env: { ...env, MESH_JOIN_TOKEN: 'x' } }), /Detected OS/],
+    'llm-setup.sh': [(env) => spawnSync('bash', [join(ROOT, 'scripts/install/llm-setup.sh'), '--check'], { encoding: 'utf8', timeout: 60_000, env: { ...env, NODE_BIN: process.execPath } }), /Wave 2/],
+  };
+  for (const [label, spell] of cases) {
+    for (const [name, [run, ran]] of Object.entries(entryPoints)) {
+      const sb = sandbox();
+      const [home, root] = spell(sb);
+      assert.equal(existsSync(join(sb.home, '.openclaw')), false);
+      const r = run(sb.env({ HOME: home, OPENCLAW_ROOT: root }));
+      const out = `${name}, ${label}: HOME=${home} OPENCLAW_ROOT=${root}\n${r.stdout}\n${r.stderr}`;
+      assert.doesNotMatch(r.stderr, /not supported/, out);
+      assert.match(r.stdout, ran, out);
+    }
+    const sb = sandbox();
+    const [home, root] = spell(sb);
+    assert.equal(isDefaultOpenclawRoot(root, home), true, `${label}: ${root} under HOME=${home}`);
+    assert.equal(customRootRefusal(root, home), null, label);
+  }
+
+  const sb = sandbox();
+  const refused = sb.run('bash', [INSTALL_SH, '--help'], { HOME: `${sb.dir}//home//` });
+  assert.notEqual(refused.status, 0, refused.stderr);
+  assert.ok(refused.stderr.includes(`OpenClaw installs only to ${sb.home}/.openclaw.`), refused.stderr);
+  assert.ok(customRootRefusal(sb.elsewhere, `${sb.dir}//home//`).includes(`OpenClaw installs only to ${sb.home}/.openclaw.`));
+});
+
 // An install made with a custom root before the refusal must still come off.
 test('uninstall.sh still removes an install made under a custom OPENCLAW_ROOT', { skip: process.platform !== 'linux' && 'uninstall.sh lock step is Darwin-specific' }, () => {
   const sb = sandbox({ rootExists: true });
