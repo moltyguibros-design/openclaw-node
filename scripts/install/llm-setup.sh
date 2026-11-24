@@ -41,6 +41,8 @@ done
 # For set_env_key. Run standalone DRY_RUN is unset, and run() reads empty as true.
 DRY_RUN="${DRY_RUN:-false}"
 . "$(dirname "$0")/helpers.sh"
+. "$(dirname "$0")/root-guard.sh"
+refuse_custom_openclaw_root
 
 if ! declare -f ok >/dev/null 2>&1; then
   _G='\033[0;32m'; _Y='\033[1;33m'; _R='\033[0;31m'; _B='\033[1m'; _N='\033[0m'
@@ -52,7 +54,7 @@ fi
 declare -f info >/dev/null 2>&1 || info() { echo -e "\033[0;32m[+]\033[0m $*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
+OPENCLAW_ROOT="$HOME/.openclaw"
 ENV_FILE="${ENV_FILE:-$OPENCLAW_ROOT/openclaw.env}"
 WORKSPACE="${WORKSPACE:-$OPENCLAW_ROOT/workspace}"
 NODE_BIN="${NODE_BIN:-$(command -v node)}"

@@ -42,7 +42,9 @@ test('cli.js under npx installs from a stable per-version copy, not the npx cach
   try {
     const pkg = join(dir, 'npm-cache', '_npx', 'f00d', 'node_modules', 'openclaw-node-harness');
     mkdirSync(join(pkg, 'node_modules', 'hoisted-leftover'), { recursive: true });
+    mkdirSync(join(pkg, 'lib'));
     copyFileSync(CLI, join(pkg, 'cli.js'));
+    copyFileSync(join(ROOT, 'lib', 'openclaw-root.js'), join(pkg, 'lib', 'openclaw-root.js'));
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'openclaw-node-harness', version: '9.9.9' }));
     writeFileSync(join(pkg, 'install.sh'), 'echo "SCRIPT=$(cd "$(dirname "$0")" && pwd) CWD=$(pwd) ARGS=$*"\n');
     const home = join(dir, 'home');

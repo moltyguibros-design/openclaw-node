@@ -103,6 +103,17 @@ Written to `~/.openclaw/openclaw.env` by install (generated where marked ⚙; RA
 ~/Library/LaunchAgents/ai.openclaw.*.plist   (or ~/.config/systemd/user/openclaw-*)
 ```
 
+The root is always `~/.openclaw`. `install.sh` (also under `--dry-run` and `--update`),
+`bootstrap.sh`, `npx openclaw-node-harness` (`cli.js`), `mesh-install.sh`,
+`bin/openclaw-node-init.js` and `scripts/install/llm-setup.sh` refuse a different `OPENCLAW_ROOT`
+with a message and a non-zero exit before they write or install anything: they would write their
+files there, but every NATS client, the memory daemon, the mesh agent and the gateway plugin read
+`~/.openclaw` whatever it says (only Mission Control would follow it), so the node would come up
+half-configured. Unset `OPENCLAW_ROOT` to install. `uninstall.sh` still honours it, so an install
+made under a custom root before this can be removed. For a second node on one machine,
+`bin/spawn-node.mjs --id <name>` creates `~/.openclaw-<name>` and prints the `OPENCLAW_HOME=...`
+commands that run its memory daemon and consolidation ([MULTI_NODE_DEPLOY.md](MULTI_NODE_DEPLOY.md)).
+
 ## §5 Service topology (what runs, what it needs)
 
 | Unit | Autostart | Depends on | Plain-language job |

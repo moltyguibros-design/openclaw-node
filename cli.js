@@ -24,6 +24,13 @@ const MESH_INIT_SCRIPT = path.join(PKG_ROOT, 'bin', 'openclaw-node-init.js');
 const args = process.argv.slice(2);
 const meshOnly = args.includes('--mesh-only');
 
+// Before the harness copy below, which writes under the root.
+const refusal = require('./lib/openclaw-root').customRootRefusal(process.env.OPENCLAW_ROOT);
+if (refusal) {
+  console.error(refusal);
+  process.exit(1);
+}
+
 // npx runs the package from its cache (~/.npm/_npx/<hash>/node_modules/<pkg>),
 // which npm clears or replaces at will, and install.sh renders every mesh unit's
 // ExecStart/WorkingDirectory from the directory it runs in. A full install runs
@@ -31,7 +38,7 @@ const meshOnly = args.includes('--mesh-only');
 function stableInstallRoot(dryRun) {
   if (!PKG_ROOT.split(path.sep).includes('_npx')) return PKG_ROOT;
   const { version } = require(path.join(PKG_ROOT, 'package.json'));
-  const dest = path.join(process.env.OPENCLAW_ROOT || path.join(os.homedir(), '.openclaw'), 'harness', version);
+  const dest = path.join(os.homedir(), '.openclaw', 'harness', version);
   if (dryRun) {
     console.log(`[dry-run] would copy ${PKG_ROOT} to ${dest} and install from there`);
     return PKG_ROOT;

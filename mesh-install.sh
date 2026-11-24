@@ -29,6 +29,25 @@ warn() { echo -e "${YELLOW}  ⚠${RESET} $1"; }
 fail() { echo -e "${RED}  ✗${RESET} $1"; }
 die()  { fail "$1"; exit 1; }
 
+# ── Install root ───────────────────────────────────────
+# openclaw-node-init refuses a custom OPENCLAW_ROOT (the services read ~/.openclaw);
+# refuse before installing Node or cloning, in the words scripts/install/root-guard.sh
+# uses, which this file cannot source: the repo is not on disk yet.
+
+if [ -n "${OPENCLAW_ROOT:-}" ]; then
+  _want="${HOME%/}/.openclaw" _got="$OPENCLAW_ROOT"
+  while [ "$_got" != / ] && [ "${_got%/}" != "$_got" ]; do _got="${_got%/}"; done
+  if [ "$_got" != "$_want" ] && ! { [ -d "$_got" ] && [ -d "$_want" ] &&
+       [ "$(CDPATH='' cd -P -- "$_got" && pwd -P)" = "$(CDPATH='' cd -P -- "$_want" && pwd -P)" ]; }; then
+    printf '%s\n' \
+      "OPENCLAW_ROOT=$OPENCLAW_ROOT: a custom install root is not supported. OpenClaw installs only to ${HOME%/}/.openclaw." \
+      "Its services (the NATS clients, the memory daemon, the mesh agent, the gateway plugin) would still read ~/.openclaw, so a node installed anywhere else would be half-configured." \
+      "Nothing was written. Run \"unset OPENCLAW_ROOT\", then run this again." \
+      "For a second node on one machine, the repo's bin/spawn-node.mjs --id <name> creates ~/.openclaw-<name> and prints the OPENCLAW_HOME=... commands that run its memory daemon and consolidation." >&2
+    exit 1
+  fi
+fi
+
 # ── Token ──────────────────────────────────────────────
 
 TOKEN="${MESH_JOIN_TOKEN:-}"

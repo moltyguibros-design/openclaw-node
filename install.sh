@@ -23,6 +23,9 @@ set -euo pipefail
 # ============================================================
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Before the legacy-lock re-exec below, so a refused run takes no lock and never re-execs.
+source "$REPO_DIR/scripts/install/root-guard.sh"
+refuse_custom_openclaw_root
 if [ "$(uname -s)" = Darwin ]; then
   NATS_WRITER_LOCK=/private/var/db/openclaw-nats-writer.lock
   if [ -e "$NATS_WRITER_LOCK" ] || [ -L "$NATS_WRITER_LOCK" ]; then
@@ -40,8 +43,9 @@ if [ "$(uname -s)" = Darwin ]; then
     fi
   fi
 fi
-# Exported: the unit and NATS conf templates render their paths from it.
-export OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
+# Exported: the unit and NATS conf templates render their paths from it. Spelled the one
+# way the services and the harness-copy paths expect, whichever alias the check accepted.
+export OPENCLAW_ROOT="$HOME/.openclaw"
 WORKSPACE="$OPENCLAW_ROOT/workspace"
 ENV_FILE="$OPENCLAW_ROOT/openclaw.env"
 DRY_RUN=false
@@ -110,6 +114,8 @@ for arg in "$@"; do
       echo "                      copy the OpenClaw git hooks into its .git/hooks. Without it,"
       echo "                      neither happens (only universal rules are installed)."
       echo "  --enable-services   Also enable and start services after installing"
+      echo "Installs to ~/.openclaw only. A different OPENCLAW_ROOT is refused before anything is written:"
+      echo "the services read ~/.openclaw whatever it says, so the node would be half-configured."
       echo "In a VM whose host serves Ollama with the node's model, LLM_BASE_URL points at the host"
       echo "(nothing runs or downloads in the VM). OPENCLAW_LLM_HOST=0 keeps the VM on its own Ollama."
       exit 0

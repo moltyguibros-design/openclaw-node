@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,7 +44,10 @@ function machine(vars = {}) {
   }
   const envFile = join(dir, 'openclaw.env');
   writeFileSync(envFile, 'LLM_MODEL=qwen3:8b\nLLM_BASE_URL=http://localhost:11434\nOTHER=kept\n');
-  const env = { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, STUB_OS: 'Darwin', ...vars };
+  // The installers refuse any root but $HOME/.openclaw, so dir is reached through it.
+  const home = tmpDir('llm-host-home-');
+  symlinkSync(dir, join(home, '.openclaw'));
+  const env = { PATH: `${dir}:/usr/bin:/bin`, HOME: home, STUB_OS: 'Darwin', ...vars };
   return { dir, envFile, env };
 }
 
@@ -145,7 +148,7 @@ test('--dry-run reports the bridge and writes nothing', () => {
 test('wave 2 in a VM uses the host and downloads nothing, without ollama installed', () => {
   const m = machine(UTM_VM);
   const r = spawnSync('bash', [LLM_SETUP, '--check'], {
-    env: { ...m.env, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    env: { ...m.env, ENV_FILE: m.envFile, REPO_DIR: ROOT, NODE_BIN: process.execPath },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -158,7 +161,7 @@ test('wave 2 treats an already-recorded remote endpoint the same way', () => {
   const m = machine({ STUB_VMM: '0' });
   writeFileSync(m.envFile, 'LLM_MODEL=qwen3:8b\nLLM_BASE_URL=http://192.168.64.1:11434\n');
   const r = spawnSync('bash', [LLM_SETUP, '--check'], {
-    env: { ...m.env, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    env: { ...m.env, ENV_FILE: m.envFile, REPO_DIR: ROOT, NODE_BIN: process.execPath },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -167,7 +170,7 @@ test('wave 2 treats an already-recorded remote endpoint the same way', () => {
 
 const wave2 = (m, args) => {
   const r = spawnSync('bash', [LLM_SETUP, ...args], {
-    env: { ...m.env, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    env: { ...m.env, ENV_FILE: m.envFile, REPO_DIR: ROOT, NODE_BIN: process.execPath },
     encoding: 'utf8',
   });
   return { ...r, out: r.stdout.replace(/\x1b\[[0-9;]*m/g, '') };

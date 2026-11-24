@@ -145,7 +145,7 @@ test('unit and NATS conf templates follow OPENCLAW_ROOT; the default render is u
   walk(join(ROOT, 'services'));
   for (const f of files) assert.doesNotMatch(readFileSync(f, 'utf8'), /\$\{HOME\}\/\.openclaw/, f);
   assert.match(moduleSrc['services.sh'], /^UNIT_NAMES='[^']*\bOPENCLAW_ROOT\b/m);
-  assert.match(readFileSync(INSTALL_SH, 'utf8'), /^export OPENCLAW_ROOT="\$\{OPENCLAW_ROOT:-\$HOME\/\.openclaw\}"$/m);
+  assert.match(readFileSync(INSTALL_SH, 'utf8'), /^export OPENCLAW_ROOT="\$HOME\/\.openclaw"$/m);
 
   const custom = { HOME: '/h', OPENCLAW_ROOT: '/tmp/x', NATS_SERVER_BIN: '/x/nats-server' };
   const unit = renderUnitCli('systemd', join(ROOT, 'services/systemd/openclaw-nats.service'), custom);

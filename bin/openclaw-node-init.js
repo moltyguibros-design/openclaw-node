@@ -926,6 +926,12 @@ configureNats = tracer.wrap('configureNats', configureNats, { tier: 2, category:
 // ── Main ──────────────────────────────────────────────
 
 async function main() {
+  const refusal = require('../lib/openclaw-root').customRootRefusal(process.env.OPENCLAW_ROOT);
+  if (refusal) {
+    console.error(refusal);
+    process.exit(1);
+  }
+
   console.log(`\n${BOLD}${CYAN}╔══════════════════════════════════════╗${RESET}`);
   console.log(`${BOLD}${CYAN}║   OpenClaw Mesh — Join Network       ║${RESET}`);
   console.log(`${BOLD}${CYAN}╚══════════════════════════════════════╝${RESET}\n`);

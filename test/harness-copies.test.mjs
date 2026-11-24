@@ -57,8 +57,9 @@ test('dependency links left in an older harness copy follow the current one; oth
 
 function npxPackage(dir, version, installBody) {
   const pkg = join(dir, 'npm-cache', '_npx', 'f00d', 'node_modules', 'openclaw-node-harness');
-  mkdirSync(pkg, { recursive: true });
+  mkdirSync(join(pkg, 'lib'), { recursive: true });
   copyFileSync(join(ROOT, 'cli.js'), join(pkg, 'cli.js'));
+  copyFileSync(join(ROOT, 'lib', 'openclaw-root.js'), join(pkg, 'lib', 'openclaw-root.js'));
   writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'openclaw-node-harness', version }));
   writeFileSync(join(pkg, 'install.sh'), `${installBody}\n`);
   return pkg;
