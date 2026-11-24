@@ -1367,7 +1367,9 @@ describe('a rollback the lead sends is checked against this node\'s memory store
     const errors = result.errors.join('\n');
     assert.match(errors, /rollback refused: .*state\.db is at memory-store schema v9, but .* code expects v8 or older/);
     assert.ok(errors.includes(backupName), errors);
-    assert.match(errors, /mesh-deploy\.js --rollback --force/);
+    // Whatever command sent this trigger, the override it names moves this node
+    // to this sha and nothing else (test/mesh-deploy-fleet-sha.test.js runs it).
+    assert.ok(errors.includes(`mesh-deploy.js --rollback --force --node deploy-test-node --to ${fx.S0.slice(0, 7)}`), errors);
     assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
     assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
   });

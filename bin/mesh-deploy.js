@@ -49,6 +49,10 @@
  *                                         refused below the memory store's schema (each
  *                                         remote listener checks its own) unless --force,
  *                                         which the signed fleet trigger carries
+ *   mesh deploy --rollback --to <sha>   — roll back to that sha, not the last deploy's;
+ *                                         --rollback --force --node <id> --to <sha> is the
+ *                                         override a refusing listener names: that node,
+ *                                         that sha, nothing else
  *   mesh deploy --status                — show what's deployed vs what's in git
  *
  * ENVIRONMENT:
@@ -1349,9 +1353,17 @@ async function main() {
       if (!forceAll) throw new Error(`${refusal} (or roll back anyway: mesh-deploy.js --rollback --force)`);
       warn(`${refusal} — rolling back anyway (--force)`);
     };
+    // --to: the exact sha a refusing listener names. lastSha cannot stand in for
+    // it: a rollback that moved this node made lastSha the sha the node left.
+    const pinnedTo = toArg ? resolveCommit(REPO_DIR, toArg) : null;
+    if (toArg && !pinnedTo) throw new Error(`--to ${toArg} is not a commit in ${REPO_DIR}`);
     // A deploy that failed partway on this node: revert it, not the one before.
     // The fleet never received it (the trigger goes out after the local deploy).
     const pendingSha = deployLocal ? resolveCommit(REPO_DIR, state.pendingSha) : null;
+    if (pendingSha && pinnedTo) {
+      throw new Error(`a deploy of ${pendingSha.slice(0, 7)} failed partway on this node — revert it first ` +
+        '(mesh-deploy.js --rollback), or leave this node out with --node');
+    }
     if (pendingSha) {
       const toSha = resolveCommit(REPO_DIR, state.pendingFrom);
       if (!toSha) {
@@ -1366,11 +1378,11 @@ async function main() {
       if (deployRemote) skip('Remote nodes never received the failed deploy — remote rollback skipped');
       return;
     }
-    if (!state.lastSha) {
+    if (!pinnedTo && !state.lastSha) {
       fail('No previous deploy state found — cannot rollback');
       return;
     }
-    const toSha = resolveCommit(REPO_DIR, state.lastSha);
+    const toSha = pinnedTo || resolveCommit(REPO_DIR, state.lastSha);
     if (!toSha) {
       fail(`lastSha in deploy state is not a commit in ${REPO_DIR}: ${JSON.stringify(state.lastSha).slice(0, 50)}`);
       return;

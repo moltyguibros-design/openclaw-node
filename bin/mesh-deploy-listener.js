@@ -214,7 +214,9 @@ async function runDeployScript(args) {
  * refuses, as mesh-deploy --rollback refuses it: unlike the failed-deploy
  * rollback, no failed `npm ci` took this tree's better-sqlite3, and the node
  * stays on the tree it deployed. Only a schemaOverride covered by a verified
- * signature (mesh-deploy --rollback --force) goes past it.
+ * signature goes past it. The refusal names that override for this node and
+ * this sha only: a bare --rollback --force on the lead goes to the lead's own
+ * lastSha, and to every node.
  */
 async function backwardMoveRefusal(trigger, toSha, warnings) {
   let refusal;
@@ -224,7 +226,10 @@ async function backwardMoveRefusal(trigger, toSha, warnings) {
     refusal = err.message;
   }
   if (!refusal) return null;
-  if (trigger.schemaOverride !== true) return `${refusal} (or roll back anyway: mesh-deploy.js --rollback --force on the lead)`;
+  if (trigger.schemaOverride !== true) {
+    return `${refusal} (or move it anyway, on the lead: ` +
+      `mesh-deploy.js --rollback --force --node ${NODE_ID} --to ${toSha.slice(0, 7)})`;
+  }
   // Strict mode verified the signature, which covers every trigger field, before the trigger was queued.
   const { requireSignedDeploy } = await import('../lib/deploy-trigger-auth.mjs');
   if (!requireSignedDeploy()) {
