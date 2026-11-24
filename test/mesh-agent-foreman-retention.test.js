@@ -95,6 +95,33 @@ describe('Foreman timeline retention', () => {
     }
   });
 
+  it('a set value that is not a number (a trailing comment included) skips the prune and warns', async () => {
+    const envDir = path.join(TMP, '.openclaw');
+    const envFile = path.join(envDir, 'openclaw.env');
+    fs.mkdirSync(envDir, { recursive: true });
+    const warnings = [];
+    const retentionWarnings = () => warnings.filter((w) => /MESH_FOREMAN_RETENTION_DAYS/.test(w));
+    const origWarn = console.warn;
+    console.warn = (msg) => warnings.push(String(msg));
+    try {
+      fs.writeFileSync(envFile, 'MESH_FOREMAN_RETENTION_DAYS=0   # keep step 1.2 evidence\n');
+      const ancient = file('T-ancient.jsonl', 400);
+      await agent.__test.pruneForemanTimelines();
+      assert.equal(fs.existsSync(ancient), true, 'a commented openclaw.env value deletes nothing');
+      assert.equal(retentionWarnings().length, 1);
+      assert.match(retentionWarnings()[0], /keep step 1\.2 evidence/);
+
+      process.env.MESH_FOREMAN_RETENTION_DAYS = 'thirty';
+      const old = file('T-old.jsonl', 400);
+      await agent.__test.pruneForemanTimelines();
+      assert.equal(fs.existsSync(old), true, 'an unparseable environment value deletes nothing');
+      assert.equal(retentionWarnings().length, 2);
+    } finally {
+      console.warn = origWarn;
+      fs.rmSync(envDir, { recursive: true, force: true });
+    }
+  });
+
   it('a missing directory is nothing to prune', async () => {
     fs.rmSync(DIR, { recursive: true, force: true });
     await agent.__test.pruneForemanTimelines();

@@ -185,7 +185,7 @@ a one-line summary:
 | `MESH_FOREMAN_ASSESS_TIMEOUT_MS` | `8000` | analysis-lane ceiling before passthrough |
 | `MESH_FOREMAN_MODEL` | `LLM_MODEL` | assessor model (Ollama tag) |
 | `MESH_FOREMAN_DIR` | `~/.openclaw/foreman` | timeline directory |
-| `MESH_FOREMAN_RETENTION_DAYS` | `30` | agent startup deletes timelines whose last write is older than this; `0` keeps them all (copy out step 1.2 evidence before it ages out). Read from the agent's environment, else `~/.openclaw/openclaw.env` |
+| `MESH_FOREMAN_RETENTION_DAYS` | `30` | agent startup deletes timelines whose last write is older than this; `0` keeps them all (copy out step 1.2 evidence before it ages out). Read from the agent's environment, else `~/.openclaw/openclaw.env`; a value that is not a number (a trailing `# comment` counts) prunes nothing and logs a warning |
 | `MESH_FOREMAN_MAX_INTERVENTIONS` | `20` | ceiling on actions other than CONTINUE taken while a worker runs |
 | `MESH_FOREMAN_MAX_RETRIES` | `MESH_MAX_ATTEMPTS − 1` | retries after a stop (the agent's own attempt loop is the real budget) |
 | `MESH_FOREMAN_MAX_WORKERS` | `2 × MESH_MAX_ATTEMPTS + 2` | worker records per task: one coding worker plus one verification record per attempt |

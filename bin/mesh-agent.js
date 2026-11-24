@@ -548,9 +548,16 @@ const FOREMAN_ENABLED = process.env.MESH_FOREMAN !== '0';
 // One timeline per task, never rotated: startup drops those past the retention
 // window (0 keeps them all), as reconcileKeptBranches ages out kept branches.
 // The window also comes from openclaw.env: the agent's units pass no MESH_FOREMAN_RETENTION_DAYS.
+// A set value that is not a number prunes nothing: falling back to 30 days would
+// delete what an operator who wrote `0  # keep` meant to keep.
 async function pruneForemanTimelines(now = Date.now()) {
   const { foremanConfigFromEnv } = await import('../lib/foreman/index.mjs');
-  const env = { ...process.env, MESH_FOREMAN_RETENTION_DAYS: resolveEnvKey('MESH_FOREMAN_RETENTION_DAYS') || '' };
+  const raw = resolveEnvKey('MESH_FOREMAN_RETENTION_DAYS') || '';
+  if (raw && !Number.isFinite(Number(raw))) {
+    warn(`FOREMAN: MESH_FOREMAN_RETENTION_DAYS=${JSON.stringify(raw)} is not a number (a trailing comment counts); no timeline pruned`);
+    return;
+  }
+  const env = { ...process.env, MESH_FOREMAN_RETENTION_DAYS: raw };
   const { dir, retention_days: days } = foremanConfigFromEnv(env);
   if (!dir || !(days > 0) || !fs.existsSync(dir)) return;
   const cutoff = now - days * 86400000;
