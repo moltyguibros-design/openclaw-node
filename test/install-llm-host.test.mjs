@@ -187,8 +187,9 @@ test('wave 2 sizes the embedder from the transformers.js cache, not the Python H
   assert.match(hit.out, /Total download : ~0 GB/);
 
   const pythonOnly = machine(UTM_VM);
-  mkdirSync(join(pythonOnly.dir, '.cache/huggingface/hub'), { recursive: true });
-  writeFileSync(join(pythonOnly.dir, '.cache/huggingface/hub/config.json'), '{"_name_or_path": "BAAI/bge-m3"}');
+  const hfHub = join(pythonOnly.env.HOME, '.cache/huggingface/hub');
+  mkdirSync(hfHub, { recursive: true });
+  writeFileSync(join(hfHub, 'config.json'), '{"_name_or_path": "BAAI/bge-m3"}');
   const miss = wave2(pythonOnly, ['--check']);
   assert.equal(miss.status, 0, miss.out + miss.stderr);
   assert.match(miss.out, /Embedder\s+: Xenova\/bge-m3\s+\(~2 GB/);
