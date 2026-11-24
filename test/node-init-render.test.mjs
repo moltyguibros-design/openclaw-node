@@ -516,3 +516,19 @@ describe('node-init leaves the mesh agent on demand', () => {
     });
   }
 });
+
+// main() refuses every root but ~/.openclaw; an accepted alias (a trailing slash,
+// a symlink to it) must still render the one spelling the services read, as install.sh does.
+describe('node-init renders the canonical node root', () => {
+  it('an accepted OPENCLAW_ROOT alias renders as ~/.openclaw', () => {
+    const saved = process.env.OPENCLAW_ROOT;
+    process.env.OPENCLAW_ROOT = `${join(homedir(), '.openclaw')}//`;
+    try {
+      const v = serviceTemplateVars({ meshDir: '/opt/openclaw', nodeId: 'worker-7', config: {} });
+      assert.equal(v.OPENCLAW_ROOT, join(homedir(), '.openclaw'));
+    } finally {
+      if (saved === undefined) delete process.env.OPENCLAW_ROOT;
+      else process.env.OPENCLAW_ROOT = saved;
+    }
+  });
+});

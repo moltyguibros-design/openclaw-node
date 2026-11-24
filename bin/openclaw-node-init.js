@@ -604,7 +604,8 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
     NODE_BIN_DIR: path.dirname(process.execPath),
     NPM_BIN: env.NPM_BIN || path.join(path.dirname(process.execPath), 'npm'),
     NATS_SERVER_BIN: env.NATS_SERVER_BIN || '/usr/local/bin/nats-server',
-    OPENCLAW_ROOT: env.OPENCLAW_ROOT || path.join(home, '.openclaw'),
+    // main() refuses any other root; an accepted alias still renders the spelling the services read.
+    OPENCLAW_ROOT: path.join(home, '.openclaw'),
     OPENCLAW_WORKSPACE: serviceWorkspace(),
     OPENCLAW_REPO_DIR: meshDir,
     OPENCLAW_NATS: config.nats,

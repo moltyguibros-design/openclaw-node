@@ -132,8 +132,8 @@ test('unit renders fill only the listed placeholders, so $MAINPID survives', () 
   assert.ok(r.stdout.includes('ExecStart="/x/nats-server" --config "/h/.openclaw/config/nats.conf"'), r.stdout);
 });
 
-// install.sh writes configs under a custom OPENCLAW_ROOT, but every unit and NATS conf
-// template had ${HOME}/.openclaw written in, so nats-server looked for a config that was not there.
+// The unit and NATS conf templates render their paths from OPENCLAW_ROOT, which install.sh
+// always sets to $HOME/.openclaw (it refuses any other root), so the default render must not change.
 test('unit and NATS conf templates follow OPENCLAW_ROOT; the default render is unchanged', () => {
   const files = [];
   const walk = (d) => {
