@@ -88,15 +88,18 @@ mesh collab gate reject <session-id>      # send it back for another sub-round
 ### Deploy
 
 ```bash
-mesh deploy                               # deploy the repo HEAD to every node
+mesh deploy                               # deploy origin's tip of the deploy branch to every node
 mesh deploy --node ubuntu                 # one node (alias or node id)
 mesh deploy --component mesh-daemons      # one component
 mesh deploy --force                       # reinstall even when nothing changed
 ```
 
-The trigger carries the repo's current sha and branch, read from `$OPENCLAW_REPO_DIR`
-(else `~/openclaw-node`, else `~/openclaw`). Each node's listener checks out that sha and
-reports to the `MESH_DEPLOY_RESULTS` store; the CLI waits about 15 s for answers.
+The trigger carries origin's tip of `$OPENCLAW_DEPLOY_BRANCH` (default `main`): the CLI
+fetches `origin/<branch>` in `$OPENCLAW_REPO_DIR` (else `~/openclaw-node`, else `~/openclaw`)
+and sends that sha and branch, whatever that checkout has checked out. Push first: a commit
+that is not on origin's deploy branch (a work branch, an unpushed commit) is not deployed. If
+origin cannot be fetched it exits 1 and sends nothing. Each node's listener checks out that
+sha and reports to the `MESH_DEPLOY_RESULTS` store; the CLI waits about 15 s for answers.
 
 ## Health
 

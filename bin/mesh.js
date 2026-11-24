@@ -22,7 +22,9 @@
  * ~/openclaw/shared/ between nodes.
  *
  * ENVIRONMENT:
- *   OPENCLAW_NATS  — NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)
+ *   OPENCLAW_NATS           — NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)
+ *   OPENCLAW_DEPLOY_BRANCH  — branch `mesh deploy` sends origin's tip of (default main)
+ *   OPENCLAW_REPO_DIR       — checkout it fetches origin in (default ~/openclaw-node, else ~/openclaw)
  */
 
 const { connect, StringCodec } = require('nats');
@@ -883,7 +885,7 @@ function cmdHelp() {
     '  mesh health                             ok / degraded / down for this node',
     '  mesh health --all                       ... for every node in MESH_NODE_HEALTH',
     '  mesh health --json                      Same, as JSON (exit 1 unless all ok)',
-    '  mesh deploy                             Deploy to all nodes',
+    "  mesh deploy                             Deploy origin's tip of OPENCLAW_DEPLOY_BRANCH to all nodes",
     '  mesh deploy --force                     Force deploy (skip cache)',
     '  mesh deploy --node ubuntu               Deploy to specific node',
     '  mesh deploy --component mesh-daemons    Deploy specific component',
@@ -895,7 +897,10 @@ function cmdHelp() {
     '  ~/.openclaw/mesh-aliases.json adds more (openclaw-node-init writes it)',
     '',
     'ENVIRONMENT:',
-    '  OPENCLAW_NATS  -- NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)',
+    '  OPENCLAW_NATS           -- NATS server URL (auto-detected from env or ~/.openclaw/openclaw.env)',
+    '  OPENCLAW_DEPLOY_BRANCH  -- `mesh deploy` sends origin\'s tip of this branch, default main',
+    '                             (unpushed and work-branch commits are not deployed)',
+    '  OPENCLAW_REPO_DIR       -- checkout it fetches origin in (default ~/openclaw-node, else ~/openclaw)',
     '',
   ].join('\n'));
 }

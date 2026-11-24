@@ -176,3 +176,33 @@ describe('mesh deploy trigger sha', () => {
     assert.deepEqual(r.bus.filter((e) => !e.publish?.startsWith('openclaw.trace.')), []);
   });
 });
+
+// The skill, the README and `mesh help` still said it deployed "the repo HEAD"
+// or "the repo's current sha and branch", and the help never named the
+// variable that now picks what ships.
+describe('mesh deploy docs', () => {
+  const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  const help = spawnSync(process.execPath, [path.join(ROOT, 'bin', 'mesh.js'), 'help'], { encoding: 'utf8', env: baseEnv() }).stdout;
+  const skill = read('skills/mesh/SKILL.md');
+  const docs = {
+    help: help.split('\n').filter((l) => /mesh deploy|OPENCLAW_/.test(l)).join('\n'),
+    skill: skill.slice(skill.indexOf('\n### Deploy\n'), skill.indexOf('\n## Health\n')),
+    readme: read('README.md').split('\n').find((l) => l.startsWith('node ~/openclaw/bin/mesh.js deploy')),
+  };
+
+  for (const [name, text] of Object.entries(docs)) {
+    it(`${name} says it deploys origin's tip of the deploy branch, not the checkout's HEAD`, () => {
+      assert.ok(text && text.length > 40, `no mesh deploy text found in ${name}`);
+      assert.doesNotMatch(text, /\bHEAD\b|current sha|current branch/);
+      assert.match(text, /origin/);
+      assert.match(text, /OPENCLAW_DEPLOY_BRANCH/);
+    });
+  }
+
+  it('help and skill name the default branch and where the repo is read from', () => {
+    assert.match(docs.help, /OPENCLAW_DEPLOY_BRANCH\b.*default main/);
+    assert.match(docs.help, /OPENCLAW_REPO_DIR\b/);
+    assert.match(docs.skill, /`main`/);
+    assert.match(docs.skill, /\$OPENCLAW_REPO_DIR/);
+  });
+});
