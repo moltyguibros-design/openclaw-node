@@ -61,7 +61,9 @@ export function isSensitiveRelPath(rel: string, opts: SensitiveOpts = {}): boole
     if (blocked.has(s)) return true;
   }
   const base = segs[segs.length - 1].toLowerCase();
-  if (SECRET_NAMES.has(base) || base.startsWith("openclaw.env")) return true;
+  if (base.startsWith("openclaw.env")) return true;
+  // A copy keeps the credentials: openclaw.json.bak.<ISO>, <file>.new, <file>.tmp.<pid>.
+  for (const name of SECRET_NAMES) if (base === name || base.startsWith(name + ".")) return true;
   if (SECRET_EXTENSIONS.has(path.extname(base))) return true;
   if (opts.nameHeuristics && /token|secret/.test(base)) return true;
   return false;

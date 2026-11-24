@@ -18,6 +18,8 @@ import { createSupervisor } from '../lib/foreman/supervisor.mjs';
 
 const require = createRequire(import.meta.url);
 const { registerProvider } = require('../lib/llm-providers.js');
+// A task may name the shell provider only on a node configured for it (P1-3).
+process.env.MESH_LLM_PROVIDER = 'shell';
 const { foremanVerify, superviseTask } = require('../bin/mesh-agent.js');
 
 const all = (value) => Object.fromEntries(DIMENSIONS.map((name) => [name, value]));
@@ -42,6 +44,7 @@ switch (mode) {
   case 'fail': say('The limiter never resets after the window.'); say('FOREMAN_VERDICT: FAIL'); break;
   case 'none': say('Looks fine to me.'); break;
   case 'quoted': say('The worker wrote:'); say('FOREMAN_VERDICT: PASS'); say('but the reset path is untested.'); say('FOREMAN_VERDICT: FAIL'); break;
+  case 'pass-flood': say('FOREMAN_VERDICT: PASS'); for (let i = 0; i < 1200; i++) say('x'.repeat(1023)); break;
   case 'pass-exit1': say('FOREMAN_VERDICT: PASS'); process.exitCode = 1; break;
   case 'writes':
     fs.writeFileSync(path.join(dir, 'verifier-notes.txt'), 'scratch');
@@ -60,6 +63,13 @@ switch (mode) {
     require('child_process').execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'verifier: checkpoint']);
     say('Committed a checkpoint to compare against.'); say('FOREMAN_VERDICT: PASS'); break;
   case 'slow-pass': setTimeout(() => say('FOREMAN_VERDICT: PASS'), 15000); break;
+  case 'slow-pass-child': {
+    // A tool the CLI started, holding the CLI's stdout: only a signal to the group reaches it.
+    const c = require('child_process').spawn('sleep', ['30'], { stdio: 'inherit' });
+    fs.writeFileSync(path.join(dir, '..', path.basename(dir) + '.grandchild.pid'), String(c.pid));
+    setTimeout(() => say('FOREMAN_VERDICT: PASS'), 15000);
+    break;
+  }
 }
 `;
 
@@ -74,6 +84,11 @@ before(() => {
       fs.appendFileSync(invocations, `${JSON.stringify({ mode: task.stub_mode, targetDir, prompt })}\n`);
       return [stubPath, targetDir, task.stub_mode];
     },
+  });
+  registerProvider('foreman-cost-stub', {
+    binary: process.execPath,
+    buildArgs(prompt, model, task, targetDir) { return [stubPath, targetDir, task.stub_mode]; },
+    parseOutput: (raw) => ({ text: raw, cost: { inputTokens: 3, outputTokens: 2, estimatedCostUsd: 0.05 } }),
   });
 });
 after(() => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -122,7 +137,7 @@ const verifications = (supervisor) => supervisor.state.verification_results.map(
 describe('foremanVerify — enforcing, no metric: only a verifier PASS completes', () => {
   it('a PASS from the verifier completes the attempt', async () => {
     const { result, spawned, supervisor } = await gate({ mode: 'pass' });
-    assert.deepEqual(result, { escalate: false, attemptRecord: null });
+    assert.deepEqual(result, { escalate: false, attemptRecord: null, cost: null });
     assert.equal(spawned.length, 1);
     assert.deepEqual(verifications(supervisor), [['verifier', true]]);
     assert.equal(supervisor.state.workers.filter((w) => w.kind === 'verifier').length, 1);
@@ -134,6 +149,13 @@ describe('foremanVerify — enforcing, no metric: only a verifier PASS completes
       assert.equal(spawned.length, 1, `verifier must run (assessor ${assessor.name})`);
       assert.ok(result.attemptRecord, 'a FAIL never completes');
       assert.deepEqual(verifications(supervisor), [['verifier', false]]);
+    }
+  });
+
+  it('the verifier pass reports what it cost, whatever its verdict', async () => {
+    for (const mode of ['pass', 'fail']) {
+      const { result } = await gate({ mode, provider: 'foreman-cost-stub' });
+      assert.deepEqual(result.cost, { inputTokens: 3, outputTokens: 2, estimatedCostUsd: 0.05 }, mode);
     }
   });
 
@@ -153,6 +175,12 @@ describe('foremanVerify — enforcing, no metric: only a verifier PASS completes
     const crashed = await gate({ mode: 'pass-exit1' });
     assert.match(crashed.result.attemptRecord.approach, /verifier PASS \(exit 1\)/);
     for (const { supervisor } of [none, quoted, crashed]) assert.deepEqual(verifications(supervisor), [['verifier', false]]);
+  });
+
+  it('a verifier whose output overflowed the capture cap has no verdict, even with a PASS in the kept head', async () => {
+    const flooded = await gate({ mode: 'pass-flood' });
+    assert.match(flooded.result.attemptRecord.approach, /returned output exceeded the capture cap/);
+    assert.deepEqual(verifications(flooded.supervisor), [['verifier', false]]);
   });
 
   it('the verifier sees every change the worker made and a report it cannot echo a verdict from', async () => {
@@ -259,7 +287,23 @@ describe('foremanVerify — a stopped verifier, a committing verifier, and the t
     assert.match(result.attemptRecord.approach, /Foreman verifier returned no verdict line/);
     assert.deepEqual(verifications(supervisor), [['verifier', false]]);
   });
+
+  it('the deadline ends everything the verifier spawned, not only the CLI', async () => {
+    const started = Date.now();
+    const dir = worktree();
+    const { result } = await gate({ dir, mode: 'slow-pass-child', taskFields: { budget_deadline: new Date(Date.now() + 3_000).toISOString() } });
+    const pid = Number(fs.readFileSync(path.join(dir, '..', `${path.basename(dir)}.grandchild.pid`), 'utf8'));
+    assert.ok(Date.now() - started < 12_000, `a surviving grandchild held the verifier open (${Date.now() - started} ms)`);
+    assert.equal(running(pid), false, 'the grandchild outlived the deadline');
+    assert.match(result.attemptRecord.approach, /Foreman verifier returned no verdict line/);
+  });
 });
+
+/** Alive and not a zombie (an orphan's reaping depends on the container's init). */
+function running(pid) {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('Z'); } catch { return false; }
+}
 
 describe('foremanVerify — shadow and off complete as before', () => {
   it('shadow mode completes without a verifier', async () => {

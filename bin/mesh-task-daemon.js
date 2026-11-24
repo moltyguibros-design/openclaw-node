@@ -23,8 +23,12 @@
  *   mesh.tasks.list          — list tasks with optional filter (request/reply)
  *   mesh.tasks.get           — get a single task by ID (request/reply)
  *   mesh.tasks.cancel        — cancel a task (request/reply)
+ *   mesh.tasks.update        — signed operator edit of a live task's editable fields (request/reply)
+ *   mesh.tasks.approve / reject / merged — review gate and merge report (request/reply)
+ *   mesh.collab.*            — join, leave, status, find, reflect, recruiting, gate.approve, gate.reject
+ *   mesh.plans.*             — create, get, list, approve, abort, subtask.update
  *
- * Enforcement loops run every 30s: budget check + stall detection.
+ * Enforcement loops run every 30s: budget check, lease reaping + stall detection.
  *
  * Usage:
  *   node mesh-task-daemon.js          # foreground
@@ -34,12 +38,11 @@
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-task-daemon');
-const { createTask, TaskStore, TASK_STATUS, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET } = require('../lib/mesh-tasks');
+const { createTask, TaskStore, EDITABLE_TASK_FIELDS, TASK_STATUS, TERMINAL_STATES, TASK_TERMINAL, DEFAULT_MAX_REJECTIONS, DEFAULT_LEASE_MS, KV_BUCKET, isSessionOwner } = require('../lib/mesh-tasks');
 const { validateMetricCommand } = require('../lib/exec-safety');
-const { createSession, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
+const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS, COLLAB_KV_BUCKET, COLLAB_MODE, isModeImplemented } = require('../lib/mesh-collab');
 const { createPlan, autoRoutePlan, PlanStore, PLAN_STATUS, SUBTASK_STATUS, PLANS_KV_BUCKET } = require('../lib/mesh-plans');
-const { findRole, findRoleByScope, validateRequiredOutputs, checkForbiddenPatterns } = require('../lib/role-loader');
-const os = require('os');
+const { findRole, findRoleByScope } = require('../lib/role-loader');
 const path = require('path');
 
 // Role search directories
@@ -50,6 +53,7 @@ const ROLE_DIRS = [
 
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
 const BUDGET_CHECK_INTERVAL = 30000; // 30s
 const STALL_MINUTES = parseInt(process.env.MESH_STALL_MINUTES || '5'); // no heartbeat for this long → stalled
 const MAX_REJECTIONS = parseInt(process.env.MESH_MAX_REJECTIONS || String(DEFAULT_MAX_REJECTIONS)); // reject→requeue cap (P4-5)
@@ -57,7 +61,6 @@ const TASK_TTL_DAYS = parseInt(process.env.MESH_TASK_TTL_DAYS || '14'); // termi
 const LEASE_MS = parseInt(process.env.MESH_LEASE_MS || String(DEFAULT_LEASE_MS)); // owner must renew within this (heartbeat is 60s) — P4-5
 const TASK_TTL_MS = TASK_TTL_DAYS > 0 ? TASK_TTL_DAYS * 86400000 : 0;
 const CIRCLING_STEP_TIMEOUT_MS = parseInt(process.env.MESH_CIRCLING_STEP_TIMEOUT_MS || String(10 * 60 * 1000)); // 10 min default
-const NODE_ID = require('../lib/node-id').resolveNodeId();
 
 let nc, store, collabStore, planStore;
 
@@ -135,7 +138,8 @@ async function operatorAuth() {
 
 /**
  * Gate a mutation. On refusal, answers the request with an error and returns
- * false so the handler can simply `return`.
+ * false so the handler can simply `return`; otherwise returns the credential
+ * that passed ('owner' or 'operator').
  */
 async function authorize(msg, params, task, { action, allowOwner = false, allowOperator = true }) {
   const { authorizeTaskMutation } = await operatorAuth();
@@ -146,7 +150,7 @@ async function authorize(msg, params, task, { action, allowOwner = false, allowO
     return false;
   }
   if (decision.via === 'operator') log(`AUTHZ ${action}: signed operator request accepted`);
-  return true;
+  return decision.via;
 }
 
 // ── Event Publishing ───────────────────────────────
@@ -163,8 +167,8 @@ function publishEvent(eventType, task) {
 // follows task.plan_id/subtask_id, and requires_review:false skips the human
 // gate, so a submitter setting them could complete, fail or abort another plan's
 // subtask, or wave its own work past review (review 2026-09-15 F1). Only
-// advancePlanWave sets them, plus handleFail's escalation, which copies them from
-// a task the daemon dispatched. A bus submit or KV proposal carrying them is refused.
+// advancePlanWave sets them, plus escalateTask, which copies them from
+// a task the daemon dispatched. A bus submit carrying them is refused.
 const DAEMON_OWNED_TASK_FIELDS = ['plan_id', 'subtask_id', 'requires_review'];
 
 function daemonOwnedFieldsIn(task) {
@@ -190,9 +194,8 @@ async function handleSubmit(msg) {
     return respondError(msg, `Submit refused: ${owned.join(', ')} can only be set by the daemon`);
   }
 
-  // Server-side metric gate. The worker re-checks before running, but the
-  // daemon is the only place every submit path (NATS, kanban bridge, proposals)
-  // converges, so a bad metric must be refused here, fail-closed.
+  // Server-side metric gate, fail-closed. Plan subtasks and escalations are not
+  // gated here; the worker's evaluateMetric re-check covers them.
   if (params.metric) {
     const check = validateMetricCommand(params.metric);
     if (!check.allowed) {
@@ -204,49 +207,79 @@ async function handleSubmit(msg) {
   // Check if task already exists
   const existing = await store.get(params.task_id);
   if (existing) {
-    return respondError(msg, `Task ${params.task_id} already exists`);
+    return respondError(msg, `Task ${params.task_id} already exists`, { code: 'TASK_EXISTS' });
   }
 
-  const task = createTask(params);
+  let task;
+  try {
+    task = createTask(params);
+  } catch (err) {
+    log(`SUBMIT REJECTED ${params.task_id}: ${err.message}`);
+    return respondError(msg, err.message);
+  }
+
+  // Built before the first put: createSession throws on an unknown mode, and a
+  // stored collab task with no session is claimed and failed as "Collab session not found".
+  // 3.4: envelope-level preferred_mode (createTask does not keep it) is a fallback for the spec's own.
+  let session = null;
+  if (task.collaboration && collabStore) {
+    const spec = params.preferred_mode && !task.collaboration.preferred_mode && !task.collaboration.mode
+      ? { ...task.collaboration, preferred_mode: params.preferred_mode }
+      : task.collaboration;
+    try {
+      session = createSession(task.task_id, spec);
+    } catch (err) {
+      return respondError(msg, err.message);
+    }
+  }
+
+  // The task is claimable from its first write, so it carries its session
+  // from then on: a second put of this copy would erase a claim made between.
+  if (session) {
+    await collabStore.put(session);
+    task.collab_session_id = session.session_id;
+  }
   await store.put(task);
 
   log(`SUBMIT ${task.task_id}: "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'})`);
   publishEvent('submitted', task);
 
-  // Auto-create collab session if task has collaboration spec.
-  // 3.4: envelope-level task.preferred_mode is a fallback for the spec's own.
-  if (task.collaboration && collabStore) {
-    const spec = task.preferred_mode && !task.collaboration.preferred_mode && !task.collaboration.mode
-      ? { ...task.collaboration, preferred_mode: task.preferred_mode }
-      : task.collaboration;
-    const session = createSession(task.task_id, spec);
-    await collabStore.put(session);
-
-    // Store session_id back in task for agent discovery
-    task.collab_session_id = session.session_id;
-    await store.put(task);
-
-    log(`  → COLLAB SESSION ${session.session_id} auto-created (mode: ${session.mode})`);
-    publishCollabEvent('created', session);
-
-    // Broadcast recruit signal
-    log(`RECRUIT: broadcasting for session ${session.session_id}`);
-    nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
-      session_id: session.session_id,
-      task_id: task.task_id,
-      mode: session.mode,
-      min_nodes: session.min_nodes,
-      max_nodes: session.max_nodes,
-      task_title: task.title,
-    })));
-  }
+  if (session) announceCollabSession(task, session);
 
   respond(msg, task);
 }
 
+function announceCollabSession(task, session) {
+  log(`  → COLLAB SESSION ${session.session_id} auto-created (mode: ${session.mode})`);
+  publishCollabEvent('created', session);
+
+  // Broadcast recruit signal
+  log(`RECRUIT: broadcasting for session ${session.session_id}`);
+  nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
+    session_id: session.session_id,
+    task_id: task.task_id,
+    mode: session.mode,
+    min_nodes: session.min_nodes,
+    max_nodes: session.max_nodes,
+    task_title: task.title,
+  })));
+}
+
+// Every collab member keeps its own contribution branch while review is
+// pending, so every member hears the outcome, not only the claimer.
+async function reviewRecipients(task) {
+  const ids = new Set(task.owner && !isSessionOwner(task.owner) ? [task.owner] : []);
+  if (task.collab_session_id && collabStore) {
+    const session = await collabStore.get(task.collab_session_id);
+    for (const n of session?.nodes || []) ids.add(n.node_id);
+  }
+  return [...ids];
+}
+
 /**
  * Abort any collab session tied to a task that is being terminated.
- * Shared by handleFail, handleRelease, handleCancel.
+ * Shared by handleFail, handleRelease, handleCancel, the budget enforcer, and the
+ * lease reaper's and stall detector's releases.
  *
  * NOT called from handleComplete — that path goes through evaluateRound
  * which already calls collabStore.markCompleted() on the session.
@@ -256,6 +289,7 @@ async function handleSubmit(msg) {
  */
 async function cleanupTaskCollabSession(task, reason) {
   if (!task.collab_session_id || !collabStore) return;
+  clearCirclingStepTimer(task.collab_session_id);
   try {
     // markAborted returns null if session doesn't exist or is already completed/aborted.
     // Non-null means we actually transitioned the session to aborted.
@@ -266,8 +300,6 @@ async function cleanupTaskCollabSession(task, reason) {
       log(`COLLAB ABORTED ${task.collab_session_id}: ${reason}`);
     }
     // Clean up audit error rate-limit counter
-    // NOTE: sessions expiring via KV TTL bypass this — residual Map entry is negligible
-    // for a homelab mesh but worth noting.
     collabStore.clearAuditErrorCount(task.collab_session_id);
   } catch (err) {
     log(`COLLAB CLEANUP WARN: could not abort session ${task.collab_session_id}: ${err.message}`);
@@ -276,24 +308,24 @@ async function cleanupTaskCollabSession(task, reason) {
 
 /**
  * mesh.tasks.claim — Agent requests the next available task.
- * Expects: { node_id }
+ * Expects: { node_id, accepts_collab? } — accepts_collab: false skips collab tasks
+ * (a node whose provider D11 declines as a grappe worker).
  * Returns: the claimed task, or null if nothing available.
  */
 async function handleClaim(msg) {
-  const { node_id } = parseRequest(msg);
+  const { node_id, accepts_collab } = parseRequest(msg);
 
   if (!node_id) {
     return respondError(msg, 'node_id is required');
   }
 
   // Check if this node already has a running task
-  const running = await store.list({ status: TASK_STATUS.RUNNING, owner: node_id });
-  const claimed = await store.list({ status: TASK_STATUS.CLAIMED, owner: node_id });
-  if (running.length > 0 || claimed.length > 0) {
-    return respondError(msg, `Node ${node_id} already has an active task: ${(running[0] || claimed[0]).task_id}`);
+  const active = await store.list({ statuses: [TASK_STATUS.RUNNING, TASK_STATUS.CLAIMED], owner: node_id });
+  if (active.length > 0) {
+    return respondError(msg, `Node ${node_id} already has an active task: ${active[0].task_id}`);
   }
 
-  const task = await store.claim(node_id);
+  const task = await store.claim(node_id, { acceptsCollab: accepts_collab !== false, skip: collabParentClosed });
 
   if (task) {
     // Pre-dispatch revalidation: re-read the task we just claimed to confirm
@@ -347,7 +379,8 @@ async function handleComplete(msg) {
   // Determine if this task requires human review before completing.
   // requires_review logic:
   //   - explicit true/false on task → honor it
-  //   - null (default) → auto-compute:
+  //   - null (default), signed operator force-complete → no
+  //   - null (default), owner completion → auto-compute:
   //     * mode: human → always (by definition)
   //     * mode: soul → always (creative/strategic work, no mechanical verification)
   //     * collab_mesh without metric → yes (peer review without mechanical check)
@@ -360,11 +393,17 @@ async function handleComplete(msg) {
   // The claiming node completes its own task; a signed operator request may
   // force-complete (Mission Control "force converge"). Anyone else — including
   // a peer with the shared NATS token fabricating { success: true } — is refused.
-  if (!(await authorize(msg, params, existingTask, { action: 'complete', allowOwner: true, allowOperator: true }))) return;
+  const via = await authorize(msg, params, existingTask, { action: 'complete', allowOwner: true, allowOperator: true });
+  if (!via) return;
 
   let needsReview = existingTask.requires_review;
   let reviewReason = needsReview ? 'explicit_requires_review' : null;
-  if (needsReview === null || needsReview === undefined) {
+  if ((needsReview === null || needsReview === undefined) && via === 'operator') {
+    // MC's "force converge" is a signed operator decision: it is the human
+    // review the auto-computed gate would ask for.
+    needsReview = false;
+    reviewReason = 'operator_force_complete';
+  } else if (needsReview === null || needsReview === undefined) {
     const mode = existingTask.collaboration ? 'collab_mesh' : (existingTask.tags?.includes('soul') ? 'soul' : 'solo_mesh');
     const hasMetric = !!existingTask.metric;
 
@@ -383,23 +422,20 @@ async function handleComplete(msg) {
     }
   }
 
-  // Role-based post-completion validation — runs UNCONDITIONALLY on all tasks
-  // with a role, regardless of review status. Validation results are included
-  // in the pending_review metadata so human reviewers see structured checks.
+  // Role required_outputs are checked by the worker, in the worktree where the
+  // files and their contents exist, and arrive as result.role_validation. The
+  // daemon acts on that verdict for every task whose role requires outputs,
+  // whatever its review status, and the result reaches the reviewer. An owner
+  // completion without a verdict goes to review rather than passing unchecked;
+  // a signed operator force-complete is the operator's own call.
   let roleValidation = { passed: true, issues: [] };
   if (existingTask.role) {
     const role = findRole(existingTask.role, ROLE_DIRS);
-    if (role) {
-      const outputFiles = result?.artifacts || [];
-      const harnessFiles = (result?.harness?.violations || []).flatMap(v => v.files || []);
-      const allFiles = [...new Set([...outputFiles, ...harnessFiles])];
-
-      if (allFiles.length > 0) {
-        const reqResult = validateRequiredOutputs(role, allFiles, null);
-        if (!reqResult.passed) {
-          roleValidation.passed = false;
-          roleValidation.issues.push(...reqResult.failures.map(f => `[required_output] ${f.description}: ${f.detail}`));
-        }
+    if (role?.required_outputs?.length) {
+      if (result?.role_validation) {
+        roleValidation = { passed: result.role_validation.passed === true, issues: result.role_validation.issues || [] };
+      } else if (via === 'owner') {
+        roleValidation = { passed: false, issues: ['[required_output] the worker sent no role validation'] };
       }
 
       if (!roleValidation.passed) {
@@ -490,52 +526,49 @@ async function handleFail(msg) {
   publishEvent('failed', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} failed: ${reason}`);
 
-  // Phase F: Escalation — if the task has a role with escalation mapping,
-  // create an escalation task before cascading failure through the plan.
-  let escalated = false;
-  if (task.role) {
-    const role = findRole(task.role, ROLE_DIRS);
-    if (role && role.escalation) {
-      // Determine failure type for escalation routing
-      let failureType = 'on_metric_failure';
-      if (reason && reason.includes('Budget exceeded')) failureType = 'on_budget_exceeded';
-      if (reason && reason.includes('scope')) failureType = 'on_scope_violation';
-
-      const escalationTarget = role.escalation[failureType];
-      if (escalationTarget) {
-        const escalationTask = createTask({
-          task_id: `ESC-${task_id}-${Date.now()}`,
-          title: `[Escalation] ${task.title}`,
-          description: [
-            `Escalated from ${task_id} (role: ${task.role}, failure: ${failureType}).`,
-            `Original reason: ${reason}`,
-            '',
-            `Original description: ${task.description}`,
-          ].join('\n'),
-          budget_minutes: Math.ceil(task.budget_minutes * 1.5), // 50% more budget
-          metric: task.metric,
-          scope: task.scope,
-          success_criteria: task.success_criteria,
-          role: escalationTarget === 'human' ? null : escalationTarget,
-          requires_review: escalationTarget === 'human' ? true : null,
-          tags: [...(task.tags || []), 'escalation', `escalated_from:${task_id}`],
-          plan_id: task.plan_id,
-          subtask_id: task.subtask_id, // Wire back to original plan subtask for recovery
-        });
-        await store.put(escalationTask);
-        publishEvent('submitted', escalationTask);
-        log(`ESCALATED ${task_id} → ${escalationTask.task_id} (target role: ${escalationTarget})`);
-        escalated = true;
-      }
-    }
-  }
-
-  // Check if this task belongs to a plan (escalation doesn't block cascade —
-  // the escalation task is independent. If the plan has abort_on_critical_fail
-  // and this was critical, it still aborts. The escalation is a parallel attempt.)
+  // An agent fails a task only when it could not set up (worktree isolation,
+  // collab discovery, a provider it cannot serve); that is no reason to hand the
+  // work to another role.
   await checkPlanProgress(task_id, 'failed');
 
-  respond(msg, { ...task, escalated, escalation_task_id: escalated ? `ESC-${task_id}-${Date.now()}` : null });
+  respond(msg, task);
+}
+
+/**
+ * Phase F escalation: hand a task that failed for one of its role's named
+ * reasons to the role (or human) the role's escalation map names, with 1.5x the
+ * budget. Called when attempts are exhausted on a failing metric
+ * (on_metric_failure) and when the budget runs out (on_budget_exceeded). The
+ * escalation task runs beside the plan cascade; it does not block it.
+ */
+async function escalateTask(task, failureType, reason) {
+  if (!task.role) return null;
+  const role = findRole(task.role, ROLE_DIRS);
+  const escalationTarget = role?.escalation?.[failureType];
+  if (!escalationTarget) return null;
+  const escalationTask = createTask({
+    task_id: `ESC-${task.task_id}-${Date.now()}`,
+    title: `[Escalation] ${task.title}`,
+    description: [
+      `Escalated from ${task.task_id} (role: ${task.role}, failure: ${failureType}).`,
+      `Original reason: ${reason}`,
+      '',
+      `Original description: ${task.description}`,
+    ].join('\n'),
+    budget_minutes: Math.ceil(task.budget_minutes * 1.5),
+    metric: task.metric,
+    scope: task.scope,
+    success_criteria: task.success_criteria,
+    role: escalationTarget === 'human' ? null : escalationTarget,
+    requires_review: escalationTarget === 'human' ? true : null,
+    tags: [...(task.tags || []), 'escalation', `escalated_from:${task.task_id}`],
+    plan_id: task.plan_id,
+    subtask_id: task.subtask_id, // Wire back to original plan subtask for recovery
+  });
+  await store.put(escalationTask);
+  publishEvent('submitted', escalationTask);
+  log(`ESCALATED ${task.task_id} → ${escalationTask.task_id} (${failureType}, target role: ${escalationTarget})`);
+  return escalationTask.task_id;
 }
 
 /**
@@ -613,24 +646,30 @@ async function handleHeartbeat(msg) {
 
 /**
  * mesh.tasks.release — Mark task as released (automation gave up, human triage needed).
- * Expects: { task_id, reason, attempts? }
+ * Expects: { task_id, reason, attempts?, cost?, metric_exhausted? }
  * Different from fail: "released" means all retries exhausted, escalation required.
  */
 async function handleRelease(msg) {
   const params = parseRequest(msg);
-  const { task_id, reason, attempts } = params;
+  const { task_id, reason, attempts, cost } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
   const existing = await store.get(task_id);
   if (!existing) return respondError(msg, `Task ${task_id} not found`);
   if (!(await authorize(msg, params, existing, { action: 'release', allowOwner: true, allowOperator: true }))) return;
 
-  const task = await store.markReleased(task_id, reason || 'released for human triage', attempts || []);
+  const task = await store.markReleased(task_id, reason || 'released for human triage', attempts || [], { cost });
   if (!task) return respondUnchanged(msg, task_id);
 
   log(`RELEASED ${task_id}: ${reason || 'no reason'} (needs human triage)`);
   publishEvent('released', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} released: ${reason || 'human triage'}`);
+  // The agent sets metric_exhausted only when every attempt ran and its metric
+  // kept failing; a Foreman escalation, a pre-check or a declined provider does not.
+  if (params.metric_exhausted === true && task.metric) {
+    await escalateTask(task, 'on_metric_failure', reason || 'metric failed on every attempt');
+  }
+  await checkPlanProgress(task_id, 'failed');
   respond(msg, task);
 }
 
@@ -643,18 +682,61 @@ async function handleCancel(msg) {
   const { task_id, reason } = params;
   if (!task_id) return respondError(msg, 'task_id is required');
 
-  const task = await store.get(task_id);
-  if (!task) return respondError(msg, `Task ${task_id} not found`);
-  if (!(await authorize(msg, params, task, { action: 'cancel' }))) return;
+  const existing = await store.get(task_id);
+  // Coded so Mission Control can tell "never reached the mesh" from a refusal.
+  if (!existing) return respondError(msg, `Task ${task_id} not found`, { code: 'TASK_NOT_FOUND' });
+  if (!(await authorize(msg, params, existing, { action: 'cancel' }))) return;
 
-  task.status = TASK_STATUS.CANCELLED;
-  task.completed_at = new Date().toISOString();
-  task.result = { success: false, summary: reason || 'cancelled' };
-  await store.put(task);
+  const task = await store.markCancelled(task_id, reason || 'cancelled');
+  if (!task) return respondUnchanged(msg, task_id);
 
   log(`CANCEL ${task_id}: ${reason || 'no reason'}`);
   publishEvent('cancelled', task);
   await cleanupTaskCollabSession(task, `Parent task ${task_id} cancelled: ${reason || 'no reason'}`);
+  respond(msg, task);
+}
+
+// What an operator may edit on a live task is lib/mesh-tasks.js EDITABLE_TASK_FIELDS.
+// Mission Control's PATCH used to write any field straight into KV (mission-control-app~2#6).
+function invalidTaskEdit(fields) {
+  const strings = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
+  if ('title' in fields && (typeof fields.title !== 'string' || !fields.title.trim())) return 'title must be a non-empty string';
+  if ('description' in fields && typeof fields.description !== 'string') return 'description must be a string';
+  if ('priority' in fields && !Number.isFinite(fields.priority)) return 'priority must be a number';
+  if ('budget_minutes' in fields && !(Number.isFinite(fields.budget_minutes) && fields.budget_minutes > 0)) return 'budget_minutes must be a positive number';
+  for (const list of ['success_criteria', 'scope', 'tags', 'preferred_nodes', 'exclude_nodes']) {
+    if (list in fields && !strings(fields[list])) return `${list} must be a list of strings`;
+  }
+  return null;
+}
+
+/**
+ * mesh.tasks.update — a signed operator edit of a live task.
+ * Expects: { task_id, ...fields } with fields from EDITABLE_TASK_FIELDS; any other
+ * field refuses the whole request rather than being dropped.
+ */
+async function handleUpdate(msg) {
+  const params = parseRequest(msg);
+  const { task_id } = params;
+  if (!task_id) return respondError(msg, 'task_id is required');
+
+  const existing = await store.get(task_id);
+  if (!existing) return respondError(msg, `Task ${task_id} not found`, { code: 'TASK_NOT_FOUND' });
+  if (!(await authorize(msg, params, existing, { action: 'update' }))) return;
+
+  const { OPERATOR_ENVELOPE_FIELDS } = await operatorAuth();
+  const fields = Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'task_id' && !OPERATOR_ENVELOPE_FIELDS.includes(k)));
+  const refused = Object.keys(fields).filter((k) => !EDITABLE_TASK_FIELDS.includes(k));
+  const invalid = refused.length
+    ? `${refused.join(', ')} cannot be edited (editable: ${EDITABLE_TASK_FIELDS.join(', ')})`
+    : Object.keys(fields).length ? invalidTaskEdit(fields) : 'no editable field given';
+  if (invalid) return respondError(msg, `Update refused: ${invalid}`, { code: 'INVALID_UPDATE' });
+
+  const task = await store.updateFields(task_id, fields);
+  if (!task) return respondUnchanged(msg, task_id);
+
+  log(`UPDATE ${task_id}: ${Object.keys(fields).join(', ')}`);
+  publishEvent('updated', task);
   respond(msg, task);
 }
 
@@ -682,8 +764,8 @@ async function handleTaskApprove(msg) {
   // Merge-after-review (P4-4): the branch only reaches main now. The owning
   // agent merges and reports via mesh.tasks.merged; if it is offline it
   // reconciles its kept branches on next start.
-  if (task.owner) {
-    nc.publish(`mesh.agent.${task.owner}.approved`, sc.encode(JSON.stringify({ task_id })));
+  for (const node of await reviewRecipients(task)) {
+    nc.publish(`mesh.agent.${node}.approved`, sc.encode(JSON.stringify({ task_id })));
   }
 
   // Now advance plan wave (this was blocked while in pending_review)
@@ -705,20 +787,38 @@ async function handleTaskReject(msg) {
   // → re-run → re-merge, forever). Operator signature required.
   if (!(await authorize(msg, params, null, { action: 'reject' }))) return;
 
-  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer', { maxRejections: MAX_REJECTIONS });
+  // The old session is completed, so a re-queued collab task needs a fresh
+  // one: a claimer joining the finished session is refused and walks away.
+  // It is stored before the re-queue links it, so the task is never claimable
+  // with the old session or rewritten after a claim.
+  const before = await store.get(task_id);
+  let fresh = null;
+  if (before && before.status === TASK_STATUS.PENDING_REVIEW && before.collaboration && collabStore
+      && (before.rejection_count || 0) + 1 < MAX_REJECTIONS) {
+    const previous = before.collab_session_id ? await collabStore.get(before.collab_session_id) : null;
+    const spec = previous ? { ...before.collaboration, mode: previous.mode } : before.collaboration;
+    fresh = createSession(before.task_id, spec);
+    await collabStore.put(fresh);
+  }
+
+  const task = await store.markRejected(task_id, reason || 'Rejected by reviewer', { maxRejections: MAX_REJECTIONS, collabSessionId: fresh?.session_id });
+  if (fresh && task?.status !== TASK_STATUS.QUEUED) await collabStore.markAborted(fresh.session_id, 'Reject did not re-queue the task');
   if (!task) return respondError(msg, `Task ${task_id} not found or not in pending_review status`);
 
   // The owning agent kept the task branch unmerged while review was pending
   // (P4-4); tell it to drop that branch. Best-effort — the next attempt's
   // worktree creation deletes a stale branch of the same name anyway.
-  if (task.owner) {
-    nc.publish(`mesh.agent.${task.owner}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
+  // Read from the pre-reject record: the re-queued one names the fresh session.
+  for (const node of await reviewRecipients(before)) {
+    nc.publish(`mesh.agent.${node}.rejected`, sc.encode(JSON.stringify({ task_id, reason: task.rejection_reason })));
   }
+
+  if (fresh && task.status === TASK_STATUS.QUEUED) announceCollabSession(task, fresh);
 
   if (task.status === TASK_STATUS.FAILED) {
     log(`REJECTED ${task_id} (${task.rejection_count}× — cap ${MAX_REJECTIONS} reached): ${reason || 'no reason'} — FAILED, not re-queued`);
     publishEvent('failed', task);
-    await updatePlanSubtaskStatus(task_id, 'failed');
+    await checkPlanProgress(task_id, 'failed');
   } else {
     log(`REJECTED ${task_id} (${task.rejection_count}/${MAX_REJECTIONS}): ${reason || 'no reason'} — re-queued for retry`);
     publishEvent('rejected', task);
@@ -768,7 +868,7 @@ async function detectStalls() {
   // detector to release it for human triage. The stall detector below still
   // covers a worker that renews but never finishes.
   try {
-    const reaped = await store.reapExpiredLeases();
+    const reaped = await store.reapExpiredLeases({ keep: collabSessionLive });
     for (const id of reaped.requeued) {
       log(`LEASE EXPIRED ${id}: holder stopped renewing — re-queued`);
       const t = await store.get(id);
@@ -777,7 +877,12 @@ async function detectStalls() {
     for (const id of reaped.released) {
       log(`LEASE EXPIRED ${id}: too many expiries — RELEASED for triage`);
       const t = await store.get(id);
-      if (t) { publishEvent('released', t); await checkPlanProgress(id, 'failed'); }
+      if (!t) continue;
+      publishEvent('released', t);
+      // The reaper spares a parent whose session is live (collabSessionLive), so this
+      // only ends a session that already stopped recruiting and running rounds.
+      await cleanupTaskCollabSession(t, `Lease expired: parent task ${id} released for triage`);
+      await checkPlanProgress(id, 'failed');
     }
   } catch (err) {
     warn(`reapExpiredLeases: ${err.message}`);
@@ -788,11 +893,17 @@ async function detectStalls() {
   for (const task of stalled) {
     const lastSignal = task.last_activity || task.started_at;
     const silentMin = ((Date.now() - new Date(lastSignal)) / 60000).toFixed(1);
+    // A parent its collab session owns has no agent to ask: the session is its heartbeat.
+    const agent = isSessionOwner(task.owner) ? null : task.owner;
+    if (!agent && await collabSessionLive(task)) {
+      await store.touchActivity(task.task_id);
+      continue;
+    }
 
     log(`STALL SUSPECTED ${task.task_id}: no heartbeat for ${silentMin}m (threshold: ${STALL_MINUTES}m). Checking agent...`);
 
     // Alive check: ask the agent directly before killing — cheap insurance against false stall detection
-    if (task.owner) {
+    if (agent) {
       try {
         const reply = await nc.request(
           `mesh.agent.${task.owner}.alive`,
@@ -817,7 +928,7 @@ async function detectStalls() {
     // a reflection from a crashed node.
     // Uses findActiveSessionsByNode() — O(sessions) single pass instead of
     // the previous O(sessions × nodes) list-then-find pattern.
-    if (task.owner && collabStore) {
+    if (agent && collabStore) {
       try {
         const sessions = await collabStore.findActiveSessionsByNode(task.owner);
         for (const session of sessions) {
@@ -846,54 +957,24 @@ async function detectStalls() {
       `Stall detected: no agent heartbeat for ${silentMin}m, alive check failed`,
       task.attempts
     );
-    if (releasedTask) publishEvent('released', releasedTask);
+    // Null: another path ended the task meanwhile and already moved its plan.
+    if (!releasedTask) continue;
+    publishEvent('released', releasedTask);
+    await cleanupTaskCollabSession(releasedTask, `Stall detected: parent task ${task.task_id} released for triage`);
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
 
-    // Notify the agent's node (fire-and-forget)
-    if (task.owner) {
+    // Tell the agent's node to stop the task it no longer holds (fire-and-forget)
+    if (agent) {
       log(`STALL NOTIFY: ${task.task_id} → ${task.owner}`);
-      nc.publish(`mesh.agent.${task.owner}.stall`, sc.encode(JSON.stringify({
+      await publishAgentStop(task.owner, 'stall', {
         task_id: task.task_id,
+        reason: `released after ${silentMin}m without a heartbeat`,
         silent_minutes: parseFloat(silentMin),
         threshold_minutes: STALL_MINUTES,
-      })));
+      });
     }
-  }
-}
-
-/**
- * Process proposed tasks — worker nodes write tasks with status "proposed"
- * directly to KV. The lead daemon validates and transitions them.
- */
-async function processProposals() {
-  const proposed = await store.list({ status: TASK_STATUS.PROPOSED });
-  for (const task of proposed) {
-    // Basic validation: must have title and origin
-    if (!task.title || !task.origin) {
-      task.status = TASK_STATUS.REJECTED;
-      task.result = { success: false, summary: 'Missing required fields (title, origin)' };
-      await store.put(task);
-      log(`REJECTED ${task.task_id}: missing required fields`);
-      publishEvent('rejected', task);
-      continue;
-    }
-    const owned = daemonOwnedFieldsIn(task);
-    if (owned.length) {
-      task.status = TASK_STATUS.REJECTED;
-      task.result = { success: false, summary: `Proposal sets daemon-owned ${owned.join(', ')}` };
-      await store.put(task);
-      log(`REJECTED proposal ${task.task_id} from ${task.origin}: sets daemon-owned ${owned.join(', ')}`);
-      publishEvent('rejected', task);
-      continue;
-    }
-
-    // Accept: transition to queued
-    task.status = TASK_STATUS.QUEUED;
-    await store.put(task);
-    log(`ACCEPTED proposal ${task.task_id} from ${task.origin}: "${task.title}"`);
-    publishEvent('submitted', task);
   }
 }
 
@@ -910,28 +991,47 @@ async function enforceBudgets() {
       `Budget exceeded: ${elapsed}m elapsed, ${task.budget_minutes}m budget`,
       task.attempts
     );
-    if (failedTask) publishEvent('failed', failedTask);
+    if (!failedTask) continue;
+    publishEvent('failed', failedTask);
 
-    // Clean up any collab session for this task
-    if (collabStore && task.collab_session_id) {
-      try {
-        await collabStore.markAborted(task.collab_session_id, `Budget exceeded for task ${task.task_id}`);
-        log(`BUDGET → COLLAB: aborted session ${task.collab_session_id}`);
-      } catch (err) {
-        log(`BUDGET → COLLAB ERROR: ${err.message}`);
-      }
-    }
+    await cleanupTaskCollabSession(failedTask, `Budget exceeded for task ${task.task_id}`);
+    await escalateTask(failedTask, 'on_budget_exceeded', failedTask.result?.summary || 'Budget exceeded');
 
     // Update plan progress if this task belongs to a plan
     await checkPlanProgress(task.task_id, 'failed');
 
-    // Publish notification so the agent knows
-    log(`BUDGET NOTIFY: ${task.task_id} → ${task.owner}`);
-    nc.publish(`mesh.agent.${task.owner}.budget_exceeded`, sc.encode(JSON.stringify({
-      task_id: task.task_id,
-      elapsed_minutes: parseFloat(elapsed),
-      budget_minutes: task.budget_minutes,
-    })));
+    // Tell the agent to stop the task it was failed for; a session-owned parent's
+    // workers are its session's members.
+    const targets = isSessionOwner(task.owner) ? await sessionMemberIds(task.collab_session_id) : [task.owner];
+    for (const nodeId of targets) {
+      log(`BUDGET NOTIFY: ${task.task_id} → ${nodeId}`);
+      await publishAgentStop(nodeId, 'budget_exceeded', {
+        task_id: task.task_id,
+        reason: `failed at ${elapsed}m of a ${task.budget_minutes}m budget`,
+        elapsed_minutes: parseFloat(elapsed),
+        budget_minutes: task.budget_minutes,
+      });
+    }
+  }
+}
+
+async function sessionMemberIds(sessionId) {
+  const session = sessionId && collabStore ? await collabStore.get(sessionId) : null;
+  return (session?.nodes || []).map((n) => n.node_id);
+}
+
+/**
+ * mesh-agent acts on mesh.agent.<node>.stall/.budget_exceeded only when an
+ * operator key signed it (anyone with the bus token could otherwise stop any
+ * node's work), and only for the node the signature names.
+ */
+async function publishAgentStop(nodeId, kind, payload) {
+  try {
+    const { signOperatorRequest } = await operatorAuth();
+    nc.publish(`mesh.agent.${nodeId}.${kind}`, sc.encode(JSON.stringify(
+      signOperatorRequest({ ...payload, target_node_id: nodeId }))));
+  } catch (err) {
+    warn(`${kind} notice to ${nodeId} not sent: ${err.message}`);
   }
 }
 
@@ -951,54 +1051,62 @@ function publishCollabEvent(eventType, session) {
 // ── Collab Subject Handlers ─────────────────────────
 
 /**
- * mesh.collab.create — Create a collab session for a collaborative task.
- * Expects: { task_id }
- * Called automatically when a task with collaboration spec is submitted.
+ * Refuse a collab mutation whose node_id did not present the member token it
+ * was issued at join. Answers the request and returns false on refusal.
  */
-async function handleCollabCreate(msg) {
-  const { task_id } = parseRequest(msg);
-  if (!task_id) return respondError(msg, 'task_id is required');
+function memberAuthorized(msg, session, nodeId, token, action) {
+  if (CollabStore.memberTokenMatches(session, nodeId, token)) return true;
+  warn(`AUTHZ REFUSED collab_${action}: ${nodeId} presented no valid member token for ${session.session_id}`);
+  respondError(msg, `collab ${action} refused: ${nodeId} is not a member holding its join token`);
+  return false;
+}
 
-  const task = await store.get(task_id);
-  if (!task) return respondError(msg, `Task ${task_id} not found`);
-  if (!task.collaboration) return respondError(msg, `Task ${task_id} has no collaboration spec`);
+// The collab owner heartbeats only while its own worker runs; between rounds
+// nothing else touched the parent, so the lease reaper re-queued a live session.
+async function renewCollabParentLease(taskId) {
+  if (!taskId) return;
+  try { await store.touchActivity(taskId); } catch (err) { warn(`collab lease renew ${taskId}: ${err.message}`); }
+}
 
-  // Check for existing session
-  const existing = await collabStore.findByTaskId(task_id);
-  if (existing) return respondError(msg, `Session already exists for task ${task_id}: ${existing.session_id}`);
+async function collabSessionLive(task) {
+  if (!task.collab_session_id || !collabStore) return false;
+  const session = await collabStore.get(task.collab_session_id);
+  return !!session && (session.status === COLLAB_STATUS.RECRUITING || session.status === COLLAB_STATUS.ACTIVE);
+}
 
-  const session = createSession(task_id, task.collaboration);
-  await collabStore.put(session);
+// A claimer of a collab parent must be able to join its session; one that no
+// longer takes members (full, or past recruiting) would refuse the claimer.
+async function collabParentClosed(task) {
+  if (!task.collaboration || !task.collab_session_id || !collabStore) return false;
+  const session = await collabStore.get(task.collab_session_id);
+  if (!session) return false;
+  return session.status !== COLLAB_STATUS.RECRUITING
+    || (!!session.max_nodes && session.nodes.length >= session.max_nodes);
+}
 
-  log(`COLLAB CREATE ${session.session_id} for task ${task_id} (mode: ${session.mode}, min: ${session.min_nodes}, max: ${session.max_nodes || '∞'})`);
-  publishCollabEvent('created', session);
-
-  // Broadcast recruit signal
-  log(`RECRUIT: broadcasting for session ${session.session_id}`);
-  nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
-    session_id: session.session_id,
-    task_id: task_id,
-    mode: session.mode,
-    min_nodes: session.min_nodes,
-    max_nodes: session.max_nodes,
-    task_title: task.title,
-  })));
-
-  respond(msg, session);
+async function adoptCollabParent(session) {
+  const task = await store.markSessionOwned(session.task_id, session.session_id, session.nodes.map((n) => n.node_id));
+  if (!task) return;
+  log(`COLLAB PARENT ${task.task_id} → ${task.owner} (budget deadline: ${task.budget_deadline})`);
+  publishEvent('started', task);
 }
 
 /**
  * mesh.collab.join — Node joins a collab session.
  * Expects: { session_id, node_id, role? }
+ * Returns the session plus member_token, which only this reply carries; leave
+ * and reflect require it.
  */
 async function handleCollabJoin(msg) {
   const { session_id, node_id, role } = parseRequest(msg);
   if (!session_id || !node_id) return respondError(msg, 'session_id and node_id required');
 
-  const session = await collabStore.addNode(session_id, node_id, role || 'worker');
+  const { token, hash } = issueMemberToken();
+  const session = await collabStore.addNode(session_id, node_id, role || 'worker', '*', { tokenHash: hash });
   if (!session) return respondError(msg, `Cannot join ${session_id}: full, closed, or already joined`);
 
   log(`COLLAB JOIN ${session_id}: ${node_id} (${session.nodes.length}/${session.max_nodes || '∞'} nodes)`);
+  await renewCollabParentLease(session.task_id);
   await collabStore.appendAudit(session_id, 'node_joined', { node_id, role: role || 'worker', total_nodes: session.nodes.length });
   publishCollabEvent('joined', session);
 
@@ -1011,17 +1119,35 @@ async function handleCollabJoin(msg) {
     await startRecruitedSession(session.session_id);
   }
 
-  respond(msg, session);
+  respond(msg, { ...session, member_token: token });
 }
 
 /**
  * mesh.collab.leave — Node leaves a collab session.
- * Expects: { session_id, node_id, reason? }
+ * Expects: { session_id, node_id, member_token, reason? } from the member, or
+ * a signed operator request { session_id, target_node_id, reason? } (Mission
+ * Control remove_node; the signer's envelope owns node_id).
  */
 async function handleCollabLeave(msg) {
-  const { session_id, node_id, reason } = parseRequest(msg);
-  if (!session_id || !node_id) return respondError(msg, 'session_id and node_id required');
+  const params = parseRequest(msg);
+  const { session_id, reason } = params;
+  if (!session_id) return respondError(msg, 'session_id required');
 
+  const current = await collabStore.get(session_id);
+  if (!current) return respondError(msg, `Session ${session_id} not found`);
+
+  let node_id;
+  if (params.operator_action === true) {
+    if (!(await authorize(msg, params, null, { action: 'collab_leave' }))) return;
+    node_id = params.target_node_id;
+    if (!node_id) return respondError(msg, 'target_node_id required');
+  } else {
+    node_id = params.node_id;
+    if (!node_id) return respondError(msg, 'session_id and node_id required');
+    if (!memberAuthorized(msg, current, node_id, params.member_token, 'leave')) return;
+  }
+
+  const before = await collabStore.get(session_id);
   const session = await collabStore.removeNode(session_id, node_id);
   if (!session) return respondError(msg, `Session ${session_id} not found`);
 
@@ -1030,8 +1156,22 @@ async function handleCollabLeave(msg) {
 
   // If below min_nodes and still active, abort
   if (session.status === COLLAB_STATUS.ACTIVE && session.nodes.length < session.min_nodes) {
-    await collabStore.markAborted(session_id, `Below min_nodes: ${session.nodes.length} < ${session.min_nodes}`);
-    publishCollabEvent('aborted', session);
+    const abortReason = `Below min_nodes: ${session.nodes.length} < ${session.min_nodes}`;
+    clearCirclingStepTimer(session_id);
+    const aborted = await collabStore.markAborted(session_id, abortReason);
+    publishCollabEvent('aborted', aborted || await collabStore.get(session_id));
+    // Every other early circling end releases the parent for another try; the
+    // other modes fail it, as their own below-quorum aborts do.
+    if (aborted && session.mode === COLLAB_MODE.CIRCLING_STRATEGY) {
+      await settleCollabParent(session.task_id, 'released', `Circling session aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+    } else if (aborted) {
+      await settleCollabParent(session.task_id, 'failed', `Collab aborted: ${abortReason}`);
+    }
+  } else if (session.status === COLLAB_STATUS.ACTIVE && session.mode === COLLAB_MODE.SEQUENTIAL && before?.current_turn === node_id) {
+    // The leaver held the turn: removeNode handed it on, so notify the next member
+    // or, past the last turn, evaluate the round.
+    if (session.current_turn) await notifySequentialTurn(session_id, session.current_turn);
+    else await evaluateRound(session_id);
   } else if (session.status === COLLAB_STATUS.ACTIVE) {
     // Re-check if the round is now complete (removed node excluded from quorum)
     const updated = await collabStore.get(session_id);
@@ -1133,6 +1273,10 @@ async function handleCollabReflect(msg) {
   const { session_id } = reflection;
   if (!session_id || !reflection.node_id) return respondError(msg, 'session_id and node_id required');
 
+  const current = await collabStore.get(session_id);
+  if (!current) return respondError(msg, `Session ${session_id} not found`);
+  if (!memberAuthorized(msg, current, reflection.node_id, reflection.member_token, 'reflect')) return;
+
   // D14 cost record: every reflection — accepted, degraded, or about to be
   // retried — carries this round-attempt's real spend. Accumulate before any
   // early return so retry attempts count too.
@@ -1166,6 +1310,7 @@ async function handleCollabReflect(msg) {
 
   const session = await collabStore.submitReflection(session_id, reflection);
   if (!session) return respondError(msg, `Cannot submit reflection to ${session_id}`);
+  await renewCollabParentLease(session.task_id);
 
   log(`COLLAB REFLECT ${session_id} R${session.current_round}: ${reflection.node_id} (vote: ${reflection.vote}, conf: ${reflection.confidence}${reflection.parse_failed ? ', PARSE FAILED' : ''})`);
   await collabStore.appendAudit(session_id, 'reflection_received', {
@@ -1181,16 +1326,8 @@ async function handleCollabReflect(msg) {
     if (reflection.circling_artifacts && reflection.circling_artifacts.length > 0) {
       const { current_subround, current_step } = session.circling;
       const isWorker = reflection.node_id === session.circling.worker_node_id;
-      // Use stored reviewer IDs for stable identity (falls back to array-index if not set)
-      let nodeRole;
-      if (isWorker) {
-        nodeRole = 'worker';
-      } else if (session.circling.reviewerA_node_id && session.circling.reviewerB_node_id) {
-        nodeRole = reflection.node_id === session.circling.reviewerA_node_id ? 'reviewerA' : 'reviewerB';
-      } else {
-        const reviewerNodes = session.nodes.filter(n => n.node_id !== session.circling.worker_node_id);
-        nodeRole = reviewerNodes[0]?.node_id === reflection.node_id ? 'reviewerA' : 'reviewerB';
-      }
+      const nodeRole = isWorker ? 'worker'
+        : reflection.node_id === session.circling.reviewerA_node_id ? 'reviewerA' : 'reviewerB';
 
       const arts = Array.isArray(reflection.circling_artifacts) ? reflection.circling_artifacts : [];
       if (!Array.isArray(reflection.circling_artifacts)) {
@@ -1230,8 +1367,6 @@ async function handleCollabReflect(msg) {
     }
   // Sequential mode: advance turn, notify next node or evaluate round
   // Parallel mode: check if all reflections are in → evaluate convergence
-  // NOTE: Node.js single-threaded event loop prevents concurrent execution of this
-  // handler — no mutex needed. advanceTurn() is safe without CAS here.
   } else if (session.mode === 'sequential') {
     const nextNodeId = await collabStore.advanceTurn(session_id);
     if (nextNodeId) {
@@ -1312,8 +1447,9 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
       outcome: 'cooperative_rounds_done', rounds: coop.integrations.length, integrators: coop.integrator_order,
     });
     publishCollabEvent('completed', done);
-    await store.markCompleted(session.task_id, done.result);
-    publishEvent('completed', await store.get(session.task_id));
+    const settled = await store.markCompleted(session.task_id, done.result);
+    if (settled) publishEvent('completed', settled);
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
     return;
   }
 
@@ -1334,8 +1470,7 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     log(`COOPERATIVE ABORT ${sessionId}: no alive integrator candidates remain (order: ${order.join(' → ')})`);
     await collabStore.markAborted(sessionId, 'No alive integrator candidates remain');
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markFailed(session.task_id, 'Cooperative session lost all integrator candidates');
-    publishEvent('failed', await store.get(session.task_id));
+    await settleCollabParent(session.task_id, 'failed', 'Cooperative session lost all integrator candidates');
     return;
   }
   // CAS, not a blind put: this session object predates the audit appends above —
@@ -1348,7 +1483,7 @@ async function evaluateCooperativeRound(sessionId, session, currentRound) {
     log(`COOPERATIVE ${sessionId}: rotation skipped dead node(s) ${skipped.join(', ')} → ${next}`);
     await collabStore.appendAudit(sessionId, 'cooperative_rotation_skipped_dead', { skipped, next });
   }
-  log(`COOPERATIVE ${sessionId}: next integrator=${coop.current_integrator}, starting round ${session.current_round + 1}`);
+  log(`COOPERATIVE ${sessionId}: next integrator=${next}, starting round ${session.current_round + 1}`);
   await startCollabRound(sessionId);
 }
 
@@ -1404,8 +1539,7 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
     });
     await collabStore.markAborted(sessionId, `Merge gate failed: ${gateFailure}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markFailed(session.task_id, `Collaborative merge gate failed: ${gateFailure}`);
-    publishEvent('failed', await store.get(session.task_id));
+    await settleCollabParent(session.task_id, 'failed', `Collaborative merge gate failed: ${gateFailure}`);
     return;
   }
 
@@ -1432,8 +1566,9 @@ async function evaluateCollaborativeRound(sessionId, session, currentRound) {
   const done = await collabStore.get(sessionId);
   await collabStore.appendAudit(sessionId, 'session_completed', { outcome: 'collaborative_merged', merger: collab.merger_node_id });
   publishCollabEvent('completed', done);
-  await store.markCompleted(session.task_id, done.result);
-  publishEvent('completed', await store.get(session.task_id));
+  const settled = await store.markCompleted(session.task_id, done.result);
+  if (settled) publishEvent('completed', settled);
+  if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
 /**
@@ -1504,10 +1639,17 @@ function computeNodeScopes(nodes, taskScope, strategy) {
   return scopes;
 }
 
+// startRound refuses an ended session; without this check its null would read as
+// an insufficient-nodes abort and settle the parent a second time.
+function isLiveSession(session) {
+  return !!session && (session.status === COLLAB_STATUS.RECRUITING || session.status === COLLAB_STATUS.ACTIVE);
+}
+
 /**
  * Start a new round: compile shared intel and notify all nodes.
  */
 async function startCollabRound(sessionId) {
+  if (!isLiveSession(await collabStore.get(sessionId))) return;
   const round = await collabStore.startRound(sessionId);
   if (!round) {
     // startRound returns null if session is aborted (e.g., too few nodes after pruning dead)
@@ -1519,12 +1661,13 @@ async function startCollabRound(sessionId) {
         recruited: session.recruited_count,
       });
       publishCollabEvent('aborted', session);
-      await store.markFailed(session.task_id, `Collab aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
+      await settleCollabParent(session.task_id, 'failed', `Collab aborted: too few active nodes (${session.nodes.length} < ${session.min_nodes})`);
     }
     return;
   }
 
   const session = await collabStore.get(sessionId);
+  await renewCollabParentLease(session.task_id);
   log(`COLLAB ROUND ${sessionId} R${round.round_number} START (${session.nodes.length} nodes)`);
   await collabStore.appendAudit(sessionId, 'round_started', {
     round: round.round_number, active_nodes: session.nodes.map(n => n.node_id),
@@ -1694,9 +1837,10 @@ async function evaluateRound(sessionId) {
 
     // Complete the parent task
     const completedSession = await collabStore.get(sessionId);
-    await store.markCompleted(freshSession.task_id, completedSession.result);
-    publishEvent('completed', await store.get(freshSession.task_id));
+    const settled = await store.markCompleted(freshSession.task_id, completedSession.result);
+    if (settled) publishEvent('completed', settled);
     publishCollabEvent('completed', completedSession);
+    if (settled) await checkPlanProgress(freshSession.task_id, 'completed');
 
   } else if (maxReached) {
     log(`COLLAB MAX ROUNDS ${sessionId}: ${session.current_round}/${session.max_rounds}. Completing with current artifacts.`);
@@ -1710,31 +1854,89 @@ async function evaluateRound(sessionId) {
       }
     }
 
+    // The members never agreed, so nothing lands on main without a human:
+    // the parent waits in pending_review and each member keeps its
+    // contribution branch until a signed approve (agents read needs_review on
+    // the session), the same gate a solo task without a metric goes through.
+    const digest = notConvergedDigest(session);
     await collabStore.markCompleted(sessionId, {
       artifacts: [...new Set(allArtifacts)],
-      summary: `Max rounds (${session.max_rounds}) reached. ${session.nodes.length} nodes participated.`,
+      summary: `Max rounds (${session.max_rounds}) reached without convergence; needs review. ${digest.text}`,
       node_contributions: contributions,
+      needs_review: true,
+      review_digest: digest,
     });
     await collabStore.appendAudit(sessionId, 'session_completed', {
       outcome: 'max_rounds_reached', rounds: session.current_round,
       max_rounds: session.max_rounds, artifacts: [...new Set(allArtifacts)].length,
       node_count: session.nodes.length, recruited_count: session.recruited_count,
+      review_digest: digest,
     });
 
-    // Complete parent task (flagged for review since not truly converged)
     const updatedSession = await collabStore.get(sessionId);
-    await store.markCompleted(session.task_id, {
+    const task = await store.markPendingReview(session.task_id, {
       ...updatedSession.result,
+      success: true,
       max_rounds_reached: true,
     });
-    publishEvent('completed', await store.get(session.task_id));
     publishCollabEvent('completed', updatedSession);
+    if (task) {
+      log(`PENDING REVIEW ${session.task_id}: collab ${sessionId} did not converge. ${digest.text}`);
+      log(`  Approve: mesh tasks approve ${session.task_id}  |  Reject: mesh tasks reject ${session.task_id} --reason "..."`);
+      publishEvent('pending_review', task);
+      await updatePlanSubtaskStatus(session.task_id, 'pending_review');
+    }
 
   } else {
     // Not converged, not maxed out → next round
     log(`COLLAB ROUND ${sessionId} R${session.current_round} DONE. Not converged. Starting next round.`);
     await startCollabRound(sessionId);
   }
+}
+
+const DIGEST_EXCERPT = 240;
+
+function excerpt(text) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  return flat.length > DIGEST_EXCERPT ? `${flat.slice(0, DIGEST_EXCERPT - 1)}…` : flat;
+}
+
+/**
+ * Why a session that hit max_rounds is not done: each member's last-round
+ * vote, confidence and its own account of the work, plus any member that sent
+ * nothing in that round. The reviewer reads this before approving.
+ */
+function notConvergedDigest(session) {
+  const last = session.rounds[session.rounds.length - 1];
+  const reflections = last?.reflections || [];
+  const members = reflections.map((r) => ({
+    node_id: r.node_id,
+    vote: r.parse_failed ? 'parse_failed' : r.vote,
+    confidence: r.confidence ?? null,
+    summary: excerpt(r.summary),
+    learnings: excerpt(r.learnings),
+  }));
+  const silent = session.nodes
+    .map((n) => n.node_id)
+    .filter((id) => !reflections.some((r) => r.node_id === id));
+  const lines = members.map((m) => {
+    const conf = m.confidence == null ? '' : `, confidence ${m.confidence}`;
+    const open = m.learnings ? ` Learnings: ${m.learnings}` : '';
+    return `${m.node_id} voted ${m.vote}${conf}: ${m.summary || '(no summary)'}${open}`;
+  });
+  for (const id of silent) lines.push(`${id} sent no reflection in the final round`);
+  const convergedVotes = members.filter((m) => m.vote === 'converged').length;
+  const type = session.convergence?.type || 'unknown';
+  const rule = type === 'majority' ? `majority >= ${session.convergence.threshold}` : type;
+  return {
+    rounds: session.current_round,
+    max_rounds: session.max_rounds,
+    convergence: rule,
+    converged_votes: convergedVotes,
+    members,
+    silent,
+    text: `Round ${session.current_round}: ${convergedVotes}/${session.nodes.length} voted converged (rule: ${rule}). ${lines.join(' | ')}`,
+  };
 }
 
 // ── Circling Strategy Functions ──────────────────────
@@ -1745,20 +1947,36 @@ async function evaluateRound(sessionId) {
  * Also creates a new round in the session (for reflection storage).
  */
 async function startCirclingStep(sessionId) {
-  const session = await collabStore.get(sessionId);
-  if (!session || !session.circling) return;
+  const current = await collabStore.get(sessionId);
+  if (!isLiveSession(current) || !current.circling) return;
+  await renewCollabParentLease(current.task_id);
+
+  // Record step start time for timeout rehydration after daemon restart. CAS, not
+  // a blind put: a cancel during the lease renewal would otherwise be written over.
+  const session = await collabStore._updateWithCAS(sessionId, (s) => {
+    if (!isLiveSession(s) || !s.circling) return null;
+    s.circling.step_started_at = new Date().toISOString();
+    return s;
+  });
+  if (!session) return;
 
   const { phase, current_subround, current_step } = session.circling;
-
-  // Record step start time for timeout rehydration after daemon restart
-  session.circling.step_started_at = new Date().toISOString();
-  await collabStore.put(session);
 
   // Start a new round in the session for reflection storage
   // (each step gets its own round to keep reflections organized)
   const round = await collabStore.startRound(sessionId);
   if (!round) {
-    log(`CIRCLING ERROR: startRound failed for ${sessionId} (aborted?)`);
+    const aborted = await collabStore.get(sessionId);
+    if (aborted && aborted.status === COLLAB_STATUS.ABORTED) {
+      log(`CIRCLING ABORTED ${sessionId}: too few active nodes (${aborted.nodes.length} < ${aborted.min_nodes})`);
+      await collabStore.appendAudit(sessionId, 'session_aborted', {
+        reason: 'insufficient_nodes', active: aborted.nodes.length, min_required: aborted.min_nodes,
+      });
+      publishCollabEvent('aborted', aborted);
+      await settleCollabParent(aborted.task_id, 'released', `Circling session aborted: too few active nodes (${aborted.nodes.length} < ${aborted.min_nodes})`);
+    } else {
+      log(`CIRCLING ERROR: startRound failed for ${sessionId}`);
+    }
     return;
   }
 
@@ -1813,7 +2031,7 @@ async function handleCirclingStepTimeout(sessionId, stepSnapshot) {
   circlingStepTimers.delete(sessionId);
 
   const session = await collabStore.get(sessionId);
-  if (!session || !session.circling) return;
+  if (!session || !session.circling || session.status !== COLLAB_STATUS.ACTIVE) return;
 
   const { phase, current_subround, current_step } = session.circling;
 
@@ -1867,7 +2085,7 @@ async function handleCirclingStepTimeout(sessionId, stepSnapshot) {
     log(`CIRCLING STEP TIMEOUT: ${sessionId} — no active nodes remain. Aborting.`);
     await collabStore.markAborted(sessionId, `All nodes timed out at ${phase}/SR${current_subround}/Step${current_step}`);
     publishCollabEvent('aborted', await collabStore.get(sessionId));
-    await store.markReleased(session.task_id, `Circling session aborted: all nodes timed out`);
+    await settleCollabParent(session.task_id, 'released', `Circling session aborted: all nodes timed out`);
   }
 }
 
@@ -1931,9 +2149,10 @@ async function completeCirclingSession(sessionId) {
 
   // Complete parent task
   const completedSession = await collabStore.get(sessionId);
-  await store.markCompleted(session.task_id, completedSession.result);
-  publishEvent('completed', await store.get(session.task_id));
+  const settled = await store.markCompleted(session.task_id, completedSession.result);
+  if (settled) publishEvent('completed', settled);
   publishCollabEvent('completed', completedSession);
+  if (settled) await checkPlanProgress(session.task_id, 'completed');
 }
 
 /**
@@ -1948,6 +2167,7 @@ async function handleCirclingGateApprove(msg) {
 
   const session = await collabStore.get(session_id);
   if (!session || !session.circling) return respondError(msg, 'Not a circling session');
+  if (session.status !== COLLAB_STATUS.ACTIVE) return respondError(msg, `Session ${session_id} is ${session.status}, not active`);
 
   log(`CIRCLING GATE APPROVED: ${session_id} — resuming`);
   await collabStore.appendAudit(session_id, 'gate_approved', {
@@ -1960,7 +2180,7 @@ async function handleCirclingGateApprove(msg) {
     // Force complete
     const lastRound = session.rounds[session.rounds.length - 1];
     const finalArtifact = collabStore.getLatestArtifact(session, 'worker', 'workArtifact');
-    await collabStore.markConverged(session_id);
+    if (!(await collabStore.markConverged(session_id))) return respondError(msg, `Session ${session_id} is no longer active`);
     await collabStore.markCompleted(session_id, {
       artifacts: finalArtifact ? ['workArtifact'] : [],
       summary: `Circling completed via gate approval after ${session.circling.current_subround} sub-rounds`,
@@ -1970,9 +2190,10 @@ async function handleCirclingGateApprove(msg) {
       circling_final_artifact: finalArtifact,
     });
     const completedSession = await collabStore.get(session_id);
-    await store.markCompleted(session.task_id, completedSession.result);
-    publishEvent('completed', await store.get(session.task_id));
+    const settled = await store.markCompleted(session.task_id, completedSession.result);
+    if (settled) publishEvent('completed', settled);
     publishCollabEvent('completed', completedSession);
+    if (settled) await checkPlanProgress(session.task_id, 'completed');
   } else {
     // Mid-protocol gate (tier 3) — resume next step
     await startCirclingStep(session_id);
@@ -1993,6 +2214,7 @@ async function handleCirclingGateReject(msg) {
 
   const session = await collabStore.get(session_id);
   if (!session || !session.circling) return respondError(msg, 'Not a circling session');
+  if (session.status !== COLLAB_STATUS.ACTIVE) return respondError(msg, `Session ${session_id} is ${session.status}, not active`);
 
   log(`CIRCLING GATE REJECTED: ${session_id} — forcing another sub-round`);
   await collabStore.appendAudit(session_id, 'gate_rejected', {
@@ -2000,15 +2222,18 @@ async function handleCirclingGateReject(msg) {
     subround: session.circling.current_subround,
   });
 
-  // Reset to circling phase, increment subround, step 1
-  session.circling.phase = 'circling';
-  session.circling.max_subrounds++; // allow one more
-  session.circling.current_step = 1;
-  session.circling.current_subround++;
-  await collabStore.put(session);
+  // CAS, not a blind put: `session` predates the gate_rejected audit append above.
+  const updated = await collabStore._updateWithCAS(session_id, (s) => {
+    s.circling.phase = 'circling';
+    s.circling.max_subrounds++; // allow one more
+    s.circling.current_step = 1;
+    s.circling.current_subround++;
+    return s;
+  });
+  if (!updated) return respondError(msg, 'Not a circling session');
 
   await startCirclingStep(session_id);
-  respond(msg, { rejected: true, new_subround: session.circling.current_subround });
+  respond(msg, { rejected: true, new_subround: updated.circling.current_subround });
 }
 
 // ── Collab Recruiting Timer ─────────────────────────
@@ -2043,11 +2268,12 @@ async function startRecruitedSession(session_id) {
     log(`COLLAB RECRUIT FAILED ${session.session_id}: only ${session.nodes.length}/${session.min_nodes} nodes. Aborting.`);
     await collabStore.markAborted(session.session_id, `Not enough nodes: ${session.nodes.length} < ${session.min_nodes}`);
     publishCollabEvent('aborted', await collabStore.get(session.session_id));
-    await store.markReleased(session.task_id, `Collab session failed to recruit: ${session.nodes.length}/${session.min_nodes} nodes`);
+    await settleCollabParent(session.task_id, 'released', `Collab session failed to recruit: ${session.nodes.length}/${session.min_nodes} nodes`);
     return true;
   }
 
   log(`COLLAB RECRUIT DONE ${session.session_id}: ${session.nodes.length} nodes joined. Starting round 1.`);
+  await adoptCollabParent(session);
   if (session.mode === 'circling_strategy' && session.circling) {
     // Circling requires exactly 3 nodes (1 worker + 2 reviewers).
     // Even if min_nodes was misconfigured, refuse to start with <3.
@@ -2066,7 +2292,7 @@ async function startRecruitedSession(session_id) {
       log(`COLLAB RECRUIT FAILED ${session.session_id}: circling requires 1 worker + 2 reviewers, got ${session.nodes.length} nodes (worker: ${hasWorker}, reviewers: ${reviewerCount}). Aborting.`);
       await collabStore.markAborted(session.session_id, `Circling requires 1 worker + 2 reviewers; got ${session.nodes.length} nodes`);
       publishCollabEvent('aborted', await collabStore.get(session.session_id));
-      await store.markReleased(session.task_id, `Circling session failed: insufficient role distribution`);
+      await settleCollabParent(session.task_id, 'released', `Circling session failed: insufficient role distribution`);
       return true;
     }
     // Assign all role IDs if not yet assigned
@@ -2106,7 +2332,7 @@ async function startRecruitedSession(session_id) {
     log(`COLLAB RECRUIT FAILED ${session.session_id}: mode '${session.mode}' has no daemon protocol yet. Aborting (not silently downgrading to parallel).`);
     await collabStore.markAborted(session.session_id, `Mode '${session.mode}' not yet implemented`);
     publishCollabEvent('aborted', await collabStore.get(session.session_id));
-    await store.markReleased(session.task_id, `Collab mode '${session.mode}' not yet implemented`);
+    await settleCollabParent(session.task_id, 'released', `Collab mode '${session.mode}' not yet implemented`);
   }
   return true;
 }
@@ -2159,43 +2385,92 @@ async function sweepCirclingStepTimeouts() {
   }
 }
 
-// Round timeout for the barrier modes (P1 #4): circling has step timers, but a
-// cooperative/collaborative round used to hang FOREVER on one crashed member.
+// Round timeout (P1 #4): circling has step timers; every other live mode used to
+// hang FOREVER on one crashed or withdrawn member. Barrier modes (parallel, review,
+// cooperative, collaborative) time the round; sequential times the current turn.
+// The limit is not a work cap: a member past it is dropped only when its agent no
+// longer answers the alive check for this task, so a long round by a live worker
+// runs on, bounded by the task's budget.
 const COLLAB_ROUND_TIMEOUT_MS = parseInt(process.env.MESH_COLLAB_ROUND_TIMEOUT_MS || '', 10) || 15 * 60_000;
+const BARRIER_TIMEOUT_MODES = new Set([COLLAB_MODE.PARALLEL, COLLAB_MODE.REVIEW, COLLAB_MODE.COOPERATIVE, COLLAB_MODE.COLLABORATIVE]);
+
+async function memberStillWorking(nodeId, taskId) {
+  try {
+    const reply = await nc.request(`mesh.agent.${nodeId}.alive`, sc.encode(JSON.stringify({ task_id: taskId })), { timeout: 5000 });
+    return JSON.parse(sc.decode(reply.data)).alive === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Marks `missing` dead; returns false when the session was aborted for too few members. */
+async function dropTimedOutMembers(session, missing, auditEvent, auditData) {
+  await collabStore.appendAudit(session.session_id, auditEvent, { ...auditData, marked_dead: missing });
+  await collabStore.markNodesDead(session.session_id, missing);
+
+  const fresh = await collabStore.get(session.session_id);
+  const alive = fresh.nodes.filter(n => n.status !== 'dead').length;
+  if (alive >= fresh.min_nodes) return true;
+  log(`COLLAB ROUND TIMEOUT ${session.session_id}: only ${alive}/${fresh.min_nodes} members alive — aborting`);
+  await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
+  publishCollabEvent('aborted', await collabStore.get(session.session_id));
+  await settleCollabParent(fresh.task_id, 'failed', `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
+  return false;
+}
+
+async function sweepSequentialTurn(session, round) {
+  const turn = session.current_turn;
+  if (!turn || round.reflections.some(r => r.node_id === turn)) return;
+  const member = session.nodes.find(n => n.node_id === turn);
+  const gone = !member || member.status === 'dead';
+  const elapsed = Date.now() - new Date(session.turn_started_at || round.started_at).getTime();
+  if (!gone && elapsed <= COLLAB_ROUND_TIMEOUT_MS) return;
+  if (!gone && await memberStillWorking(turn, session.task_id)) {
+    log(`COLLAB TURN ${session.session_id} R${session.current_round}: ${turn} past ${(elapsed / 60000).toFixed(1)}m but still working`);
+    return;
+  }
+
+  log(`COLLAB TURN TIMEOUT ${session.session_id} R${session.current_round}: ${turn} ${gone ? 'is gone' : `silent for ${(elapsed / 60000).toFixed(1)}m`} — passing the turn on`);
+  const missing = member && member.status !== 'dead' ? [turn] : [];
+  if (!(await dropTimedOutMembers(session, missing, 'turn_timeout', { round: session.current_round, node_id: turn, elapsed_ms: elapsed }))) return;
+  const next = await collabStore.advanceTurn(session.session_id);
+  if (next) await notifySequentialTurn(session.session_id, next);
+  else await evaluateRound(session.session_id);
+}
 
 async function sweepCollabRoundTimeouts() {
   try {
     const active = await collabStore.list({ status: COLLAB_STATUS.ACTIVE });
     for (const session of active) {
-      if (session.mode !== COLLAB_MODE.COOPERATIVE && session.mode !== COLLAB_MODE.COLLABORATIVE) continue;
       const round = session.rounds[session.rounds.length - 1];
       if (!round || round.completed_at || round.evaluated || !round.started_at) continue;
+      if (session.mode === COLLAB_MODE.SEQUENTIAL) {
+        await sweepSequentialTurn(session, round);
+        continue;
+      }
+      if (!BARRIER_TIMEOUT_MODES.has(session.mode)) continue;
       const elapsed = Date.now() - new Date(round.started_at).getTime();
       if (elapsed <= COLLAB_ROUND_TIMEOUT_MS) continue;
 
       const reflected = new Set(round.reflections.map(r => r.node_id));
-      const missing = session.nodes
+      const waitingOn = session.nodes
         .filter(n => n.status !== 'dead' && !reflected.has(n.node_id))
         .map(n => n.node_id);
-      log(`COLLAB ROUND TIMEOUT ${session.session_id} (${session.mode}) R${session.current_round}: ${(elapsed / 60000).toFixed(1)}m elapsed, non-reflected: ${missing.join(', ') || 'none'}`);
-      await collabStore.appendAudit(session.session_id, 'round_timeout', {
-        round: session.current_round, elapsed_ms: elapsed, marked_dead: missing,
-      });
-      await collabStore.markNodesDead(session.session_id, missing);
-
-      const fresh = await collabStore.get(session.session_id);
-      const alive = fresh.nodes.filter(n => n.status !== 'dead').length;
-      if (alive < fresh.min_nodes) {
-        log(`COLLAB ROUND TIMEOUT ${session.session_id}: only ${alive}/${fresh.min_nodes} members alive — aborting`);
-        await collabStore.markAborted(session.session_id, `Round ${fresh.current_round} timed out; ${alive}/${fresh.min_nodes} members alive`);
-        publishCollabEvent('aborted', await collabStore.get(session.session_id));
-        await store.markFailed(fresh.task_id, `Collab round timed out with too few members (${alive}/${fresh.min_nodes})`);
-        publishEvent('failed', await store.get(fresh.task_id));
-      } else {
-        // Evaluate with the quorum that DID reflect — the claim in evaluateRound
-        // keeps this single-fire even if a straggler reflection races the sweep.
-        await evaluateRound(session.session_id);
+      const missing = [];
+      for (const id of waitingOn) {
+        if (!(await memberStillWorking(id, session.task_id))) missing.push(id);
       }
+      if (waitingOn.length > 0 && missing.length === 0) {
+        log(`COLLAB ROUND ${session.session_id} (${session.mode}) R${session.current_round}: ${(elapsed / 60000).toFixed(1)}m elapsed, ${waitingOn.join(', ')} still working`);
+        continue;
+      }
+      log(`COLLAB ROUND TIMEOUT ${session.session_id} (${session.mode}) R${session.current_round}: ${(elapsed / 60000).toFixed(1)}m elapsed, non-reflected: ${missing.join(', ') || 'none'}`);
+      if (!(await dropTimedOutMembers(session, missing, 'round_timeout', { round: session.current_round, elapsed_ms: elapsed }))) continue;
+      // Members still working close the barrier themselves when they reflect.
+      if (missing.length < waitingOn.length) continue;
+      // Evaluate with the quorum that DID reflect — the claim in evaluateRound
+      // keeps this single-fire even if a straggler reflection races the sweep.
+      await evaluateRound(session.session_id);
     }
   } catch (err) {
     log(`COLLAB ROUND SWEEP ERROR: ${err.message}`);
@@ -2220,26 +2495,53 @@ function publishPlanEvent(eventType, plan) {
 /**
  * mesh.plans.create — Create a new plan from decomposition.
  * Expects: { parent_task_id, title, description, planner, subtasks[], requires_approval? }
+ * requires_approval:false starts the plan at once, but only on an operator-signed
+ * create: any bus peer can send mesh.plans.create, and execution otherwise needs
+ * the signed mesh.plans.approve. An unsigned create is stored as a draft that
+ * requires approval, whatever it asked for.
  */
 async function handlePlanCreate(msg) {
-  const params = parseRequest(msg);
-  if (!params.parent_task_id || !params.title) {
+  const raw = parseRequest(msg);
+  if (!raw.parent_task_id || !raw.title) {
     return respondError(msg, 'parent_task_id and title are required');
   }
 
   // Verify parent task exists
-  const parentTask = await store.get(params.parent_task_id);
-  if (!parentTask) return respondError(msg, `Parent task ${params.parent_task_id} not found`);
+  const parentTask = await store.get(raw.parent_task_id);
+  if (!parentTask) return respondError(msg, `Parent task ${raw.parent_task_id} not found`);
+
+  const { verifyOperatorRequest, stripOperatorEnvelope } = await operatorAuth();
+  const params = stripOperatorEnvelope(raw);
+  let autoApprove = false;
+  if (params.requires_approval === false) {
+    const verdict = verifyOperatorRequest(raw);
+    autoApprove = verdict.ok;
+    if (!autoApprove) {
+      warn(`PLAN CREATE ${raw.parent_task_id}: requires_approval:false ignored on an unsigned create (${verdict.reason}) — stored as a draft`);
+      params.requires_approval = true;
+    }
+  }
 
   let plan = createPlan(params);
 
-  // Auto-route subtasks that don't have explicit delegation
+  // Route subtasks whose delegation is unset or 'auto'. createPlan defaults a
+  // missing delegation to local, so a bus caller wanting routing asks for 'auto'
+  // (mesh plan create does).
   plan = autoRoutePlan(plan);
 
   await planStore.put(plan);
 
   log(`PLAN CREATE ${plan.plan_id}: "${plan.title}" (${plan.subtasks.length} subtasks, ${plan.estimated_waves} waves)`);
   publishPlanEvent('created', plan);
+
+  if (autoApprove) {
+    const approved = await planStore.approve(plan.plan_id, 'operator (signed create)');
+    log(`PLAN AUTO-APPROVED ${plan.plan_id}: signed create with requires_approval:false`);
+    publishPlanEvent('approved', approved);
+    await planStore.startExecuting(plan.plan_id);
+    await advancePlanWave(plan.plan_id);
+    plan = await planStore.get(plan.plan_id);
+  }
 
   respond(msg, plan);
 }
@@ -2302,18 +2604,42 @@ async function handlePlanAbort(msg) {
   if (!plan_id) return respondError(msg, 'plan_id is required');
   if (!(await authorize(msg, params, null, { action: 'plan.abort' }))) return;
 
-  const plan = await planStore.markAborted(plan_id, reason || 'manually aborted');
+  const plan = await abortPlan(plan_id, reason || 'manually aborted');
   if (!plan) return respondError(msg, `Plan ${plan_id} not found`);
-
-  log(`PLAN ABORTED ${plan_id}: ${reason || 'no reason'}`);
-  publishPlanEvent('aborted', plan);
 
   respond(msg, plan);
 }
 
 /**
+ * Abort a plan and stop its work. markAborted only rewrites the plan
+ * document; every mesh task the plan dispatched that has not ended
+ * (escalations included) is cancelled too, so a running worker stops at its
+ * next heartbeat with its partial work left on its branch, and the task's
+ * collab session is aborted.
+ */
+async function abortPlan(planId, reason) {
+  const plan = await planStore.markAborted(planId, reason);
+  if (!plan) return null;
+  log(`PLAN ABORTED ${planId}: ${reason}`);
+  publishPlanEvent('aborted', plan);
+
+  const live = (await store.list()).filter(t => t.plan_id === planId && !TERMINAL_STATES.has(t.status));
+  for (const { task_id } of live) {
+    const why = `Plan ${planId} aborted: ${reason}`;
+    const task = await store.markCancelled(task_id, why);
+    if (!task) continue;
+    log(`  CANCEL ${task_id}: ${why}`);
+    publishEvent('cancelled', task);
+    await cleanupTaskCollabSession(task, why);
+  }
+  return plan;
+}
+
+/**
  * mesh.plans.subtask.update — Update a subtask's status.
- * Called by mesh-bridge when a task completes/fails.
+ * Called by mesh-bridge when the kanban card of a local, soul or human subtask
+ * reaches done (completed) or cancelled (failed); mesh subtasks report through
+ * their mesh task.
  * Expects: { plan_id, subtask_id, status, result?, mesh_task_id?, kanban_task_id?, owner? }
  */
 async function handlePlanSubtaskUpdate(msg) {
@@ -2331,7 +2657,18 @@ async function handlePlanSubtaskUpdate(msg) {
   const updates = {};
   for (const k of SUBTASK_UPDATABLE) if (body[k] !== undefined) updates[k] = body[k];
 
-  const plan = await planStore.updateSubtask(plan_id, subtask_id, updates);
+  // A failed subtask blocks its dependents in the same CAS, as a failed mesh
+  // subtask does in checkPlanProgress; otherwise they stay pending forever.
+  let st = null;
+  let blockedIds = new Set();
+  const plan = await planStore._updateWithCAS(plan_id, (p) => {
+    blockedIds = new Set();
+    st = p.subtasks.find(s => s.subtask_id === subtask_id);
+    if (!st) return null;
+    Object.assign(st, updates);
+    if (updates.status === SUBTASK_STATUS.FAILED) blockedIds = cascadeFailure(p, subtask_id);
+    return p;
+  });
   if (!plan) return respondError(msg, `Plan ${plan_id} or subtask ${subtask_id} not found`);
 
   log(`PLAN SUBTASK ${plan_id}/${subtask_id}: ${updates.status || 'updated'}`);
@@ -2340,6 +2677,8 @@ async function handlePlanSubtaskUpdate(msg) {
     publishPlanEvent('subtask_completed', plan);
     // Check if next wave should dispatch
     await advancePlanWave(plan_id);
+  } else if (updates.status === SUBTASK_STATUS.FAILED) {
+    await applySubtaskFailure(plan, st, blockedIds);
   }
 
   respond(msg, plan);
@@ -2351,32 +2690,61 @@ async function handlePlanSubtaskUpdate(msg) {
  * Check if next wave subtasks are ready and dispatch them.
  */
 async function advancePlanWave(planId) {
-  const plan = await planStore.get(planId);
-  if (!plan || plan.status !== PLAN_STATUS.EXECUTING) return;
-
-  // Check if plan is fully done
-  if (planStore.isPlanComplete(plan)) {
-    await planStore.markCompleted(planId);
-    const completedPlan = await planStore.get(planId);
-    log(`PLAN COMPLETED ${planId}: all ${plan.subtasks.length} subtasks done`);
+  // Plan handlers and the sweep timers run concurrently, so every plan write
+  // below is a compare-and-swap on a fresh read; a blind put of a stale copy
+  // undid a sibling subtask's completion. The completion CAS re-checks
+  // completeness, so only one caller completes the plan and its parent.
+  const completedPlan = await planStore._updateWithCAS(planId, (p) => {
+    if (p.status !== PLAN_STATUS.EXECUTING || !planStore.isPlanComplete(p)) return null;
+    p.status = PLAN_STATUS.COMPLETED;
+    p.completed_at = new Date().toISOString();
+    return p;
+  });
+  if (completedPlan) {
+    log(`PLAN COMPLETED ${planId}: all ${completedPlan.subtasks.length} subtasks done`);
     publishPlanEvent('completed', completedPlan);
 
     // Mark parent task as waiting-user (Gui reviews)
-    const parentTask = await store.get(plan.parent_task_id);
+    const parentTask = await store.get(completedPlan.parent_task_id);
     if (parentTask && parentTask.status !== TASK_STATUS.COMPLETED) {
-      await store.markCompleted(plan.parent_task_id, {
-        success: !planStore.hasFailures(plan),
-        summary: `Plan ${planId} completed (${plan.subtasks.length} subtasks)`,
+      await store.markCompleted(completedPlan.parent_task_id, {
+        success: !planStore.hasFailures(completedPlan),
+        summary: `Plan ${planId} completed (${completedPlan.subtasks.length} subtasks)`,
         plan_id: planId,
       });
-      publishEvent('completed', await store.get(plan.parent_task_id));
+      publishEvent('completed', await store.get(completedPlan.parent_task_id));
     }
     return;
   }
 
-  // Get next wave subtasks
-  const ready = planStore.getNextWaveSubtasks(plan);
-  if (ready.length === 0) return;
+  // Claim the ready subtasks in one CAS before dispatching anything: their
+  // plan-side fields are known up front (a mesh task's id is its subtask id,
+  // namespaced by plan), and a second caller then finds them no longer pending instead of
+  // dispatching them again.
+  let ready = [];
+  const plan = await planStore._updateWithCAS(planId, (p) => {
+    ready = planStore.getNextWaveSubtasks(p);
+    if (ready.length === 0) return null;
+    for (const st of ready) {
+      st.status = SUBTASK_STATUS.QUEUED;
+      switch (st.delegation.mode) {
+        case 'solo_mesh':
+        case 'collab_mesh':
+          st.mesh_task_id = `${planId}-${st.subtask_id}`;
+          break;
+        case 'human':
+          st.status = SUBTASK_STATUS.BLOCKED;
+          // falls through
+        case 'local':
+        case 'soul':
+          // Template subtask ids repeat across plans; createPlan's auto ids already carry the plan id.
+          st.kanban_task_id = st.subtask_id.startsWith(`${planId}-`) ? st.subtask_id : `${planId}-${st.subtask_id}`;
+          break;
+      }
+    }
+    return p;
+  });
+  if (!plan) return;
 
   const waveNum = ready[0].wave;
   log(`PLAN WAVE ${planId} W${waveNum}: dispatching ${ready.length} subtasks`);
@@ -2395,8 +2763,6 @@ async function advancePlanWave(planId) {
   }
 
   for (const st of ready) {
-    st.status = SUBTASK_STATUS.QUEUED;
-
     // Dispatch based on delegation mode
     switch (st.delegation.mode) {
       case 'solo_mesh':
@@ -2407,8 +2773,10 @@ async function advancePlanWave(planId) {
           ? (findRoleByScope(st.scope, ROLE_DIRS)?.id || null)
           : null);
 
+        // Namespaced by plan: subtask ids come from templates (reproduce, fix, …), so a
+        // bare id let a second plan overwrite the first plan's task record and branch.
         const meshTask = createTask({
-          task_id: st.subtask_id,
+          task_id: st.mesh_task_id,
           title: st.title,
           description: st.description,
           budget_minutes: st.budget_minutes,
@@ -2423,32 +2791,16 @@ async function advancePlanWave(planId) {
           ...inheritedRouting,
         });
         if (subtaskRole) log(`  → AUTO-ROLE ${st.subtask_id}: ${subtaskRole} (matched from scope)`);
-        await store.put(meshTask);
-        st.mesh_task_id = meshTask.task_id;
-        publishEvent('submitted', meshTask);
-
-        // Auto-create collab session if needed
-        if (st.delegation.collaboration && collabStore) {
-          const session = createSession(meshTask.task_id, st.delegation.collaboration);
+        const session = st.delegation.collaboration && collabStore
+          ? createSession(meshTask.task_id, st.delegation.collaboration)
+          : null;
+        if (session) {
           await collabStore.put(session);
-
-          // Store session_id back in mesh task for agent discovery
           meshTask.collab_session_id = session.session_id;
-          await store.put(meshTask);
-
-          log(`  → COLLAB SESSION ${session.session_id} for subtask ${st.subtask_id}`);
-          publishCollabEvent('created', session);
-
-          log(`RECRUIT: broadcasting for session ${session.session_id}`);
-          nc.publish(`mesh.collab.${session.session_id}.recruit`, sc.encode(JSON.stringify({
-            session_id: session.session_id,
-            task_id: meshTask.task_id,
-            mode: session.mode,
-            min_nodes: session.min_nodes,
-            max_nodes: session.max_nodes,
-            task_title: meshTask.title,
-          })));
         }
+        await store.put(meshTask);
+        publishEvent('submitted', meshTask);
+        if (session) announceCollabSession(meshTask, session);
 
         log(`  → MESH ${st.subtask_id}: "${st.title}" (${st.delegation.mode})`);
         break;
@@ -2458,21 +2810,16 @@ async function advancePlanWave(planId) {
       case 'soul': {
         // These are handled via kanban (active-tasks.md) by mesh-bridge
         // Just mark as queued — bridge will materialize in kanban
-        st.kanban_task_id = st.subtask_id;
         log(`  → LOCAL ${st.subtask_id}: "${st.title}" (${st.delegation.mode}${st.delegation.soul_id ? `: ${st.delegation.soul_id}` : ''})`);
         break;
       }
 
       case 'human': {
-        st.status = SUBTASK_STATUS.BLOCKED;
-        st.kanban_task_id = st.subtask_id;
         log(`  → HUMAN ${st.subtask_id}: "${st.title}" (needs Gui)`);
         break;
       }
     }
   }
-
-  await planStore.put(plan);
 
   publishPlanEvent('wave_started', plan);
 }
@@ -2484,73 +2831,97 @@ async function advancePlanWave(planId) {
 async function updatePlanSubtaskStatus(taskId, newStatus) {
   const task = await store.get(taskId);
   if (!task || !task.plan_id) return;
-  const plan = await planStore.get(task.plan_id);
-  if (!plan) return;
-  const st = plan.subtasks.find(s => s.mesh_task_id === taskId || s.subtask_id === taskId);
-  if (!st) return;
-  st.status = newStatus;
-  await planStore.put(plan);
-  log(`PLAN SUBTASK ${st.subtask_id} → ${newStatus} (no wave advance)`);
+  let subtaskId = null;
+  const plan = await planStore._updateWithCAS(task.plan_id, (p) => {
+    const st = p.subtasks.find(s => s.mesh_task_id === taskId || s.subtask_id === taskId);
+    if (!st) return null;
+    st.status = newStatus;
+    subtaskId = st.subtask_id;
+    return p;
+  });
+  if (plan) log(`PLAN SUBTASK ${subtaskId} → ${newStatus} (no wave advance)`);
 }
 
 // ── Plan Progress on Task Completion ────────────────
 
+// Daemon-driven collab aborts end the parent task outside handleFail/handleRelease;
+// the bridge frees its card and dispatch slot only on the task event.
+async function settleCollabParent(taskId, outcome, reason) {
+  const settled = outcome === 'failed' ? await store.markFailed(taskId, reason) : await store.markReleased(taskId, reason);
+  if (settled) {
+    publishEvent(outcome, settled);
+    await checkPlanProgress(taskId, 'failed');
+  }
+}
+
 /**
  * When a mesh task completes, check if it belongs to a plan and update accordingly.
- * Called after handleComplete/handleFail and from detectStalls/enforceBudgets.
+ * Called after handleComplete/handleFail, from detectStalls/enforceBudgets, and
+ * after every daemon-driven terminal transition of a collab parent task (those
+ * never pass through handleComplete/handleFail).
  */
 async function checkPlanProgress(taskId, status) {
-  let plan = null;
-  let st = null;
-
   // Only the task's own plan_id links it to a plan, and only the daemon sets
   // it. The pre-back-reference fallback that matched a bare task_id against
   // every executing plan is gone: a forged task named after a pending subtask
   // completed or aborted that plan through it (review 2026-09-15 F1).
   const task = await store.get(taskId);
-  if (task && task.plan_id) {
-    plan = await planStore.get(task.plan_id);
-    if (plan) {
-      // Match by mesh_task_id, subtask_id, OR the task's subtask_id field
-      // (escalation tasks carry the original subtask_id for plan recovery)
-      st = plan.subtasks.find(s =>
-        s.mesh_task_id === taskId ||
-        s.subtask_id === taskId ||
-        (task.subtask_id && s.subtask_id === task.subtask_id)
-      );
-    }
-  }
+  if (!task || !task.plan_id) return;
 
-  if (!plan || !st) return;
+  // Match by mesh_task_id, subtask_id, OR the task's subtask_id field
+  // (escalation tasks carry the original subtask_id for plan recovery)
+  const matches = (s) =>
+    s.mesh_task_id === taskId ||
+    s.subtask_id === taskId ||
+    (task.subtask_id && s.subtask_id === task.subtask_id);
+  const isEscalation = !!task.tags?.includes('escalation');
 
-  // Escalation recovery: if a subtask was FAILED/BLOCKED but an escalation task
-  // completes successfully for it, override status to COMPLETED and unblock dependents.
-  const isEscalationRecovery = (
-    status === 'completed' &&
-    (st.status === SUBTASK_STATUS.FAILED || st.status === SUBTASK_STATUS.BLOCKED) &&
-    task && task.tags && task.tags.includes('escalation')
-  );
+  // One CAS for the whole transition (status, recovery unblocks, failure
+  // cascade): a blind put of a copy read before a sibling's update reverted
+  // that sibling. The mutator can run again on a conflict, so it only fills
+  // these from the fresh plan it is given.
+  let outcome = null;
+  let st = null;
+  let unblocked = [];
+  let blockedIds = new Set();
+  const plan = await planStore._updateWithCAS(task.plan_id, (p) => {
+    unblocked = [];
+    blockedIds = new Set();
+    st = p.subtasks.find(matches);
+    if (!st) return null;
 
-  if (isEscalationRecovery) {
-    log(`ESCALATION RECOVERY ${plan.plan_id}: subtask ${st.subtask_id} recovered by ${taskId}`);
-    st.status = SUBTASK_STATUS.COMPLETED;
-    st.result = { success: true, summary: `Recovered by escalation task ${taskId}` };
-    // Unblock any dependents that were blocked by the original failure
-    for (const dep of plan.subtasks) {
-      if (dep.status === SUBTASK_STATUS.BLOCKED && dep.depends_on.includes(st.subtask_id)) {
-        dep.status = SUBTASK_STATUS.PENDING;
-        dep.result = null;
-        log(`  UNBLOCKED: ${dep.subtask_id} (dependency ${st.subtask_id} recovered)`);
+    // Escalation recovery: if a subtask was FAILED/BLOCKED but an escalation task
+    // completes successfully for it, override status to COMPLETED and unblock dependents.
+    if (status === 'completed' && isEscalation &&
+        (st.status === SUBTASK_STATUS.FAILED || st.status === SUBTASK_STATUS.BLOCKED)) {
+      st.status = SUBTASK_STATUS.COMPLETED;
+      st.result = { success: true, summary: `Recovered by escalation task ${taskId}` };
+      for (const dep of p.subtasks) {
+        if (dep.status === SUBTASK_STATUS.BLOCKED && dep.depends_on.includes(st.subtask_id)) {
+          dep.status = SUBTASK_STATUS.PENDING;
+          dep.result = null;
+          unblocked.push(dep.subtask_id);
+        }
       }
+      outcome = 'recovered';
+      return p;
     }
-    await planStore.put(plan);
+
+    st.status = status === 'completed' ? SUBTASK_STATUS.COMPLETED : SUBTASK_STATUS.FAILED;
+    // Cascade: block all transitive dependents
+    if (st.status === SUBTASK_STATUS.FAILED) blockedIds = cascadeFailure(p, st.subtask_id);
+    outcome = st.status;
+    return p;
+  });
+  if (!plan) return;
+
+  if (outcome === 'recovered') {
+    log(`ESCALATION RECOVERY ${plan.plan_id}: subtask ${st.subtask_id} recovered by ${taskId}`);
+    for (const id of unblocked) log(`  UNBLOCKED: ${id} (dependency ${st.subtask_id} recovered)`);
     publishPlanEvent('subtask_recovered', plan);
     await advancePlanWave(plan.plan_id);
     return;
   }
-
-  st.status = status === 'completed' ? SUBTASK_STATUS.COMPLETED : SUBTASK_STATUS.FAILED;
-  await planStore.put(plan);
 
   log(`PLAN PROGRESS ${plan.plan_id}: subtask ${st.subtask_id} → ${st.status}`);
 
@@ -2560,52 +2931,47 @@ async function checkPlanProgress(taskId, status) {
     return;
   }
 
-  // Subtask failed — apply failure policy
-  if (st.status === SUBTASK_STATUS.FAILED) {
-    publishPlanEvent('subtask_failed', plan);
+  await applySubtaskFailure(plan, st, blockedIds);
+}
 
-    // Cascade: block all transitive dependents
-    const blockedIds = cascadeFailure(plan, st.subtask_id);
-    await planStore.put(plan);
+/**
+ * A subtask failed (blockedIds: the dependents its cascade blocked): apply the
+ * plan's failure policy, then advance whatever branches remain.
+ */
+async function applySubtaskFailure(plan, st, blockedIds) {
+  publishPlanEvent('subtask_failed', plan);
 
-    const policy = plan.failure_policy || 'continue_best_effort';
+  const policy = plan.failure_policy || 'continue_best_effort';
 
-    if (policy === 'abort_on_first_fail') {
-      await planStore.markAborted(plan.plan_id, `Subtask ${st.subtask_id} failed (abort_on_first_fail)`);
-      publishPlanEvent('aborted', await planStore.get(plan.plan_id));
-      log(`PLAN ABORTED ${plan.plan_id}: ${st.subtask_id} failed (abort_on_first_fail policy)`);
+  if (policy === 'abort_on_first_fail') {
+    await abortPlan(plan.plan_id, `Subtask ${st.subtask_id} failed (abort_on_first_fail)`);
+    return;
+  }
+
+  if (policy === 'abort_on_critical_fail') {
+    // Check direct failure
+    if (st.critical) {
+      await abortPlan(plan.plan_id, `Critical subtask ${st.subtask_id} failed (abort_on_critical_fail)`);
       return;
     }
 
-    if (policy === 'abort_on_critical_fail') {
-      // Check direct failure
-      if (st.critical) {
-        await planStore.markAborted(plan.plan_id, `Critical subtask ${st.subtask_id} failed (abort_on_critical_fail)`);
-        publishPlanEvent('aborted', await planStore.get(plan.plan_id));
-        log(`PLAN ABORTED ${plan.plan_id}: critical subtask ${st.subtask_id} failed`);
-        return;
-      }
-
-      // Check if cascade blocked any critical subtasks — a blocked critical is
-      // functionally equivalent to a failed critical (the plan can't achieve its goal)
-      const blockedCritical = plan.subtasks.filter(
-        s => blockedIds.has(s.subtask_id) && s.critical
+    // Check if cascade blocked any critical subtasks — a blocked critical is
+    // functionally equivalent to a failed critical (the plan can't achieve its goal)
+    const blockedCritical = plan.subtasks.filter(
+      s => blockedIds.has(s.subtask_id) && s.critical
+    );
+    if (blockedCritical.length > 0) {
+      const ids = blockedCritical.map(s => s.subtask_id).join(', ');
+      await abortPlan(
+        plan.plan_id,
+        `Critical subtask(s) ${ids} blocked by failed dependency ${st.subtask_id} (abort_on_critical_fail)`
       );
-      if (blockedCritical.length > 0) {
-        const ids = blockedCritical.map(s => s.subtask_id).join(', ');
-        await planStore.markAborted(
-          plan.plan_id,
-          `Critical subtask(s) ${ids} blocked by failed dependency ${st.subtask_id} (abort_on_critical_fail)`
-        );
-        publishPlanEvent('aborted', await planStore.get(plan.plan_id));
-        log(`PLAN ABORTED ${plan.plan_id}: critical subtask(s) [${ids}] blocked by ${st.subtask_id}`);
-        return;
-      }
+      return;
     }
-
-    // continue_best_effort: try to advance independent branches
-    await advancePlanWave(plan.plan_id);
   }
+
+  // continue_best_effort: try to advance independent branches
+  await advancePlanWave(plan.plan_id);
 }
 
 /**
@@ -2649,14 +3015,13 @@ handleGet = tracer.wrapAsync('handleGet', handleGet, { tier: 1, category: 'state
 handleHeartbeat = tracer.wrapAsync('handleHeartbeat', handleHeartbeat, { tier: 1, category: 'state_transition' });
 handleRelease = tracer.wrapAsync('handleRelease', handleRelease, { tier: 1, category: 'state_transition' });
 handleCancel = tracer.wrapAsync('handleCancel', handleCancel, { tier: 1, category: 'state_transition' });
+handleUpdate = tracer.wrapAsync('handleUpdate', handleUpdate, { tier: 1, category: 'state_transition' });
 handleTaskApprove = tracer.wrapAsync('handleTaskApprove', handleTaskApprove, { tier: 1, category: 'state_transition' });
 handleTaskReject = tracer.wrapAsync('handleTaskReject', handleTaskReject, { tier: 1, category: 'state_transition' });
-handleCollabCreate = tracer.wrapAsync('handleCollabCreate', handleCollabCreate, { tier: 1, category: 'state_transition' });
 handleCollabJoin = tracer.wrapAsync('handleCollabJoin', handleCollabJoin, { tier: 1, category: 'state_transition' });
 handleCollabReflect = tracer.wrapAsync('handleCollabReflect', handleCollabReflect, { tier: 1, category: 'state_transition' });
 detectStalls = tracer.wrapAsync('detectStalls', detectStalls, { tier: 1, category: 'state_transition' });
 enforceBudgets = tracer.wrapAsync('enforceBudgets', enforceBudgets, { tier: 1, category: 'state_transition' });
-processProposals = tracer.wrapAsync('processProposals', processProposals, { tier: 1, category: 'state_transition' });
 
 // Tier 1 — state_transition (handlers)
 handleAttempt = tracer.wrapAsync('handleAttempt', handleAttempt, { tier: 1, category: 'state_transition' });
@@ -2724,17 +3089,17 @@ async function main() {
 
   // Initialize task store
   const js = nc.jetstream();
-  const kv = await js.views.kv(KV_BUCKET);
+  const kv = await openMeshKv(js, KV_BUCKET);
   store = new TaskStore(kv, { leaseMs: LEASE_MS });
   log(`Task store initialized (bucket: ${KV_BUCKET})`);
 
   // Initialize collab store
-  const collabKv = await js.views.kv(COLLAB_KV_BUCKET);
+  const collabKv = await openMeshKv(js, COLLAB_KV_BUCKET);
   collabStore = new CollabStore(collabKv);
   log(`Collab store initialized (bucket: ${COLLAB_KV_BUCKET})`);
 
   // Initialize plan store
-  const plansKv = await js.views.kv(PLANS_KV_BUCKET);
+  const plansKv = await openMeshKv(js, PLANS_KV_BUCKET);
   planStore = new PlanStore(plansKv);
   log(`Plan store initialized (bucket: ${PLANS_KV_BUCKET})`);
 
@@ -2751,11 +3116,11 @@ async function main() {
     'mesh.tasks.list':      handleList,
     'mesh.tasks.get':       handleGet,
     'mesh.tasks.cancel':    handleCancel,
+    'mesh.tasks.update':    handleUpdate,
     'mesh.tasks.approve':   handleTaskApprove,
     'mesh.tasks.reject':    handleTaskReject,
     'mesh.tasks.merged':    handleTaskMerged,
     // Collab handlers
-    'mesh.collab.create':   handleCollabCreate,
     'mesh.collab.join':     handleCollabJoin,
     'mesh.collab.leave':    handleCollabLeave,
     'mesh.collab.status':   handleCollabStatus,
@@ -2792,9 +3157,6 @@ async function main() {
   }
 
   // Start enforcement loops
-  const proposalTimer = setInterval(async () => {
-    try { await processProposals(); } catch (err) { log(`processProposals error: ${err.message}`); }
-  }, BUDGET_CHECK_INTERVAL);
   const budgetTimer = setInterval(async () => {
     try { await enforceBudgets(); } catch (err) { log(`enforceBudgets error: ${err.message}`); }
   }, BUDGET_CHECK_INTERVAL);
@@ -2808,7 +3170,6 @@ async function main() {
   const collabRoundSweepTimer = setInterval(sweepCollabRoundTimeouts, 60000); // every 60s (P1 #4)
   const pruneTimer = setInterval(pruneTerminalTasks, 3600000); // hourly (P4-5)
   pruneTerminalTasks();
-  log(`Proposal processing: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Budget enforcement: every ${BUDGET_CHECK_INTERVAL / 1000}s`);
   log(`Stall detection: every ${BUDGET_CHECK_INTERVAL / 1000}s (threshold: ${STALL_MINUTES}m)`);
   log(`Collab recruiting check: every 5s`);
@@ -2824,7 +3185,6 @@ async function main() {
     shuttingDown = true;
     log('Shutting down...');
     log('Clearing timers...');
-    clearInterval(proposalTimer);
     clearInterval(budgetTimer);
     clearInterval(stallTimer);
     clearInterval(recruitTimer);
@@ -2872,10 +3232,23 @@ if (require.main === module) {
       if (ctx.planStore !== undefined) planStore = ctx.planStore;
     },
     startRecruitedSession: (id) => startRecruitedSession(id),
+    // test/collab-circling-step-cas.test.js
+    startCirclingStep: (id) => startCirclingStep(id),
+    handleCollabJoin: (msg) => handleCollabJoin(msg),
+    // test/daemon-circling-handlers.test.js, test/circling-parse-retry.test.mjs
+    handleCollabReflect: (msg) => handleCollabReflect(msg),
     handleCollabJoinDispatch: async (session) =>
       collabStore.isRecruitingDone(session) ? startRecruitedSession(session.session_id) : false,
     evaluateRound: (id) => evaluateRound(id),
+    handleCirclingStepTimeout: (id, snap) => handleCirclingStepTimeout(id, snap),
+    hasCirclingStepTimer: (id) => circlingStepTimers.has(id),
+    handleCirclingGateApprove: (msg) => handleCirclingGateApprove(msg),
+    handleCirclingGateReject: (msg) => handleCirclingGateReject(msg),
+    completeCirclingSession: (id) => completeCirclingSession(id),
     sweepCollabRoundTimeouts: () => sweepCollabRoundTimeouts(),
+    sweepCirclingStepTimeouts: () => sweepCirclingStepTimeouts(),
+    computeNodeScopes: (nodes, scope, strategy) => computeNodeScopes(nodes, scope, strategy),
+    handleCollabLeave: (msg) => handleCollabLeave(msg),
     handleFail: (msg) => handleFail(msg),
     // F1/R1 (test/mesh-lease-authz.test.js): the handlers a stranger on the bus reaches.
     // Also owner calls on a task that already ended (test/daemon-terminal-task.test.js).
@@ -2888,9 +3261,17 @@ if (require.main === module) {
     handleAttempt: (msg) => handleAttempt(msg),
     handleHeartbeat: (msg) => handleHeartbeat(msg),
     handleRelease: (msg) => handleRelease(msg),
+    handleTaskApprove: (msg) => handleTaskApprove(msg),
+    handleTaskReject: (msg) => handleTaskReject(msg),
+    handleCancel: (msg) => handleCancel(msg),
+    handleUpdate: (msg) => handleUpdate(msg),
     handleTaskMerged: (msg) => handleTaskMerged(msg),
     handlePlanCreate: (msg) => handlePlanCreate(msg),
     handlePlanApprove: (msg) => handlePlanApprove(msg),
-    processProposals: () => processProposals(),
+    handlePlanAbort: (msg) => handlePlanAbort(msg),
+    handlePlanGet: (msg) => handlePlanGet(msg),
+    handlePlanSubtaskUpdate: (msg) => handlePlanSubtaskUpdate(msg),
+    detectStalls: () => detectStalls(),
+    enforceBudgets: () => enforceBudgets(),
   };
 }

@@ -22,15 +22,20 @@ import {
   OPERATOR_ENVELOPE_FIELDS,
 } from '../lib/operator-auth.mjs';
 
-let tmp, lead, peer;
+let tmp, lead, peer, savedHome;
 
+// HOME is the temp dir for the whole file: trustedOperatorKeys reads ~/.openclaw/openclaw.env,
+// which on a real node would otherwise leak the operator's own allowlist into these cases.
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'operator-auth-'));
+  savedHome = process.env.HOME;
+  process.env.HOME = tmp;
   lead = getOrCreateIdentity(path.join(tmp, 'lead'));
   peer = getOrCreateIdentity(path.join(tmp, 'peer'));
   delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
 });
 after(() => {
+  process.env.HOME = savedHome;
   fs.rmSync(tmp, { recursive: true, force: true });
   delete process.env.OPENCLAW_OPERATOR_TRUSTED_KEYS;
 });
@@ -75,6 +80,18 @@ describe('signOperatorRequest / verifyOperatorRequest', () => {
     assert.deepEqual(again, { ok: false, reason: 'replay' });
   });
 
+  it('an untrusted signer cannot evict a trusted id from the replay cache', () => {
+    const seen = createSeenEventCache(2);
+    const req = signOperatorRequest({ task_id: 'T-1' }, { identity: lead, nodeId: 'lead' });
+    assert.equal(verifyOperatorRequest(req, { trustedKeys: leadKeys(), seenIds: seen }).ok, true);
+    for (let i = 0; i < 2; i++) {
+      const flood = signOperatorRequest({ task_id: `T-flood-${i}` }, { identity: peer, nodeId: 'peer' });
+      assert.equal(verifyOperatorRequest(flood, { trustedKeys: leadKeys(), seenIds: seen }).reason, 'untrusted-signer');
+    }
+    assert.equal(seen.size(), 1);
+    assert.deepEqual(verifyOperatorRequest(req, { trustedKeys: leadKeys(), seenIds: seen }), { ok: false, reason: 'replay' });
+  });
+
   it('refuses a stale request (outside the 5-minute window)', () => {
     const req = signOperatorRequest({ task_id: 'T-1' }, { identity: lead, nodeId: 'lead', now: Date.now() - 10 * 60_000 });
     const r = verifyOperatorRequest(req, { trustedKeys: leadKeys(), seenIds: null });
@@ -109,6 +126,26 @@ describe('trustedOperatorKeys', () => {
   it('falls back to the local node identity (zero-config on the lead)', () => {
     const keys = trustedOperatorKeys({ identity: lead });
     assert.deepEqual(keys, [lead.publicKeyBase64]);
+  });
+
+  const withEnvFile = (keys, fn) => {
+    const file = path.join(tmp, '.openclaw', 'openclaw.env');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `OPENCLAW_OPERATOR_TRUSTED_KEYS=${keys}\n`);
+    try { fn(); } finally { fs.rmSync(file); }
+  };
+
+  it('reads the allowlist the installer persists in ~/.openclaw/openclaw.env when the env var is unset', () => {
+    withEnvFile('k1,k2', () => {
+      assert.deepEqual(trustedOperatorKeys({ identity: lead }), ['k1', 'k2']);
+    });
+  });
+
+  it('a request signed by a key listed only in openclaw.env verifies with the default allowlist', () => {
+    withEnvFile(peer.publicKeyBase64, () => {
+      const req = signOperatorRequest({ mode: 'dev' }, { identity: peer, nodeId: 'peer' });
+      assert.deepEqual(verifyOperatorRequest(req, { seenIds: null }), { ok: true, reason: 'verified' });
+    });
   });
 });
 

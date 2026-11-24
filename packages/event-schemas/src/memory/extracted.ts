@@ -17,6 +17,8 @@ export const MemoryExtractedSchema = EventEnvelopeSchema.extend({
     decision_texts: z.array(z.string().max(500)).max(10).optional(),
     model: z.string(),
     duration_ms: z.number().int().nonnegative(),
+    // Set when the flush found the same tail as the last extraction (llm-dedup).
+    dedup: z.literal(true).optional(),
   }),
 });
 

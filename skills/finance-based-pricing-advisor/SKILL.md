@@ -568,7 +568,7 @@ Or ask any follow-up questions."
 
 ## Examples
 
-See `examples/` folder for sample conversation flows. Mini examples below:
+Mini examples:
 
 ### Example 1: Price Increase (Good Case)
 

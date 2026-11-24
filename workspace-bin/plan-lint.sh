@@ -120,7 +120,13 @@ if [ -f "$AUTO" ]; then
   else
     report FAIL automation "automation.json invalid JSON or missing plist_label/tick_command"
   fi
-else report FAIL automation "automation.json missing"; fi
+else
+  # automation.json is machine-local (gitignored: it renders absolute paths), so a
+  # fresh clone never has one; the viewer derives the same defaults from the id.
+  derived="$REPO/workspace-bin/$ID-tick.sh"
+  if [ -x "$derived" ]; then report PASS automation "no automation.json — derived defaults (tick_command ${derived#$REPO/})"
+  else report WARN automation "no automation.json and no derived tick shim ${derived#$REPO/} (chain cannot run headless)"; fi
+fi
 
 if [ -f "$PLAN/TICK_PROMPT.md" ]; then
   if grep -q '<FILL:' "$PLAN/TICK_PROMPT.md"; then
@@ -156,7 +162,7 @@ else report WARN documents "ROADMAP.md missing (required for new plans; historic
 
 # ── surface 6: history ──────────────────────────────────────────────────────
 if [ -d "$PLAN/tick-logs" ]; then report PASS history "tick-logs/ present"
-else report FAIL history "tick-logs/ missing (ticks have nowhere to write; Live/History tabs dead)"; fi
+else report WARN history "tick-logs/ missing (gitignored; plan-tick creates it on the first tick)"; fi
 
 if [ -f "$PLAN/VERSION" ]; then
   ver=$(tr -d '[:space:]' < "$PLAN/VERSION")
@@ -185,7 +191,13 @@ if [ "${OPEN_ROWS:-0}" -gt 0 ] && [ ! -f "$PLAN/BLOCKED.md" ] && git -C "$REPO" 
   # A CLOSED version (no -pre/-mid) whose closing commit carries no Runtime-Evidence:
   # trailer is a done-contract violation, not a hygiene warning: the step was
   # declared done with nothing observable behind it (MASTER_PLAN §5, review L4).
-  if [ -n "$vh" ] && [ -f "$PLAN/VERSION" ] && printf '%s' "$ver" | grep -qvE -- '-pre$|-mid$'; then
+  # In a shallow clone the graft commit shows every file as added, so it would be
+  # blamed for setting VERSION; the real closing commit is not in this clone.
+  # --path-format=absolute: the relative .git/shallow would resolve against the caller's cwd.
+  shallow=$(git -C "$REPO" rev-parse --path-format=absolute --git-path shallow 2>/dev/null || true)
+  if [ -n "$vh" ] && [ -f "$shallow" ] && grep -qx "$vh" "$shallow"; then
+    report WARN history "VERSION's closing commit is outside this shallow clone (graft ${vh:0:7}) — git fetch --unshallow to grade it"
+  elif [ -n "$vh" ] && [ -f "$PLAN/VERSION" ] && [ "$ver" != "v0.0" ] && printf '%s' "$ver" | grep -qvE -- '-pre$|-mid$'; then
     if git -C "$REPO" log -1 --format='%B' "$vh" 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
       report PASS history "closing commit ${vh:0:7} carries a Runtime-Evidence: trailer"
     else

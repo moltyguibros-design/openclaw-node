@@ -49,7 +49,7 @@ Every compliant node MUST have these files at its workspace root:
 
 | File | Required | Purpose | Max Staleness |
 |------|----------|---------|---------------|
-| `.companion-state.md` | YES | Immediate session context | 4 hours (if active) |
+| `.daemon-state-<node>.md` | YES | Immediate session context, written by the memory daemon | 4 hours (if active) |
 | `memory/active-tasks.md` | YES | Running/blocked/done tasks | 48 hours |
 | `.learnings/lessons.md` | YES | Accumulated corrections | 30 days |
 | `MEMORY.md` | YES | Curated long-term memory | 7 days |
@@ -68,7 +68,7 @@ Every compliant node MUST have these files at its workspace root:
 | File | Required | Purpose |
 |------|----------|---------|
 | `bin/auto-checkpoint` | YES | Memory daemon (session start, flush, recap, maintenance) |
-| `bin/memory-maintenance` | YES | Periodic maintenance (archival, predictions, stale tasks, sync) |
+| `bin/memory-maintenance.mjs` | YES | Periodic maintenance (predictions, stale tasks, sync) |
 | `bin/session-recap` | YES | Rolling conversation digest |
 
 ### Tier 5 — Optional Infrastructure
@@ -138,7 +138,6 @@ Each task entry MUST conform to this YAML-like schema:
 **Validation rules:**
 - Filename date MUST match the `# YYYY-MM-DD` header
 - File must not be empty (at minimum, the header)
-- Files >30 days old MUST be archived (violation if still in `memory/`)
 
 ### 2.4 memory/predictions.md
 
@@ -170,11 +169,13 @@ Each task entry MUST conform to this YAML-like schema:
 - Each entry should have a date
 - No exact duplicate entries
 
-### 2.6 .companion-state.md
+### 2.6 `.daemon-state-<node>.md`
+
+Written only by the memory daemon (`lib/companion-state.mjs`); agents read it, never write it.
 
 ```markdown
 ## Session Status
-status: active|idle|crashed
+status: active|idle|ended
 started_at: <ISO-8601>
 last_flush: <ISO-8601>
 
@@ -189,7 +190,7 @@ last_flush: <ISO-8601>
 ```
 
 **Validation rules:**
-- `status: active` with no session running = stale (needs reset to idle)
+- `status: active` or `idle` with no session live = the previous session crashed before its end-of-session flush
 - `started_at` must be a valid timestamp
 - `last_flush` must be within 4 hours of current time (if status=active)
 
@@ -207,7 +208,6 @@ last_flush: <ISO-8601>
 | Companion state flush | auto-checkpoint | Every tool activity |
 | Daily file creation | auto-checkpoint (session start) | Once per session |
 | Memory maintenance (full) | auto-checkpoint | 30 min |
-| Daily file archival | memory-maintenance | 30 min (checks; archives >30d files) |
 | Prediction closure | memory-maintenance | 30 min (checks; closes >7d predictions) |
 | Stale task detection | memory-maintenance | 30 min |
 | MEMORY.md freshness check | memory-maintenance | 30 min |
@@ -217,7 +217,7 @@ last_flush: <ISO-8601>
 
 A node is **Principle 11 compliant** if:
 1. `bin/auto-checkpoint` exists and is executable
-2. `bin/memory-maintenance` exists and is executable
+2. `bin/memory-maintenance.mjs` exists and is executable
 3. `bin/session-recap` exists and is executable
 4. `.tmp/last-maintenance` exists and its timestamp is within 60 min of current time (during an active session)
 5. No maintenance operation requires manual invocation to function
@@ -233,7 +233,7 @@ These internal references MUST be consistent:
 | `MEMORY.md` Active Context | `memory/YYYY-MM-DD.md` dates | Dates in Active Context must have corresponding daily files (or be within last 7 days) |
 | `active-tasks.md` artifacts | File paths | Referenced files must exist |
 | `AGENTS.md` automation table | `bin/` scripts | Referenced scripts must exist and be executable |
-| `.companion-state.md` active task | `active-tasks.md` | If companion-state references a task, it should exist in active-tasks |
+| `.daemon-state-<node>.md` active task | `active-tasks.md` | If the daemon state references a task, it should exist in active-tasks |
 | `HEARTBEAT.md` commands | `bin/` scripts | Referenced scripts must exist |
 | `lessons.md` tags | Valid tag set | Tags must be in: preference, correction, pattern, error, workflow |
 
@@ -244,10 +244,9 @@ These internal references MUST be consistent:
 ### 5.1 Self-Check (node checks itself)
 
 ```bash
-bin/memory-maintenance --force --verbose
-# Exit 0 = healthy
-# Exit 1 = warnings (non-critical degradation)
-# Exit 2 = critical failure (structurally broken)
+bin/memory-maintenance.mjs --force --verbose
+# Exit 0 = ran (warnings, if any, are in .tmp/maintenance-results)
+# Exit 2 = fatal error
 ```
 
 Additionally, read `.tmp/maintenance-results` for specific findings.
@@ -268,12 +267,11 @@ PHASE 2: Format (files parse correctly)
   □ All task_ids are unique
   □ All timestamps parse to valid datetimes
   □ lessons.md entries have valid tags
-  □ companion-state.md has required fields
+  □ .daemon-state-<node>.md has required fields
 
 PHASE 3: Freshness (nothing stale beyond thresholds)
   □ MEMORY.md modified within 7 days
   □ active-tasks.md modified within 48 hours (if any running tasks)
-  □ No daily files >30 days old in memory/ (should be archived)
   □ No predictions open >7 days without outcome
   □ No ERRORS.md entries pending >14 days
   □ .tmp/last-maintenance within 60 min (if session active)
@@ -309,7 +307,6 @@ Some violations can be repaired automatically by the checking node:
 |-----------|-------------|
 | Missing today's daily file | Create with header |
 | Stale predictions (>7d, no outcome) | Mark as expired |
-| Daily files >30d not archived | Run archival |
 | Missing `memory/archive/` dir | Create directory |
 | MEMORY.md >7 days stale | Flag for manual refresh (cannot auto-generate content) |
 | Running tasks >48h without update | Mark as stale, flag for review |
@@ -336,7 +333,7 @@ Non-auto-repairable violations (require human or node-owner intervention):
 - `SOUL.md` (each node has its own identity)
 - `MEMORY.md` (each node has its own memories)
 - `memory/*.md` (daily files are private)
-- `.companion-state.md` (session-local)
+- `.daemon-state-<node>.md` (session-local)
 - `.learnings/lessons.md` (per-node learning)
 - `memory/predictions.md` (per-node calibration)
 - Active tasks (per-node workload)

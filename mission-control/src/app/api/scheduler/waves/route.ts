@@ -1,54 +1,19 @@
 import { NextResponse } from "next/server";
-import { eq, and, or } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { tasks, dependencies } from "@/lib/db/schema";
-import { computeWaves } from "@/lib/scheduler";
+import { planDispatch } from "@/lib/scheduler";
 
 /**
  * GET /api/scheduler/waves
- * Returns the current wave structure without dispatching.
+ * Returns the current wave structure without dispatching, plus the
+ * dispatchable tasks blocked behind a predecessor that is not done.
  * Useful for visualization and debugging.
  */
 export async function GET() {
-  const db = getDb();
-
-  const dispatchable = db
-    .select()
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.needsApproval, 0),
-        or(
-          eq(tasks.status, "ready"),
-          and(eq(tasks.status, "queued"), eq(tasks.triggerKind, "none"))
-        )
-      )
-    )
-    .all();
-
-  const allDeps = db.select().from(dependencies).all();
-  const depTargetMap = new Map<string, string[]>();
-  for (const dep of allDeps) {
-    const existing = depTargetMap.get(dep.targetId) || [];
-    existing.push(dep.sourceId);
-    depTargetMap.set(dep.targetId, existing);
-  }
-  const taskStatusLookup = new Map(
-    db
-      .select({ id: tasks.id, status: tasks.status })
-      .from(tasks)
-      .all()
-      .map((t) => [t.id, t.status] as const)
-  );
-
-  const waves = computeWaves(
-    dispatchable.map((t) => t.id),
-    depTargetMap,
-    taskStatusLookup
-  );
+  const { dispatchable, blocked, waves } = planDispatch(getDb());
 
   return NextResponse.json({
     waves,
+    blocked,
     totalDispatchable: dispatchable.length,
   });
 }

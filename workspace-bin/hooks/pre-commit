@@ -19,8 +19,11 @@ if [ ! -f "$SCANNER" ]; then
 fi
 
 # ── Identify changed skill directories ────────────────────────────────────────
+# skills/_quarantine/ is never installed or deployed; scanning it would block
+# moving an already-dangerous skill out of the shipped tree.
 CHANGED_SKILLS=$(git diff --cached --name-only --diff-filter=ACMR \
   | grep -E '^skills/' \
+  | grep -vE '^skills/_quarantine/' \
   | sed 's|^skills/\([^/]*\)/.*|\1|' \
   | sort -u) || true
 
@@ -28,38 +31,52 @@ if [ -z "$CHANGED_SKILLS" ]; then
   exit 0
 fi
 
+# The scan reads the index being committed, not the working tree: a partial
+# `git add -p` or an edit after `git add` would otherwise scan other content.
+# checkout-index honours GIT_INDEX_FILE, so `git commit -a`/`<path>` work too.
+STAGED=$(mktemp -d "${TMPDIR:-/tmp}/skill-gate.XXXXXX")
+trap 'rm -rf "$STAGED"' EXIT
+git ls-files -z -- skills/ ':(exclude)skills/_quarantine' | git checkout-index -z --stdin --prefix="$STAGED/"
+
 # ── Scan each changed skill ──────────────────────────────────────────────────
 BLOCKED=0
 WARNED=0
 
 for skill_name in $CHANGED_SKILLS; do
   # Skip self (the scanner itself)
-  if [ "$skill_name" = "openclaw-skill-scanner" ]; then
+  if [ "$skill_name" = "openclaw-skill-scanner" ] || [ "$skill_name" = "_quarantine" ]; then
     continue
   fi
 
   # Skip if directory no longer exists (deleted skill)
-  if [ ! -d "$REPO_ROOT/skills/$skill_name" ]; then
+  if [ ! -d "$STAGED/skills/$skill_name" ]; then
     continue
   fi
 
-  # Run scanner
-  SCAN_OUTPUT=$(python3 "$SCANNER" --skill "$skill_name" --json 2>/dev/null) || continue
+  # scanner.py exits 1 exactly when a skill is dangerous (or missing), so its
+  # status is not an error signal; the JSON decides. The default --dir is the
+  # deployed ~/.openclaw tree, not the tree being committed.
+  SCAN_OUTPUT=$(python3 "$SCANNER" --dir "$STAGED/skills" --skill "$skill_name" --json 2>/dev/null) || true
 
-  # Extract risk_score from JSON
+  # No parseable report fails closed: an unscanned skill must not pass.
   RISK_SCORE=$(python3 -c "
 import json, sys
 try:
-    data = json.loads(sys.argv[1])
-    print(data.get('risk_score', 0))
+    print(int(json.loads(sys.argv[1])['skills'][0]['risk_score']))
 except Exception:
-    print(0)
-" "$SCAN_OUTPUT" 2>/dev/null) || RISK_SCORE=0
+    print('unscanned')
+" "$SCAN_OUTPUT" 2>/dev/null) || RISK_SCORE=unscanned
 
-  if [ "$RISK_SCORE" -ge 70 ] 2>/dev/null; then
+  if [ "$RISK_SCORE" = "unscanned" ]; then
+    echo "BLOCKED: skills/$skill_name — the scanner produced no report"
+    BLOCKED=1
+    continue
+  fi
+
+  if [ "$RISK_SCORE" -ge 70 ]; then
     echo "BLOCKED: skills/$skill_name — risk_score $RISK_SCORE/100 (dangerous)"
     BLOCKED=1
-  elif [ "$RISK_SCORE" -ge 30 ] 2>/dev/null; then
+  elif [ "$RISK_SCORE" -ge 30 ]; then
     echo "WARNING: skills/$skill_name — risk_score $RISK_SCORE/100 (suspicious)"
     WARNED=1
   fi

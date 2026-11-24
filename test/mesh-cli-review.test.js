@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 /**
- * mesh-cli-review.test.js — the REAL `mesh tasks approve|reject|submit` CLI
- * against the live task daemon (the CI mesh stack; a visible skip elsewhere).
+ * mesh-cli-review.test.js — the REAL `mesh tasks approve|reject` and
+ * `mesh tasks review` CLI against the live task daemon (the CI mesh stack; a
+ * visible skip elsewhere).
  *
  * The daemon refuses with a normal reply, { ok: false, error }, and the CLI
  * printed fields off the reply without looking at `ok`. A refused approval
  * printed "Task approved: undefined → undefined", which is how the operator
  * found it on 2026-09-27. Even a successful one printed undefined, because the
  * task is under `data`. A refusal must exit non-zero with the daemon's reason.
- * (`mesh submit` goes through the same helper, but it cannot run on a clean
- * install until the `yaml` module it requires is a declared dependency.)
  *
  * Run: node --test test/mesh-cli-review.test.js   (needs NATS + mesh-task-daemon)
  */

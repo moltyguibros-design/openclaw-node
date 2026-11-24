@@ -123,8 +123,8 @@ fi
 
 # ─── Create Temp Directory ──────────────────────────────────────────────────
 
-TMPDIR=$(mktemp -d "/tmp/skill-scan-XXXXXX")
-trap "rm -rf '$TMPDIR'" EXIT
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/skill-scan-XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
 
 echo ""
 echo -e "${CYAN}${BOLD}🔍 Skill Scanner — Safe Install${RESET}"
@@ -136,12 +136,9 @@ echo ""
 
 echo -e "${DIM}📦 Downloading skill to temp directory...${RESET}"
 
-SKILL_TMPDIR="${TMPDIR}/${SLUG}"
-mkdir -p "$SKILL_TMPDIR"
-
 # Try openclaw hub install
 if command -v openclaw &>/dev/null; then
-    if ! openclaw hub install "$SLUG" --dir "$TMPDIR" 2>/dev/null; then
+    if ! openclaw hub install "$SLUG" --dir "$WORK" 2>/dev/null; then
         echo -e "${RED}✗ Failed to download skill '${SLUG}' via openclaw hub${RESET}"
         exit 1
     fi
@@ -151,19 +148,24 @@ else
     exit 1
 fi
 
-# Find the actual skill directory (might be nested)
-if [ ! -d "$SKILL_TMPDIR" ]; then
-    # Try to find it
-    FOUND=$(find "$TMPDIR" -maxdepth 2 -name "SKILL.md" -type f 2>/dev/null | head -1)
-    if [ -n "$FOUND" ]; then
-        SKILL_TMPDIR=$(dirname "$FOUND")
-    else
-        # Just use whatever was downloaded
-        DIRS=$(find "$TMPDIR" -maxdepth 1 -type d ! -path "$TMPDIR" | head -1)
-        if [ -n "$DIRS" ]; then
-            SKILL_TMPDIR="$DIRS"
-        fi
+# The hub CLI's layout is not fixed (<dir>/<slug>/ or <dir>/skills/<slug>/),
+# so the skill is wherever its SKILL.md landed, shallowest first.
+SKILL_DIR=""
+for cand in "$WORK/$SLUG" "$WORK/skills/$SLUG"; do
+    if [ -f "$cand/SKILL.md" ]; then
+        SKILL_DIR="$cand"
+        break
     fi
+done
+if [ -z "$SKILL_DIR" ]; then
+    FOUND=$(find "$WORK" -maxdepth 3 -name SKILL.md -type f | awk -F/ 'NR == 1 || NF < min { min = NF; best = $0 } END { print best }')
+    if [ -n "$FOUND" ]; then
+        SKILL_DIR=$(dirname "$FOUND")
+    fi
+fi
+if [ -z "$SKILL_DIR" ]; then
+    echo -e "${RED}✗ Download produced no SKILL.md — refusing to install '${SLUG}'${RESET}"
+    exit 1
 fi
 
 echo -e "${GREEN}✓ Downloaded${RESET}"
@@ -174,11 +176,8 @@ echo ""
 echo -e "${DIM}🔬 Scanning for malicious patterns...${RESET}"
 echo ""
 
-# Get JSON results for programmatic use
-JSON_RESULT=$(python3 "$SCANNER" --file "$SKILL_TMPDIR" --json 2>/dev/null || true)
-
-# Also run with directory scan for better coverage
-SCAN_OUTPUT=$(python3 "$SCANNER" --dir "$TMPDIR" --skill "$(basename "$SKILL_TMPDIR")" 2>&1 || true)
+JSON_RESULT=$(python3 "$SCANNER" --file "$SKILL_DIR" --json 2>/dev/null || true)
+SCAN_OUTPUT=$(python3 "$SCANNER" --file "$SKILL_DIR" 2>&1 || true)
 
 # Get risk score
 RISK_SCORE=$(echo "$JSON_RESULT" | python3 -c "
@@ -194,26 +193,6 @@ except:
     print(0)
 " 2>/dev/null || echo "0")
 
-# If JSON failed, try scanning the directory directly
-if [ "$RISK_SCORE" = "0" ] || [ -z "$RISK_SCORE" ]; then
-    # Run full directory scan
-    JSON_RESULT=$(python3 "$SCANNER" --dir "$TMPDIR" --json 2>/dev/null || true)
-    RISK_SCORE=$(echo "$JSON_RESULT" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    skills = data.get('skills', [])
-    max_score = 0
-    for s in skills:
-        score = s.get('risk_score', 0)
-        if score > max_score:
-            max_score = score
-    print(max_score)
-except:
-    print(0)
-" 2>/dev/null || echo "0")
-fi
-
 # Print the human-readable scan output
 echo "$SCAN_OUTPUT"
 
@@ -224,7 +203,7 @@ echo "$SCAN_OUTPUT"
 # verdict means no install.
 if [ -z "$JSON_RESULT" ] || ! [[ "$RISK_SCORE" =~ ^[0-9]+$ ]]; then
     echo -e "${RED}${BOLD}✗ Scanner produced no verdict — refusing to install '${SLUG}' (fail-closed).${RESET}"
-    echo -e "${DIM}  Run it by hand: python3 ${SCANNER} --dir ${TMPDIR} --json${RESET}"
+    echo -e "${DIM}  Run it by hand: python3 ${SCANNER} --file <skill dir> --json${RESET}"
     exit 1
 fi
 
@@ -249,7 +228,7 @@ if [ "$RISK_SCORE" -lt 30 ]; then
         rm -rf "$DEST"
     fi
 
-    cp -r "$SKILL_TMPDIR" "$DEST"
+    cp -r "$SKILL_DIR" "$DEST"
     echo -e "${GREEN}${BOLD}✓ Installed '${SLUG}' to ${DEST}${RESET}"
     echo ""
     exit 0
@@ -277,7 +256,7 @@ elif [ "$RISK_SCORE" -lt 70 ]; then
         rm -rf "$DEST"
     fi
 
-    cp -r "$SKILL_TMPDIR" "$DEST"
+    cp -r "$SKILL_DIR" "$DEST"
     echo -e "${GREEN}${BOLD}✓ Installed '${SLUG}' to ${DEST}${RESET}"
     echo -e "${YELLOW}  ⚠  Monitor this skill's behavior.${RESET}"
     echo ""
@@ -302,7 +281,7 @@ else
             rm -rf "$DEST"
         fi
 
-        cp -r "$SKILL_TMPDIR" "$DEST"
+        cp -r "$SKILL_DIR" "$DEST"
         echo -e "${YELLOW}  Installed '${SLUG}' to ${DEST}${RESET}"
         echo -e "${RED}${BOLD}  ⚠  THIS SKILL MAY BE MALICIOUS. USE AT YOUR OWN RISK.${RESET}"
         echo ""

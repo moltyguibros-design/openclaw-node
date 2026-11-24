@@ -1,13 +1,13 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdtemp, rm, readFile, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
+import yaml from 'js-yaml';
 
 import {
-  SHARED_CONCEPTS_DIR,
-  getNodeId,
+  sharedConceptsDir,
   buildPromotedFrontmatter,
   queryPromotableConcepts,
   promoteConceptNotes,
@@ -88,17 +88,27 @@ function seedConceptData(db, name, mentionCount, type = 'concept') {
 
 // ── Tests ────────────────────────────────────────────────
 
-describe('SHARED_CONCEPTS_DIR', () => {
-  it('ends with projects/arcane-vault/concepts-shared', () => {
-    assert.ok(SHARED_CONCEPTS_DIR.endsWith(join('projects', 'arcane-vault', 'concepts-shared')));
+describe('sharedConceptsDir', () => {
+  const saved = { cfg: process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG, ws: process.env.OPENCLAW_WORKSPACE };
+  let dir;
+  before(async () => { dir = await mkdtemp(join(tmpdir(), 'promoter-cfg-')); });
+  after(async () => {
+    for (const [k, v] of [['OPENCLAW_OBSIDIAN_SYNC_CONFIG', saved.cfg], ['OPENCLAW_WORKSPACE', saved.ws]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    await rm(dir, { recursive: true, force: true });
   });
-});
 
-describe('getNodeId', () => {
-  it('returns a non-empty string (hostname or env)', () => {
-    const nodeId = getNodeId();
-    assert.ok(typeof nodeId === 'string');
-    assert.ok(nodeId.length > 0);
+  it('is concepts-shared/ in the vault root obsidian-sync.json names (workspace-relative or absolute)', async () => {
+    const cfg = join(dir, 'obsidian-sync.json');
+    process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG = cfg;
+    process.env.OPENCLAW_WORKSPACE = join(dir, 'ws');
+    await writeFile(cfg, JSON.stringify({ vaultPath: 'projects/my-vault' }));
+    assert.equal(sharedConceptsDir(), join(dir, 'ws', 'projects', 'my-vault', 'concepts-shared'));
+    await writeFile(cfg, JSON.stringify({ vaultPath: '/srv/vault' }));
+    assert.equal(sharedConceptsDir(), join('/srv/vault', 'concepts-shared'));
+    await writeFile(cfg, '{}');
+    assert.equal(sharedConceptsDir(), join(dir, 'ws', 'projects', 'arcane-vault', 'concepts-shared'));
   });
 });
 
@@ -119,13 +129,23 @@ describe('buildPromotedFrontmatter', () => {
     assert.ok(fm.includes('entity_type: technology'));
     assert.ok(fm.includes('mention_count: 15'));
     assert.ok(fm.includes('salience: 0.82'));
-    assert.ok(fm.includes('[[Ollama]]'));
-    assert.ok(fm.includes('[[SQLite]]'));
+    // Quoted slug links: bare [[X]] in a YAML flow list parses as nested arrays.
+    const parsed = yaml.load(fm.slice(4, -4));
+    assert.deepEqual(parsed.related, ['[[ollama|Ollama]]', '[[sqlite|SQLite]]']);
+    assert.equal(parsed.source_node, 'test-node');
     // Provenance fields
     assert.ok(fm.includes('source_node: test-node'));
     assert.ok(fm.includes('original_path:'));
     assert.ok(fm.includes('promoted_at:'));
     assert.ok(fm.includes('nats-jetstream.md'));
+  });
+
+  it('keeps a newline in a name or node id from forging frontmatter keys', () => {
+    const entity = { name: 'X', type: 'tech\nprivate: false', first_seen: 'a', last_seen: 'b', mention_count: 11 };
+    const fm = buildPromotedFrontmatter(entity, 'n1\nforged', ['Y\nZ']);
+    assert.doesNotMatch(fm, /^private:/m);
+    assert.match(fm, /^entity_type: tech private: false$/m);
+    assert.match(fm, /^source_node: n1 forged$/m);
   });
 });
 
@@ -143,6 +163,21 @@ describe('queryPromotableConcepts', () => {
     assert.ok(names.includes('Borderline'));
     assert.ok(!names.includes('LowMention'));
     assert.equal(results.length, 2);
+    db.close();
+  });
+
+  it('leaves out private entities and private co-mentions (the shared dir is cross-node)', () => {
+    const db = createTestDb();
+    seedConceptData(db, 'Public', 12);
+    const secret = seedConceptData(db, 'Secret', 12);
+    db.prepare('UPDATE entities SET private = 1 WHERE id = ?').run(secret);
+    db.prepare(`INSERT INTO decisions (decision, session_id, private) VALUES ('private call', 'session-0', 1)`).run();
+    db.prepare(`INSERT INTO decisions (decision, session_id, private) VALUES ('public call', 'session-0', 0)`).run();
+
+    const results = queryPromotableConcepts(db, 10);
+    assert.deepEqual(results.map(r => r.entity.name), ['Public']);
+    assert.deepEqual(results[0].relatedEntities, []);
+    assert.deepEqual(results[0].decisions.map(d => d.decision), ['public call']);
     db.close();
   });
 });
@@ -292,6 +327,36 @@ describe('promoteConceptNotes', () => {
     assert.deepEqual(r2.notes, ['growingconcept.md']);
     assert.deepEqual(r2.skipped, ['stableconcept.md']);
 
+    db.close();
+  });
+
+  it('asks the LLM for a summary only for a new or changed note', async () => {
+    const db = createTestDb();
+    seedConceptData(db, 'Summarized', 15);
+    seedConceptData(db, 'Other', 15);
+    const sharedDir = join(tmpDir, 'llm-test');
+    const policy = { threshold: { concept_mention_count: 10 } };
+    const asked = [];
+    const client = {
+      async generateAnalysis(messages) {
+        asked.push(messages[1].content.match(/^Concept: (.*)$/m)[1]);
+        return { mode: 'llm', value: { content: 'A concept summary that is long enough.' } };
+      },
+    };
+
+    await promoteConceptNotes({ db, client, sharedDir, policy, nodeId: 'n1' });
+    assert.deepEqual(asked.sort(), ['Other', 'Summarized']);
+    assert.match(await readFile(join(sharedDir, 'summarized.md'), 'utf-8'), /A concept summary that is long enough\./);
+
+    asked.length = 0;
+    const r2 = await promoteConceptNotes({ db, client, sharedDir, policy, nodeId: 'n1' });
+    assert.deepEqual(asked, [], 'unchanged notes must not cost an LLM call');
+    assert.equal(r2.promoted, 0);
+
+    db.exec(`UPDATE entities SET mention_count = mention_count + 1 WHERE name = 'Summarized'`);
+    const r3 = await promoteConceptNotes({ db, client, sharedDir, policy, nodeId: 'n1' });
+    assert.deepEqual(asked, ['Summarized']);
+    assert.deepEqual(r3.notes, ['summarized.md']);
     db.close();
   });
 

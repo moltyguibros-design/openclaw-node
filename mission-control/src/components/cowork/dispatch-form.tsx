@@ -2,16 +2,13 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { dispatchCollabTask, useClusters } from "@/lib/hooks";
-import { RolePicker, RoleBadge } from "./role-picker";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { dispatchCollabTask, fetcher, useClusters } from "@/lib/hooks";
 
 const MODES = ["parallel", "sequential", "review"] as const;
 const CONVERGENCES = ["unanimous", "majority", "coordinator"] as const;
 const SCOPE_STRATEGIES = ["shared", "leader_only", "partitioned"] as const;
 
-export function DispatchForm() {
+export function DispatchForm({ initialClusterId }: { initialClusterId?: string | null }) {
   const { clusters } = useClusters();
   const { data: nodesData } = useSWR<{
     nodes: Array<{ nodeId: string; status: string }>;
@@ -25,11 +22,9 @@ export function DispatchForm() {
     "cluster"
   );
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(
-    null
+    initialClusterId ?? null
   );
-  const [manualNodes, setManualNodes] = useState<
-    Array<{ nodeId: string; role: string }>
-  >([]);
+  const [manualNodes, setManualNodes] = useState<string[]>([]);
   const [mode, setMode] = useState<string>("parallel");
   const [convergenceType, setConvergenceType] = useState<string>("unanimous");
   const [threshold, setThreshold] = useState(66);
@@ -47,12 +42,21 @@ export function DispatchForm() {
 
   const selectedCluster = clusters.find((c) => c.id === selectedClusterId);
 
+  // Clusters load after the first render, so the defaults are applied once the
+  // selected cluster is known rather than at click time.
+  const [defaultsFrom, setDefaultsFrom] = useState<string | null>(null);
+  if (selectedCluster && defaultsFrom !== selectedCluster.id) {
+    setDefaultsFrom(selectedCluster.id);
+    setMode(selectedCluster.defaultMode);
+    setConvergenceType(selectedCluster.defaultConvergence);
+    setThreshold(selectedCluster.convergenceThreshold);
+    setMaxRounds(selectedCluster.maxRounds);
+  }
+
   const toggleManualNode = (nodeId: string) => {
-    setManualNodes((prev) => {
-      const exists = prev.find((n) => n.nodeId === nodeId);
-      if (exists) return prev.filter((n) => n.nodeId !== nodeId);
-      return [...prev, { nodeId, role: "worker" }];
-    });
+    setManualNodes((prev) =>
+      prev.includes(nodeId) ? prev.filter((n) => n !== nodeId) : [...prev, nodeId]
+    );
   };
 
   const handleSubmit = async () => {
@@ -71,7 +75,10 @@ export function DispatchForm() {
         description: description.trim() || undefined,
         clusterId:
           nodeSource === "cluster" ? selectedClusterId ?? undefined : undefined,
-        nodes: nodeSource === "manual" ? manualNodes : undefined,
+        nodes:
+          nodeSource === "manual"
+            ? manualNodes.map((nodeId) => ({ nodeId }))
+            : undefined,
         mode,
         convergence: {
           type: convergenceType,
@@ -84,20 +91,15 @@ export function DispatchForm() {
         scope: scope.length > 0 ? scope : undefined,
       });
 
-      if (data.error) {
-        setResult({ ok: false, message: data.error, taskId: null });
-      } else {
-        setResult({
-          ok: true,
-          message: `Task ${data.taskId} dispatched to ${data.nodesAssigned?.length ?? 0} nodes`,
-          taskId: data.taskId,
-        });
-        // Reset form
-        setTitle("");
-        setDescription("");
-        setMetric("");
-        setScopeText("");
-      }
+      setResult({
+        ok: true,
+        message: `Task ${data.taskId} dispatched to ${data.nodesAssigned?.length ?? 0} nodes`,
+        taskId: data.taskId,
+      });
+      setTitle("");
+      setDescription("");
+      setMetric("");
+      setScopeText("");
     } catch (err) {
       setResult({ ok: false, message: (err as Error).message, taskId: null });
     } finally {
@@ -189,7 +191,6 @@ export function DispatchForm() {
                     className="inline-flex items-center gap-1 rounded bg-accent/30 px-2 py-0.5 text-[10px]"
                   >
                     <span className="font-mono">{m.nodeId.split("-")[0]}</span>
-                    <RoleBadge role={m.role} />
                   </span>
                 ))}
               </div>
@@ -205,14 +206,12 @@ export function DispatchForm() {
         {nodeSource === "manual" && (
           <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
             {meshNodes.map((node) => {
-              const selected = manualNodes.find(
-                (n) => n.nodeId === node.nodeId
-              );
+              const selected = manualNodes.includes(node.nodeId);
               return (
                 <div
                   key={node.nodeId}
                   onClick={() => toggleManualNode(node.nodeId)}
-                  className={`flex items-center justify-between rounded px-3 py-2 text-xs cursor-pointer transition-colors ${
+                  className={`flex items-center rounded px-3 py-2 text-xs cursor-pointer transition-colors ${
                     selected
                       ? "bg-accent/40 border border-accent-foreground/20"
                       : "bg-accent/10 hover:bg-accent/20"
@@ -228,20 +227,6 @@ export function DispatchForm() {
                     />
                     <span className="font-mono">{node.nodeId}</span>
                   </div>
-                  {selected && (
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <RolePicker
-                        value={selected.role}
-                        onChange={(role) =>
-                          setManualNodes((prev) =>
-                            prev.map((n) =>
-                              n.nodeId === node.nodeId ? { ...n, role } : n
-                            )
-                          )
-                        }
-                      />
-                    </div>
-                  )}
                 </div>
               );
             })}

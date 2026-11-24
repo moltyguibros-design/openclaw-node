@@ -70,6 +70,6 @@ Parent: Daedalus
 
 ## Review Cadence
 
-- After each audit: update learnings in evolution/events.jsonl
+- After each audit: record learnings as an evolution event with `bin/mc-api POST /api/souls/blockchain-auditor/evolution '<event json>'` (MULTI_SOUL_GUIDE.md, Soul Evolution)
 - Monthly: review genes.json for new attack patterns
 - When Solidity upgrades: revisit principles for language changes

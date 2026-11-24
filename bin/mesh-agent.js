@@ -30,29 +30,31 @@
  * Usage:
  *   node mesh-agent.js                        # run worker (default provider)
  *   node mesh-agent.js --once                 # claim one task, execute, exit
- *   node mesh-agent.js --model sonnet         # override model
- *   node mesh-agent.js --provider openai      # use OpenAI backend
- *   node mesh-agent.js --dry-run              # claim + build prompt, don't execute
+ *   node mesh-agent.js --model <name>         # override model
+ *   node mesh-agent.js --provider <name>      # pick a provider from lib/llm-providers.js
+ *   node mesh-agent.js --dry-run              # read one task and print its prompt; claims nothing
+ *   node mesh-agent.js --dry-run --task <id>  # the same for a named task
  */
 
 const { connect, StringCodec } = require('nats');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
 const tracer = createTracer('mesh-agent');
-const { spawn, execSync, execFileSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { getActivityState, getSessionInfo } = require('../lib/agent-activity');
+const { getSessionInfo } = require('../lib/agent-activity');
 const { loadAllRules, matchRules, formatRulesForPrompt, detectFrameworks, activateFrameworkRules } = require('../lib/rule-loader');
-const { loadHarnessRules, runMeshHarness, runPostCommitValidation, formatHarnessForPrompt } = require('../lib/mesh-harness');
+const { loadHarnessRules, runMeshHarness, runPostCommitValidation, runPreChecks, formatHarnessForPrompt, preCommitSecretScan } = require('../lib/mesh-harness');
 const { validateMetricCommand } = require('../lib/exec-safety');
-const { TASK_TERMINAL } = require('../lib/mesh-tasks');
-const { findRole, formatRoleForPrompt } = require('../lib/role-loader');
+const { TASK_TERMINAL, TERMINAL_STATES } = require('../lib/mesh-tasks');
+const { findRole, formatRoleForPrompt, validateRequiredOutputs } = require('../lib/role-loader');
 
 const sc = StringCodec();
-const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
-const { resolveProvider, resolveModel, stripLlmOutput, isOpenClawWorkerProvider } = require('../lib/llm-providers');
+const { NATS_URL, natsConnectOpts, resolveEnvKey } = require('../lib/nats-resolve');
+const { PROVIDERS, resolveProvider, resolveModel, isOpenClawWorkerProvider, taskProviderRefusal } = require('../lib/llm-providers');
+const { runCli, runProvider } = require('../lib/llm-run');
 // One derivation for every daemon (lib/node-id) — the agent must claim tasks
 // under the same node_id the task daemon authorizes, or ownership checks fail.
 const NODE_ID = require('../lib/node-id').resolveNodeId();
@@ -85,6 +87,16 @@ function getHarnessRules() {
   }
   return cachedHarnessRules;
 }
+
+// Probes for the harness pre_check stage (no-assume-running): a flush is a
+// round trip to the server, so it proves the bus answers, not just that a
+// socket object exists.
+const PRE_CHECK_PROBES = {
+  async nats() {
+    if (!nc || nc.isClosed()) throw new Error('connection closed');
+    await nc.flush();
+  },
+};
 
 /**
  * Inject matching coding rules into a prompt parts array based on task scope.
@@ -119,10 +131,12 @@ function taskTaxonomy(task) {
   };
 }
 
+// Both per-task opens skip the integrity check: a full one re-reads all of state.db
+// (transcripts, FTS) twice per task for a one-row read and a one-row write.
 async function prepareHyperagentStrategy(task) {
   try {
     const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
-    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db') });
+    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db'), integrityCheck: false });
     try {
       const { domain, subdomain } = taskTaxonomy(task);
       const strategy = store.getStrategy(domain, subdomain, NODE_ID);
@@ -152,6 +166,21 @@ function injectHyperagentStrategy(parts, task) {
   parts.push('');
 }
 
+function injectSuccessCriteria(parts, task) {
+  if (!task.success_criteria?.length) return;
+  parts.push('## Success Criteria');
+  for (const c of task.success_criteria) parts.push(`- ${c}`);
+  parts.push('');
+}
+
+function injectRejection(parts, task) {
+  if (!task?.rejection_reason) return;
+  parts.push('## Previous Review');
+  parts.push(`A reviewer rejected an earlier run of this task (rejection ${task.rejection_count || 1}): ${task.rejection_reason}`);
+  parts.push('Address this feedback; do not resubmit the same work.');
+  parts.push('');
+}
+
 // ── Role loading (cached per role ID) ─────────────────
 const ROLE_DIRS = [
   path.join(process.env.HOME, '.openclaw', 'roles'),
@@ -165,6 +194,49 @@ function getRole(roleId) {
   const role = findRole(roleId, ROLE_DIRS);
   if (role) roleCache.set(roleId, role);
   return role;
+}
+
+/**
+ * Paths the attempt created or modified in its worktree (deletions excluded),
+ * read before the commit so MESH_NO_MERGE runs report them too.
+ */
+function changedFiles(worktreePath) {
+  if (!worktreePath) return [];
+  let out;
+  try {
+    out = execFileSync('git', ['status', '--porcelain', '-uall', '-z'], { cwd: worktreePath, timeout: 5000, encoding: 'utf-8' });
+  } catch (err) {
+    warn(`changedFiles: ${err.message}`);
+    return [];
+  }
+  const entries = out.split('\0');
+  const files = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2);
+    // With -z a rename or copy is followed by its source path as its own entry.
+    if (xy[0] === 'R' || xy[0] === 'C') i++;
+    if (xy.includes('D')) continue;
+    files.push(entry.slice(3));
+  }
+  return files;
+}
+
+/**
+ * A role's required_outputs, checked here because the worktree (and so the
+ * file contents a content_check reads) exists only on this node. The daemon
+ * acts on the verdict. Null when the task's role requires no outputs.
+ */
+function checkRoleOutputs(task, files, worktreePath) {
+  const role = getRole(task.role);
+  if (!role?.required_outputs?.length) return null;
+  const { passed, failures } = validateRequiredOutputs(role, files, worktreePath);
+  return {
+    role: role.id,
+    passed,
+    issues: failures.map(f => `[required_output] ${f.description}: ${f.detail}`),
+  };
 }
 
 /**
@@ -194,26 +266,39 @@ function injectRole(parts, roleId) {
 //      disables memory entirely.
 const MEMORY_INJECT_CAP = Number(process.env.MESH_MEMORY_INJECT_CHARS ?? 4000);
 const MEMORY_INJECT_PORT = Number(process.env.MEMORY_INJECT_PORT || 7893);
-const MEMORY_INJECT_TOKEN_PATH = path.join(process.env.HOME || '', '.openclaw', 'config', 'memory-injection-token');
+// The daemon's node root, as lib/memory-daemon-paths.mjs resolves it.
+const MEMORY_INJECT_TOKEN_PATH = path.join(process.env.OPENCLAW_HOME || path.join(process.env.HOME || '', '.openclaw'), 'config', 'memory-injection-token');
 
-function recallForTask(task) {
+// Async with an abort timeout: a synchronous curl here froze the agent's event loop
+// (alive checks, heartbeats, NATS) for as long as the inject-server took to answer.
+async function recallForTask(task) {
   if (process.env.MESH_MEMORY_RECALL === 'off' || !task) return null;
   const query = [task.title, task.description].filter(Boolean).join('\n').trim().slice(0, 4000);
   if (!query) return null;
   let token;
-  try { token = fs.readFileSync(MEMORY_INJECT_TOKEN_PATH, 'utf8').trim(); } catch { return null; }
+  try { token = (await fs.promises.readFile(MEMORY_INJECT_TOKEN_PATH, 'utf8')).trim(); } catch { return null; }
   if (!token) return null;
   try {
-    const out = execFileSync('curl', [
-      '-s', '--max-time', '4',
-      '-X', 'POST', `http://127.0.0.1:${MEMORY_INJECT_PORT}/memory/inject`,
-      '-H', 'content-type: application/json',
-      '-H', `authorization: Bearer ${token}`,
-      '-d', JSON.stringify({ prompt: query }),
-    ], { encoding: 'utf8', timeout: 6000, stdio: ['ignore', 'pipe', 'ignore'] });
-    const block = JSON.parse(out).block;
+    const res = await fetch(`http://127.0.0.1:${MEMORY_INJECT_PORT}/memory/inject`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ prompt: query }),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return null;
+    const { block } = await res.json();
     return (typeof block === 'string' && block.trim()) ? block.trim() : null;
   } catch { return null; }
+}
+
+/**
+ * Fetch the task-relevant recall before a prompt is built; the builders stay
+ * synchronous and read it from the task (like _hyperagentStrategy).
+ */
+async function prepareMemoryRecall(task) {
+  const recalled = MEMORY_INJECT_CAP > 0 ? await recallForTask(task) : null;
+  Object.defineProperty(task, '_memoryRecall', { value: recalled, configurable: true, writable: true });
+  return recalled;
 }
 
 let memCache = { mtime: -1, content: '' };
@@ -228,7 +313,7 @@ function readNodeMemory() {
 
 function injectMemory(parts, task) {
   if (!(MEMORY_INJECT_CAP > 0)) return;
-  const recalled = recallForTask(task);
+  const recalled = task?._memoryRecall;
   if (recalled) {
     parts.push('## Node memory (task-relevant recall)');
     parts.push('');
@@ -249,6 +334,10 @@ function injectMemory(parts, task) {
 const args = process.argv.slice(2);
 const ONCE = args.includes('--once');
 const DRY_RUN = args.includes('--dry-run');
+const CLI_TASK_ID = (() => {
+  const idx = args.indexOf('--task');
+  return idx >= 0 && args[idx + 1] ? args[idx + 1] : null;
+})();
 const CLI_MODEL = (() => {
   const idx = args.indexOf('--model');
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : null;
@@ -258,10 +347,108 @@ const CLI_PROVIDER = (() => {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : null;
 })();
 const ENV_PROVIDER = process.env.MESH_LLM_PROVIDER || null;
+// The node's own mind, in resolveProvider's env-before-CLI order.
+const NODE_PROVIDER = ENV_PROVIDER || CLI_PROVIDER;
 
 let nc;
 let running = true;
 let currentTaskId = null; // tracks active task for alive-check responses
+// One task at a time: the claim loop, the recruit broadcast and the recruiting poll
+// each take this slot synchronously before their first await. Checking
+// currentTaskId and setting it after an await let two of them start a task at once.
+let taskSlotHeld = false;
+
+function acquireTaskSlot() {
+  if (taskSlotHeld) return false;
+  taskSlotHeld = true;
+  return true;
+}
+
+function releaseTaskSlot() {
+  taskSlotHeld = false;
+  currentTaskId = null;
+  stopRequest = null;
+}
+
+// ── Stop notices ──────────────────────────────────────
+// mesh.agent.<node>.stall / .budget_exceeded: the daemon's stall sweep and budget
+// enforcer, and Mission Control's remove_node, tell this node to stop a task. They
+// are signed with the lead's identity because anyone holding the shared bus token
+// could otherwise stop any node's work.
+const STOP_NOTICES = ['stall', 'budget_exceeded'];
+let stopRequest = null; // { task_id, reason } for the task this node holds
+let activeWorker = null; // { taskId, stop } while a worker process runs
+const stopHooks = new Map(); // task_id → ends a collab round loop waiting between rounds
+
+let _operatorAuth = null;
+async function operatorAuth() {
+  if (!_operatorAuth) _operatorAuth = await import('../lib/operator-auth.mjs');
+  return _operatorAuth;
+}
+
+function stoppedFor(taskId) {
+  return stopRequest && stopRequest.task_id === taskId ? stopRequest : null;
+}
+
+// Path (a): a notice signed by a trusted operator key naming this node and the task it holds.
+async function signedStop(notice) {
+  const { verifyOperatorRequest, stripOperatorEnvelope } = await operatorAuth();
+  const verdict = verifyOperatorRequest(notice);
+  if (!verdict.ok) return { ok: false, why: verdict.reason };
+  const { task_id, target_node_id, reason } = stripOperatorEnvelope(notice);
+  // The signature covers the target, so a notice signed for another node cannot be replayed here.
+  if (target_node_id !== NODE_ID) return { ok: false, why: `signed for ${target_node_id}, not ${NODE_ID}` };
+  if (!task_id || task_id !== currentTaskId) return { ok: false, why: `${task_id} is not the current task (${currentTaskId})` };
+  return { ok: true, task_id, reason };
+}
+
+const runningHere = (taskId) => !!taskId && (taskId === currentTaskId || activeWorker?.taskId === taskId);
+
+/**
+ * One stop notice off the bus. Acts on (a) a valid trusted-operator signature, or
+ * (b) the daemon confirming the task is no longer this node's (taskWithdrawn).
+ * Anything else is logged and ignored. Returns true when it stopped the task.
+ */
+async function onStopNotice(kind, notice) {
+  let stop = await signedStop(notice);
+  if (!stop.ok) {
+    const taskId = notice?.task_id;
+    if (!runningHere(taskId)) {
+      log(`STOP ${kind} ignored: ${stop.why}; ${taskId} is not running here`);
+      return false;
+    }
+    if (!(await taskWithdrawn(taskId))) {
+      warn(`STOP ${kind} ${taskId} ignored: ${stop.why}, and the daemon still has it running on this node`);
+      return false;
+    }
+    if (!runningHere(taskId)) return false;
+    stop = { ok: true, task_id: taskId, reason: 'the daemon ended this node\'s run' };
+  }
+  const { task_id } = stop;
+  const request = { task_id, kind, reason: `${kind}: ${stop.reason || 'stopped by the daemon'}` };
+  if (task_id === currentTaskId) stopRequest = request;
+  log(`STOP ${kind}: ${task_id} — ${request.reason}`);
+  if (activeWorker?.taskId === task_id) activeWorker.stop();
+  const hook = stopHooks.get(task_id);
+  if (hook) hook();
+  return true;
+}
+
+function listenForStops() {
+  return STOP_NOTICES.map((kind) => {
+    const sub = nc.subscribe(`mesh.agent.${NODE_ID}.${kind}`);
+    (async () => {
+      for await (const msg of sub) {
+        try {
+          await onStopNotice(kind, JSON.parse(sc.decode(msg.data)));
+        } catch (err) {
+          warn(`${kind} notice: ${err.message}`);
+        }
+      }
+    })();
+    return sub;
+  });
+}
 
 // ── Agent State File (read by mesh-health-publisher) ──
 const AGENT_STATE_PATH = path.join(os.homedir(), '.openclaw', '.tmp', 'agent-state.json');
@@ -270,10 +457,17 @@ function writeAgentState(status, taskId, provider, model) {
   try {
     fs.writeFileSync(AGENT_STATE_PATH, JSON.stringify({
       status, taskId: taskId || null,
-      llm: status === 'working' ? (provider || 'unknown') : null,
+      llm: provider || NODE_PROVIDER,
       model: status === 'working' ? (model || null) : null,
     }));
   } catch { /* best-effort */ }
+}
+
+// Not resolveProvider/resolveModel: they throw, and the 'working' writes sit outside the task's try.
+function taskMind(task) {
+  const provider = task.llm_provider || NODE_PROVIDER;
+  if (PROVIDERS[provider]?.acceptsModel === false) return [provider, null];
+  return [provider, task.llm_model || CLI_MODEL || PROVIDERS[provider]?.defaultModel || null];
 }
 
 // Cohort provenance (hyperagent-evidence 0.2): derived MECHANICALLY here, the
@@ -291,14 +485,20 @@ function deriveExecutionClass(task, providerName) {
 async function recordHyperagentTask(task, { outcome, iterations, startedAt, notes, sessionId = null }) {
   try {
     const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
-    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db') });
+    const store = createHyperAgentStore({ dbPath: process.env.OPENCLAW_STATE_DB || path.join(os.homedir(), '.openclaw', 'state.db'), integrityCheck: false });
     try {
       const { domain, subdomain } = taskTaxonomy(task);
       // Deterministic per task — recomputed here rather than threaded through
-      // six call sites.
-      const workerProvider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+      // six call sites. A refused or unknown provider is still what the task
+      // asked for: it governs running the task, not describing it.
+      let workerProvider;
+      try {
+        workerProvider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+      } catch {
+        workerProvider = PROVIDERS[task.llm_provider] ?? null;
+      }
       const providerName = workerProvider?.name ?? null;
-      const model = resolveModel(task, CLI_MODEL, workerProvider) ?? null;
+      const model = resolveModel(task, CLI_MODEL, workerProvider ?? { defaultModel: null }) ?? null;
       const row = store.logTelemetry({
         node_id: NODE_ID,
         soul_id: process.env.OPENCLAW_SOUL_ID || NODE_ID,
@@ -317,6 +517,8 @@ async function recordHyperagentTask(task, { outcome, iterations, startedAt, note
         collaboration_mode: task.collaboration?.mode ?? null,
         provider: providerName,
         model,
+        // One row per run: a claim's lease, else (a recruit holds none) its collab session.
+        run_key: task.lease_token || sessionId || task.collab_session_id || null,
       });
       log(`HyperAgent telemetry: id=${row.id} outcome=${row.outcome} iterations=${row.iterations}`);
     } finally {
@@ -342,6 +544,33 @@ const { info: log, warn, error: logError, debug } = _logger;
 // on the verifier (D3).
 
 const FOREMAN_ENABLED = process.env.MESH_FOREMAN !== '0';
+
+// One timeline per task, never rotated: startup drops those past the retention
+// window (0 keeps them all), as reconcileKeptBranches ages out kept branches.
+// The window also comes from openclaw.env: the agent's units pass no MESH_FOREMAN_RETENTION_DAYS.
+// A set value that is not a number prunes nothing: falling back to 30 days would
+// delete what an operator who wrote `0  # keep` meant to keep.
+async function pruneForemanTimelines(now = Date.now()) {
+  const { foremanConfigFromEnv } = await import('../lib/foreman/index.mjs');
+  const raw = resolveEnvKey('MESH_FOREMAN_RETENTION_DAYS') || '';
+  if (raw && !Number.isFinite(Number(raw))) {
+    warn(`FOREMAN: MESH_FOREMAN_RETENTION_DAYS=${JSON.stringify(raw)} is not a number (a trailing comment counts); no timeline pruned`);
+    return;
+  }
+  const env = { ...process.env, MESH_FOREMAN_RETENTION_DAYS: raw };
+  const { dir, retention_days: days } = foremanConfigFromEnv(env);
+  if (!dir || !(days > 0) || !fs.existsSync(dir)) return;
+  const cutoff = now - days * 86400000;
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.jsonl')) continue;
+    const file = path.join(dir, name);
+    if (fs.statSync(file).mtimeMs >= cutoff) continue;
+    fs.unlinkSync(file);
+    removed += 1;
+  }
+  if (removed) log(`FOREMAN: pruned ${removed} timeline(s) older than ${days}d from ${dir}`);
+}
 
 async function createTaskSupervisor(task, worktreePath) {
   if (!FOREMAN_ENABLED) return null;
@@ -455,7 +684,7 @@ async function foremanVerify(supervisor, task, worktreePath, attempt, llmResult)
     }
   }
   if (movedHead) tampered = tampered ? `${movedHead}; ${tampered}` : movedHead;
-  const verdict = foreman.parseVerdict(result.stdout);
+  const verdict = foreman.parseVerdict(result.stdout, { truncated: result.truncated });
   // Any Foreman stop of the verifier voids its verdict (F14.2): it was cut off mid-check, and
   // a PASS printed before the signal, or the 0 a CLI that traps SIGTERM exits with, proves
   // nothing. ESCALATE releases below; STOP is a failed attempt, retried like any other.
@@ -468,11 +697,12 @@ async function foremanVerify(supervisor, task, worktreePath, attempt, llmResult)
   const outcome = tampered ? 'modified the worktree' : stop ? `stopped — ${stop.reason}` : verdict.verdict ? `${verdict.verdict} (exit ${result.exitCode})` : `returned ${verdict.reason}`;
   log(`FOREMAN ${task.task_id}: verifier ${outcome}`);
 
+  const { cost } = result;
   if (stop?.action === 'ESCALATE') {
-    return record(`escalated by Foreman during verification — ${stop.reason}`, stop.reason, true);
+    return { ...record(`escalated by Foreman during verification — ${stop.reason}`, stop.reason, true), cost };
   }
-  if (passed) return complete;
-  return record(`Foreman verifier ${outcome}`, findings);
+  if (passed) return { ...complete, cost };
+  return { ...record(`Foreman verifier ${outcome}`, findings), cost };
 }
 
 async function closeSupervision(supervisor, outcome) {
@@ -497,7 +727,7 @@ async function natsRequest(subject, payload, timeoutMs = 10000) {
     if (!response.ok) {
       warn(`natsRequest ${subject}: ${response.error}`);
       // A TASK_TERMINAL refusal carries the task's status so the caller can stop.
-      throw Object.assign(new Error(response.error), { code: response.code, taskStatus: response.status });
+      throw Object.assign(new Error(response.error), { code: response.code, taskStatus: response.status, refused: true });
     }
     return response.data;
   } catch (err) {
@@ -525,13 +755,7 @@ function buildInitialPrompt(task) {
     parts.push('');
   }
 
-  if (task.success_criteria && task.success_criteria.length > 0) {
-    parts.push('## Success Criteria');
-    for (const c of task.success_criteria) {
-      parts.push(`- ${c}`);
-    }
-    parts.push('');
-  }
+  injectSuccessCriteria(parts, task);
 
   if (task.metric) {
     const safeMetric = isAllowedMetric(task.metric) ? task.metric : '[metric command filtered for security]';
@@ -557,6 +781,7 @@ function buildInitialPrompt(task) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   parts.push('## Instructions');
   parts.push('- Read the relevant files before making changes.');
@@ -596,13 +821,16 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
     parts.push('');
   }
 
+  injectSuccessCriteria(parts, task);
+
   parts.push('## Previous Attempts');
   for (let i = 0; i < previousAttempts.length; i++) {
     const a = previousAttempts[i];
     parts.push(`### Attempt ${i + 1}`);
     parts.push(`- Approach: ${a.approach || 'unknown'}`);
     parts.push(`- Result: ${a.result || 'unknown'}`);
-    parts.push(`- Kept: ${a.keep ? 'yes' : 'no (reverted)'}`);
+    // Only a secrets block resets the tree; any other failed attempt's edits are still there.
+    parts.push(`- Kept: ${a.keep ? 'yes' : a.reset ? 'no (the worktree was reset to HEAD; its changes are gone)' : 'no (its changes are still in the worktree)'}`);
     parts.push('');
   }
 
@@ -616,6 +844,7 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
 
   if (task.scope && task.scope.length > 0) {
     parts.push('## Scope');
+    parts.push('Only modify these files/paths:');
     for (const s of task.scope) {
       parts.push(`- ${s}`);
     }
@@ -629,6 +858,7 @@ function buildRetryPrompt(task, previousAttempts, attemptNumber) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   parts.push('## Instructions');
   parts.push('- Do NOT repeat a failed approach. Try something different.');
@@ -671,12 +901,13 @@ function createWorktree(taskId) {
         warn(`git worktree remove failed for ${worktreePath}: ${err.message} — cleaning up manually`);
         fs.rmSync(worktreePath, { recursive: true, force: true });
       }
-      // Also clean up the branch if it exists
-      forgetLease(taskId);
-      try {
-        execFileSync('git', ['branch', '-D', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'ignore' });
-      } catch { /* Intentional: branch may not exist after worktree cleanup */ }
     }
+    // A branch kept without its directory (pending_review keep, then a rejection
+    // notice missed while offline) would make `worktree add -b` refuse.
+    forgetLease(taskId);
+    try {
+      execFileSync('git', ['branch', '-D', branch], { cwd: WORKSPACE, timeout: 5000, stdio: 'ignore' });
+    } catch { /* Intentional: no such branch */ }
 
     // Create new worktree branched off HEAD
     execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, 'HEAD'], {
@@ -695,11 +926,6 @@ function createWorktree(taskId) {
   }
 }
 
-/**
- * Clean up a worktree after task completion or failure.
- * @param {string} worktreePath
- * @param {boolean} keep - If true, leave the branch for manual review
- */
 /**
  * Commit any changes in the worktree onto its `mesh/<taskId>` branch.
  * Returns { committed, sha, branch } or null if nothing to commit.
@@ -755,6 +981,32 @@ function commitWorktree(worktreePath, taskId, summary) {
   } catch (err) {
     log(`Commit warning: ${err.message}`);
     return null;
+  }
+}
+
+/**
+ * Commit leftover work for post-mortem. Unlike a completion, it never went through the
+ * harness, so it gets the harness's secret scan here; a finding skips the commit and
+ * returns { blocked: true }, and the caller drops the branch with the worktree.
+ */
+function commitPartialWork(worktreePath, taskId, summary) {
+  const scan = preCommitSecretScan(worktreePath);
+  if (scan.blocked) {
+    warn(`${taskId}: partial work not committed, secret scan found: ${scan.findings.join('; ')}`);
+    return { committed: false, blocked: true };
+  }
+  return commitWorktree(worktreePath, taskId, summary);
+}
+
+/** Put the task worktree back to its HEAD, untracked files included. Returns whether it worked. */
+function resetWorktree(worktreePath) {
+  try {
+    execFileSync('git', ['reset', '--hard', 'HEAD'], { cwd: worktreePath, timeout: 10000, stdio: 'pipe' });
+    execFileSync('git', ['clean', '-fd'], { cwd: worktreePath, timeout: 10000, stdio: 'pipe' });
+    return true;
+  } catch (err) {
+    warn(`worktree reset failed (${worktreePath}): ${err.message}`);
+    return false;
   }
 }
 
@@ -880,8 +1132,32 @@ function describeReviewState(task) {
 // work onto main, and a forged `.rejected` destroy work awaiting review (review
 // 2026-09-15 F1). Each one now acts only after the daemon itself reports the
 // matching state for a task this node owns.
+// A collab member's contribution sits on mesh/<task>-<node> whoever claimed the
+// parent, so membership, not ownership, decides which branch is this node's.
+function collabBranchId(taskId) {
+  return `${taskId}-${NODE_ID}`;
+}
+
+function isCollabTask(task) {
+  return !!(task && (task.collab_session_id || task.collaboration));
+}
+
+function collabRejected(task) {
+  return task.rejection_count > 0 && (task.status === 'queued' || task.status === 'failed');
+}
+
+function mergeCollabContribution(taskId) {
+  const id = collabBranchId(taskId);
+  const merge = mergeTaskBranch(id);
+  if (merge.missing) return false;
+  log(`APPROVED ${taskId} — collab contribution mesh/${id} ${merge.merged ? 'merged' : 'kept (merge failed)'}`);
+  if (merge.merged) deleteTaskBranch(id);
+  return true;
+}
+
 async function onReviewApproved(taskId) {
   const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
+  if (isCollabTask(task) && task.status === 'completed') return mergeCollabContribution(taskId);
   if (!task || task.owner !== NODE_ID || task.status !== 'completed') {
     warn(`APPROVED ${taskId} ignored — daemon reports ${describeReviewState(task)}`);
     return false;
@@ -897,6 +1173,11 @@ async function onReviewApproved(taskId) {
 // both cases the daemon keeps the owner and counts the rejection.
 async function onReviewRejected(taskId) {
   const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
+  if (isCollabTask(task) && collabRejected(task)) {
+    log(`REJECTED ${taskId} — dropping kept collab contribution`);
+    deleteTaskBranch(collabBranchId(taskId));
+    return true;
+  }
   const rejected = task && task.owner === NODE_ID && task.rejection_count > 0
     && (task.status === 'queued' || task.status === 'failed');
   if (!rejected) {
@@ -908,11 +1189,44 @@ async function onReviewRejected(taskId) {
   return true;
 }
 
+// An unsigned (or not-for-us) stop notice is still acted on when the daemon
+// itself confirms it: the task ended, or is no longer this node's (another
+// owner, or, for a collab member, no live seat in its session). A forged notice
+// therefore cannot kill a healthy worker.
+async function taskWithdrawn(taskId) {
+  const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000).catch(() => null);
+  if (!task) return false;
+  if (TERMINAL_STATES.has(task.status)) return true;
+  if (task.owner === NODE_ID) return false;
+  if (!isCollabTask(task)) return true;
+  if (!task.collab_session_id) return false;
+  const session = await natsRequest('mesh.collab.status', { session_id: task.collab_session_id }, 5000).catch(() => null);
+  if (!session) return false;
+  if (session.status === 'completed' || session.status === 'aborted') return true;
+  const seat = (session.nodes || []).find(n => n.id === NODE_ID);
+  return !seat || seat.status === 'dead';
+}
+
+// Partial-work branches of released and budget/stall-failed tasks are kept for
+// post-mortem until an operator deletes them or their tip is older than this
+// (0 keeps them indefinitely).
+const KEPT_BRANCH_MAX_DAYS = Number(process.env.MESH_KEPT_BRANCH_MAX_DAYS ?? 30);
+
+function branchAgeDays(branch) {
+  try {
+    const committed = Number(execFileSync('git', ['log', '-1', '--format=%ct', branch], {
+      cwd: WORKSPACE, timeout: 5000, encoding: 'utf-8', stdio: 'pipe',
+    }).trim());
+    return (Date.now() / 1000 - committed) / 86400;
+  } catch { return 0; }
+}
+
 /**
  * Startup reconciliation: an approval published while this agent was offline
  * is lost (core NATS publish), so every kept `mesh/<taskId>` branch is checked
- * against the daemon — completed → merge now, terminal-and-not-completed →
- * drop, pending_review → leave for the reviewer.
+ * against the daemon — completed → merge now; cancelled or review-rejected →
+ * drop; released or otherwise failed → keep for post-mortem until the age cap;
+ * pending_review → leave for the reviewer.
  */
 async function reconcileKeptBranches() {
   let branches = [];
@@ -928,6 +1242,7 @@ async function reconcileKeptBranches() {
   }
   for (const branch of branches) {
     const taskId = branch.slice('mesh/'.length);
+    if (await reconcileCollabBranch(branch, taskId)) continue;
     let task;
     try { task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000); } catch { continue; }
     if (!task || task.owner !== NODE_ID) continue;
@@ -936,10 +1251,32 @@ async function reconcileKeptBranches() {
       const merge = mergeTaskBranch(taskId);
       await reportMerge(taskId, { ...merge, branch, lease_token: keptLease(taskId) });
       if (merge.merged) deleteTaskBranch(taskId);
-    } else if (['failed', 'released', 'cancelled', 'rejected'].includes(task.status)) {
+    } else if (task.status === 'cancelled' || (task.status === 'failed' && task.rejection_count > 0)) {
+      deleteTaskBranch(taskId);
+    } else if (['failed', 'released'].includes(task.status) && KEPT_BRANCH_MAX_DAYS > 0
+        && branchAgeDays(branch) > KEPT_BRANCH_MAX_DAYS) {
+      log(`RECONCILE: ${branch} kept for post-mortem over ${KEPT_BRANCH_MAX_DAYS}d — dropping`);
       deleteTaskBranch(taskId);
     }
   }
+}
+
+// A kept collab contribution (mesh/<task>-<this node>) follows its parent's
+// review: approved → merge, rejected or ended → drop, pending → leave.
+async function reconcileCollabBranch(branch, branchId) {
+  const suffix = `-${NODE_ID}`;
+  if (!branchId.endsWith(suffix)) return false;
+  const parentId = branchId.slice(0, -suffix.length);
+  let parent;
+  try { parent = await natsRequest('mesh.tasks.get', { task_id: parentId }, 5000); } catch { return false; }
+  if (!isCollabTask(parent)) return false;
+  if (parent.status === 'completed') {
+    log(`RECONCILE: ${branch} approved while offline — merging`);
+    mergeCollabContribution(parentId);
+  } else if (collabRejected(parent) || ['failed', 'released', 'cancelled'].includes(parent.status)) {
+    deleteTaskBranch(branchId);
+  }
+  return true;
 }
 
 /**
@@ -976,7 +1313,8 @@ function cleanupWorktree(worktreePath, keep = false) {
 // ── LLM Execution ────────────────────────────────────
 
 /**
- * Run an LLM CLI with a prompt. Returns { exitCode, stdout, stderr, provider, model }.
+ * Run an LLM CLI with a prompt through the shared runner (lib/llm-run.js).
+ * Returns { exitCode, stdout, stderr, truncated, provider, model, cost, outcome }.
  * LLM-agnostic: provider is resolved per-task from task.llm_provider, env, or CLI flag.
  * Sends heartbeats to the daemon every HEARTBEAT_INTERVAL to prevent stall detection.
  *
@@ -984,88 +1322,68 @@ function cleanupWorktree(worktreePath, keep = false) {
  * @param {object} task
  * @param {string|null} worktreePath - If set, LLM accesses this worktree instead of WORKSPACE
  */
-function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null) {
-  return new Promise((resolve) => {
-    const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
-    const model = resolveModel(task, CLI_MODEL, provider);
+async function runLLM(prompt, task, worktreePath, supervisor = null, timeoutMs = null) {
+  const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+  const model = resolveModel(task, CLI_MODEL, provider);
+  const requestedModel = task.llm_model || CLI_MODEL;
+  if (provider.acceptsModel === false && requestedModel) {
+    warn(`${task.task_id}: ${provider.name} takes no model flag; ignoring '${requestedModel}', its own configured model runs`);
+  }
+  const targetDir = worktreePath || WORKSPACE;
 
-    const targetDir = worktreePath || WORKSPACE;
-    // D14: an isolated task sees ONLY its worktree — passing WORKSPACE too
-    // gave every worker read access to the dirty parent checkout (uncommitted
-    // edits leaked into artifacts, and reproducibility died with them).
-    const llmArgs = provider.buildArgs(prompt, model, task, targetDir, worktreePath ? null : WORKSPACE);
+  // Clean per-agent temp cwd: avoids loading workspace config files AND
+  // keeps each agent's Claude session JSONLs private — with a shared dir,
+  // concurrent agents misattribute each other's cost (getSessionInfo reads
+  // the latest session file in this cwd's project dir).
+  const cleanCwd = AGENT_WORK_DIR;
+  if (!fs.existsSync(cleanCwd)) fs.mkdirSync(cleanCwd, { recursive: true });
 
-    log(`Spawning [${provider.name}]: ${provider.binary} ${llmArgs.slice(0, 6).join(' ')} ... (target: ${worktreePath ? 'worktree' : 'workspace'})`);
-
-    // Clean per-agent temp cwd: avoids loading workspace config files AND
-    // keeps each agent's Claude session JSONLs private — with a shared dir,
-    // concurrent agents misattribute each other's cost (getSessionInfo reads
-    // the latest session file in this cwd's project dir).
-    const cleanCwd = AGENT_WORK_DIR;
-    if (!fs.existsSync(cleanCwd)) fs.mkdirSync(cleanCwd, { recursive: true });
-
-    const cleanEnv = provider.cleanEnv(process.env);
-
-    const child = spawn(provider.binary, llmArgs, {
-      cwd: cleanCwd,
-      env: cleanEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],  // stdin must be 'ignore' — some CLIs block on piped stdin
-      // Kill if it exceeds the budget; the verifier passes what is left of the task deadline (F14.5).
-      timeout: timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000,
-      // Own process group: a Foreman STOP must end the CLI and everything it spawned.
-      detached: true,
-    });
-    if (supervisor) supervisor.attach(child);
-
-    // Heartbeat: signal daemon with activity state.
-    // getActivityState reads Claude JSONL files — only useful for Claude provider.
-    // For other providers, send a basic heartbeat (process alive = active).
-    let lastHeartbeatWarn = 0;
-    const isClaude = provider.name === 'claude';
-    const heartbeatTimer = setInterval(async () => {
-      try {
-        const payload = { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token };
-        if (isClaude) {
-          const activity = await getActivityState(cleanCwd);
-          if (activity) {
-            payload.activity_state = activity.state;
-            payload.activity_timestamp = activity.timestamp?.toISOString();
-          }
-        } else {
-          // Non-Claude: process is running → active
-          payload.activity_state = 'active';
-          payload.activity_timestamp = new Date().toISOString();
-        }
-        await natsRequest('mesh.tasks.heartbeat', payload);
-      } catch (err) {
-        if (!lastHeartbeatWarn || Date.now() - lastHeartbeatWarn > 60000) {
-          warn(`heartbeat: ${err.message}`);
-          lastHeartbeatWarn = Date.now();
-        }
+  // Heartbeat: renews the lease and keeps the daemon's stall detector quiet.
+  let lastHeartbeatWarn = 0;
+  const heartbeatTimer = setInterval(async () => {
+    try {
+      await natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token });
+    } catch (err) {
+      if (!lastHeartbeatWarn || Date.now() - lastHeartbeatWarn > 60000) {
+        warn(`heartbeat: ${err.message}`);
+        lastHeartbeatWarn = Date.now();
       }
-    }, HEARTBEAT_INTERVAL);
+    }
+  }, HEARTBEAT_INTERVAL);
 
-    let stdout = '';
-    let stderr = '';
-    const MAX_OUTPUT = 1024 * 1024; // 1MB cap
+  // A confirmed stop notice (onStopNotice) aborts the run: the runner stops the whole process group.
+  const stop = new AbortController();
+  const worker = { taskId: task.task_id, stop: () => stop.abort() };
+  activeWorker = worker;
+  if (stoppedFor(task.task_id)) stop.abort();
 
-    child.stdout.on('data', (d) => { if (stdout.length < MAX_OUTPUT) stdout += d.toString().slice(0, MAX_OUTPUT - stdout.length); });
-    child.stderr.on('data', (d) => { if (stderr.length < MAX_OUTPUT) stderr += d.toString().slice(0, MAX_OUTPUT - stderr.length); });
-
-    child.on('close', (code, signal) => {
-      clearInterval(heartbeatTimer);
-      if (supervisor) supervisor.workerExited({ exitCode: code, signal });
-      // Sanitize before any parsing: terminal control codes + thinking blocks
-      // must never reach the artifact pipeline (2.4 finding 6).
-      resolve({ exitCode: code, stdout: stripLlmOutput(stdout), stderr, provider: provider.name, model });
+  let run;
+  try {
+    run = await runProvider(provider, {
+      prompt, model, task, targetDir,
+      // D14: an isolated task sees ONLY its worktree — passing WORKSPACE too
+      // gave every worker read access to the dirty parent checkout (uncommitted
+      // edits leaked into artifacts, and reproducibility died with them).
+      workspaceDir: worktreePath ? null : WORKSPACE,
+      cwd: cleanCwd,
+      // The verifier passes what is left of the task deadline (F14.5).
+      timeoutMs: timeoutMs ?? (task.budget_minutes || 30) * 60 * 1000,
+      signal: stop.signal,
+      onSpawn(child, { binary, args }) {
+        log(`Spawning [${provider.name}]: ${binary} ${args.slice(0, 6).join(' ')} ... (target: ${worktreePath ? 'worktree' : 'workspace'})`);
+        if (supervisor) supervisor.attach(child);
+      },
     });
-
-    child.on('error', (err) => {
-      clearInterval(heartbeatTimer);
-      if (supervisor) supervisor.workerExited({ exitCode: 1, signal: null });
-      resolve({ exitCode: 1, stdout: '', stderr: err.message, provider: provider.name, model });
-    });
-  });
+  } finally {
+    clearInterval(heartbeatTimer);
+    if (activeWorker === worker) activeWorker = null;
+  }
+  if (supervisor) supervisor.workerExited({ exitCode: run.exitCode, signal: run.signal });
+  if (run.outcome !== 'ok') log(`[${provider.name}] run outcome: ${run.outcome} (exit status ${run.exitStatus})`);
+  if (run.truncated) warn(`${task.task_id}: ${provider.name} output exceeded the 1MB capture cap; its middle was dropped and it carries no verdict`);
+  // A refused run exited 0 without doing the work: every caller must see it fail.
+  const exitCode = run.outcome === 'refused' ? run.exitStatus : run.exitCode;
+  return { exitCode, stdout: run.stdout, stderr: run.stderr, truncated: run.truncated, provider: provider.name, model, cost: run.cost, outcome: run.outcome };
 }
 
 // ── Metric Evaluation ─────────────────────────────────
@@ -1080,31 +1398,18 @@ function isAllowedMetric(cmd) {
 /**
  * Run the task's metric command. Returns { passed, output }.
  */
-function evaluateMetric(metric, cwd) {
-  if (!isAllowedMetric(metric)) {
-    log(`WARNING: Metric command blocked by security filter: ${metric}`);
-    return Promise.resolve({ passed: false, output: 'Metric command blocked by security filter' });
+async function evaluateMetric(metric, cwd, { timeoutMs = 60000 } = {}) {
+  const dir = cwd || WORKSPACE;
+  const check = validateMetricCommand(metric, { cwd: dir });
+  if (!check.allowed) {
+    log(`WARNING: Metric command blocked by security filter: ${metric} (${check.reason})`);
+    return { passed: false, output: `Metric command blocked by security filter: ${check.reason}` };
   }
-  return new Promise((resolve) => {
-    const child = spawn('bash', ['-c', metric], {
-      cwd: cwd || WORKSPACE,
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 60000, // 60s max for metric evaluation
-    });
-
-    let output = '';
-    child.stdout.on('data', (d) => { output += d.toString(); });
-    child.stderr.on('data', (d) => { output += d.toString(); });
-
-    child.on('close', (code) => {
-      resolve({ passed: code === 0, output: output.slice(-2000) }); // last 2K chars
-    });
-
-    child.on('error', (err) => {
-      resolve({ passed: false, output: err.message });
-    });
-  });
+  const [program, ...args] = check.argv;
+  const run = await runCli({ binary: program, args, cwd: dir, timeoutMs });
+  const output = run.stdout + (run.stderr ? (run.stdout ? '\n' : '') + run.stderr : '');
+  // Not outcome === 'ok': a metric that exits 0 without printing classifies as 'empty' and passes.
+  return { passed: run.exitCode === 0 && !run.timedOut && !run.spawnError, output: output.slice(-2000) };
 }
 
 // ── Collab Prompt Construction ────────────────────────
@@ -1137,7 +1442,7 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
   }
 
   if (myScope && myScope !== '*' && Array.isArray(myScope) && myScope[0] !== '*') {
-    const isReviewOnly = Array.isArray(myScope) && myScope.some(s => typeof s === 'string' && s.startsWith('[REVIEW-ONLY]'));
+    const isReviewOnly = isReviewOnlyScope(myScope);
     if (isReviewOnly) {
       parts.push('## Your Scope (REVIEW ONLY)');
       parts.push('You are a **reviewer**. Read and analyze these files but do NOT modify them:');
@@ -1164,14 +1469,8 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
-
-  if (task.success_criteria && task.success_criteria.length > 0) {
-    parts.push('## Success Criteria');
-    for (const c of task.success_criteria) {
-      parts.push(`- ${c}`);
-    }
-    parts.push('');
-  }
+  injectRejection(parts, task);
+  injectSuccessCriteria(parts, task);
 
   parts.push('## Instructions');
   if (roundRole === 'integrator') {
@@ -1238,7 +1537,12 @@ function buildCollabPrompt(task, roundNumber, sharedIntel, myScope, myRole, roun
  */
 const VALID_VOTES = new Set(['continue', 'converged', 'blocked']);
 
-function parseReflection(output) {
+function parseReflection(output, { truncated = false } = {}) {
+  // A spliced capture can pair a block from the head with a vote from the tail: no vote at all.
+  if (truncated) {
+    log('REFLECTION PARSE FAILED: output exceeded the capture cap');
+    return { summary: 'output exceeded the 1MB capture cap; reflection not parsed', learnings: '', confidence: 0.5, vote: 'parse_error', parse_failed: true };
+  }
   // Strategy: find the last ```json ... ``` block in the output
   const jsonBlocks = [...output.matchAll(/```json\s*\n([\s\S]*?)```/g)];
 
@@ -1273,27 +1577,8 @@ function parseReflection(output) {
     }
   }
 
-  // Fallback: try legacy REFLECTION_START format for backwards compat
-  const legacyMatch = output.match(/REFLECTION_START\n?([\s\S]*?)REFLECTION_END/);
-  if (legacyMatch) {
-    log(`REFLECTION PARSE: Using legacy REFLECTION_START format (deprecated)`);
-    const block = legacyMatch[1];
-    const summary = (block.match(/SUMMARY:\s*(.+)/)?.[1] || '').trim();
-    const learnings = (block.match(/LEARNINGS:\s*(.+)/)?.[1] || '').trim();
-    const confidence = parseFloat(block.match(/CONFIDENCE:\s*([\d.]+)/)?.[1] || 'NaN');
-    const voteRaw = (block.match(/VOTE:\s*(\w+)/)?.[1] || '').trim().toLowerCase();
-    const vote = VALID_VOTES.has(voteRaw) ? voteRaw : 'parse_error';
-
-    return {
-      summary, learnings,
-      confidence: isNaN(confidence) ? 0.5 : confidence,
-      vote,
-      parse_failed: vote === 'parse_error',
-    };
-  }
-
   // No reflection block found at all
-  log(`REFLECTION PARSE FAILED: No JSON or legacy reflection block found in output`);
+  log(`REFLECTION PARSE FAILED: No JSON reflection block found in output`);
   return {
     summary: output.slice(-300),
     learnings: '',
@@ -1423,6 +1708,7 @@ function buildCirclingPrompt(task, circlingData) {
   injectRole(parts, task.role);
   injectMemory(parts, task);
   injectHyperagentStrategy(parts, task);
+  injectRejection(parts, task);
 
   // Add directed input
   if (directed_input) {
@@ -1439,7 +1725,7 @@ function buildCirclingPrompt(task, circlingData) {
 
   if (isMultiArtifact) {
     // Multi-artifact output format (Worker Step 2 and Finalization)
-    const art1Type = circling_phase === 'finalization' ? 'workArtifact' : 'workArtifact';
+    const art1Type = 'workArtifact';
     const art2Type = circling_phase === 'finalization' ? 'completionDiff' : 'reconciliationDoc';
 
     parts.push('## Output Format (TWO artifacts required)');
@@ -1506,14 +1792,162 @@ const { parseCirclingReflection: _parseCircling } = require('../lib/circling-par
  * Parse a circling strategy output. Delegates to lib/circling-parser.js
  * with agent-specific options (logger, legacy fallback).
  */
-function parseCirclingReflection(output) {
+function parseCirclingReflection(output, { truncated = false } = {}) {
   return _parseCircling(output, {
+    truncated,
     log: (msg) => log(msg),
     legacyParser: parseReflection,
   });
 }
 
 // ── Collaborative Task Execution ──────────────────────
+
+// Sessions (or tasks) this node declined: the recruiting poll sees an unfilled
+// session on every pass, so it is logged once and never re-fetched.
+const declinedCollab = new Set();
+
+function collabWorkerEnv() {
+  return { ...process.env, MESH_ALLOW_LOCAL_WORKERS: resolveEnvKey('MESH_ALLOW_LOCAL_WORKERS') || '' };
+}
+
+/** The provider name when this node may not be a worker for `task`, else null. */
+function collabDeclinedProvider(task) {
+  const name = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER).name;
+  return isOpenClawWorkerProvider(name, collabWorkerEnv()) ? null : name;
+}
+
+function declineCollabOnce(key, task, providerName) {
+  if (declinedCollab.has(key)) return;
+  declinedCollab.add(key);
+  log(`COLLAB DECLINED (D11): provider "${providerName}" is not an OpenClaw advanced-LLM frontend — this node will not join ${task.task_id}. Set MESH_LLM_PROVIDER/task.llm_provider (claude/openai/gemini/deepseek/kimi/minimax/aider), name a vetted local provider in MESH_ALLOW_LOCAL_WORKERS, or MESH_ALLOW_MOCK_WORKERS=1 for choreography testing with 'shell'.`);
+}
+
+/**
+ * One recruit candidate, from the broadcast or the recruiting poll. Returns the
+ * task when this node should join its session, else null.
+ */
+async function recruitCandidate(sessionId, taskId) {
+  if (declinedCollab.has(sessionId)) return null;
+  const task = await natsRequest('mesh.tasks.get', { task_id: taskId }, 5000);
+  if (!task || !task.collaboration) return null;
+  if (task.owner === NODE_ID) return null; // we claimed it, already handling
+  if (task.preferred_nodes && task.preferred_nodes.length > 0 && !task.preferred_nodes.includes(NODE_ID)) return null;
+  if (task.exclude_nodes && task.exclude_nodes.length > 0 && task.exclude_nodes.includes(NODE_ID)) return null;
+  const declinedProvider = collabDeclinedProvider(task);
+  if (declinedProvider) {
+    declineCollabOnce(sessionId, task, declinedProvider);
+    return null;
+  }
+  return task;
+}
+
+async function joinRecruitedTask(task, label, sessionId) {
+  log(`${label}: Joining collab session ${sessionId} for task ${task.task_id}`);
+  currentTaskId = task.task_id;
+  try {
+    await executeCollabTask(task);
+  } finally {
+    currentTaskId = null;
+  }
+}
+
+/** A mesh.collab.*.recruit broadcast. */
+async function onRecruit(recruit) {
+  if (!acquireTaskSlot()) return; // busy
+  try {
+    const task = await recruitCandidate(recruit.session_id, recruit.task_id);
+    if (task) await joinRecruitedTask(task, 'RECRUIT', recruit.session_id);
+  } finally {
+    releaseTaskSlot();
+  }
+}
+
+/** Poll for recruiting sessions on idle — catches recruits we missed. */
+async function checkRecruitingSessions() {
+  if (!acquireTaskSlot()) return; // busy
+  try {
+    const sessions = await natsRequest('mesh.collab.recruiting', {}, 5000);
+    if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return;
+
+    for (const s of sessions) {
+      if (s.node_ids && s.node_ids.includes(NODE_ID)) continue; // already joined
+      if (s.max_nodes && s.current_nodes >= s.max_nodes) continue; // full
+      const task = await recruitCandidate(s.session_id, s.task_id);
+      if (task) await joinRecruitedTask(task, 'RECRUIT POLL', s.session_id);
+    }
+  } catch (err) {
+    warn(`recruiting poll: ${err.message}`);
+  } finally {
+    releaseTaskSlot();
+  }
+}
+
+/**
+ * One pass of the claim path: claim the next task and run it. Returns 'busy'
+ * (a recruit holds the slot), 'none' (nothing claimable), 'ran' or 'error'.
+ */
+async function claimAndRun() {
+  if (!acquireTaskSlot()) return 'busy';
+  let claimedTask = null;
+  let claimedAt = 0;
+  try {
+    // accepts_collab: false asks the daemon to leave collab tasks to nodes whose
+    // default provider can be a grappe worker (D11).
+    const acceptsCollab = collabDeclinedProvider(null) === null;
+    // Longer timeout — KV operations on remote NATS can be slow.
+    const task = await natsRequest('mesh.tasks.claim', { node_id: NODE_ID, accepts_collab: acceptsCollab }, 60000);
+    if (!task) return 'none';
+
+    log(`CLAIMED: ${task.task_id} "${task.title}"`);
+    claimedTask = task;
+    claimedAt = Date.now();
+    currentTaskId = task.task_id;
+    if (task.collaboration) {
+      await executeCollabTask(task);
+    } else {
+      await executeTask(task);
+    }
+    return 'ran';
+  } catch (err) {
+    await onWorkerError(claimedTask, claimedAt, err);
+    return 'error';
+  } finally {
+    releaseTaskSlot();
+  }
+}
+
+
+function isReviewOnlyScope(scope) {
+  return Array.isArray(scope) && scope.some(s => typeof s === 'string' && s.startsWith('[REVIEW-ONLY]'));
+}
+
+/** The member's write scope: review-only markers stripped, '*' and none mean the task's scope. */
+function effectiveCollabScope(task, scope) {
+  if (!Array.isArray(scope) || scope.length === 0) return task.scope || [];
+  const stripped = scope.map(s => String(s).replace(/^\[REVIEW-ONLY\] /, ''));
+  return stripped.includes('*') ? (task.scope || []) : stripped;
+}
+
+/**
+ * The solo path's mechanical gates for one collab member's worktree, before its
+ * contribution is committed. Review-only members and circling reviewers never
+ * contribute code; a secret or scope violation drops only this member's work.
+ * Returns the reason to discard, or null when it may merge.
+ */
+function collabMergeBlock(task, worktreePath, { reviewerOnly, scope, llmOutput }) {
+  if (reviewerOnly) return 'review-only member (reviewers do not contribute code)';
+  const harness = runMeshHarness({
+    rules: getHarnessRules(),
+    worktreePath,
+    taskScope: effectiveCollabScope(task, scope),
+    llmOutput,
+    hasMetric: !!task.metric,
+    log,
+    role: getRole(task.role),
+  });
+  const blocking = harness.violations.filter(v => v.rule === 'no-hardcoded-secrets' || v.rule === 'scope-enforcement');
+  return blocking.length > 0 ? blocking.map(v => v.message).join('; ') : null;
+}
 
 /**
  * Execute a collaborative task: join session, work in rounds, submit reflections.
@@ -1523,22 +1957,41 @@ async function executeCollabTask(task) {
   const collabSpec = task.collaboration;
   log(`COLLAB EXECUTING: ${task.task_id} "${task.title}" (mode: ${collabSpec.mode})`);
 
-  // D11: a grappe worker is the node's OpenClaw agent on an ADVANCED LLM — never a
-  // local model. Refuse to run (no silent local fallback) rather than degrade the
-  // grappe to a sub-OpenClaw worker. Mirrors the "refuse silent solo fallback" below.
-  const workerProvider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
-  if (!isOpenClawWorkerProvider(workerProvider.name)) {
-    // P1 #9a: refusal is a DECLINE — this node stays out of the session (it has
-    // not joined yet), and the recruit deadline / round timeout handles a grappe
-    // that can't fill. It used to publish mesh.tasks.fail, letting ONE
-    // misconfigured node abort every collab task mesh-wide.
-    log(`COLLAB DECLINED (D11): provider "${workerProvider.name}" is not an OpenClaw advanced-LLM frontend — this node will not join ${task.task_id}. Set MESH_LLM_PROVIDER/task.llm_provider (claude/openai/gemini/deepseek/kimi/minimax/aider), or MESH_ALLOW_MOCK_WORKERS=1 for choreography testing with 'shell'.`);
-    debug('state → idle');
+  const providerRefusal = taskProviderRefusal(task, CLI_PROVIDER, ENV_PROVIDER);
+  if (providerRefusal) {
+    log(`COLLAB DECLINED: ${providerRefusal}`);
     writeAgentState('idle', null);
-    await recordHyperagentTask(task, {
-      outcome: 'failure', iterations: 1, startedAt,
-      notes: `Collaboration declined because provider ${workerProvider.name} is not an approved advanced-LLM frontend.`,
-    });
+    if (task.owner === NODE_ID) {
+      await natsRequest('mesh.tasks.release', {
+        task_id: task.task_id,
+        node_id: NODE_ID,
+        lease_token: task.lease_token,
+        reason: providerRefusal,
+      }).catch(err => warn(`mesh.tasks.release: ${err.message}`));
+    }
+    return;
+  }
+
+  // D11: a grappe worker is the node's OpenClaw agent on an ADVANCED LLM — never a
+  // local model the operator has not vetted. Refuse to run (no silent local fallback)
+  // rather than degrade the grappe. Recruits are filtered before they get here
+  // (recruitCandidate) and the claim asks the daemon to skip collab tasks, so this
+  // path is a task this node claimed whose own provider it cannot serve.
+  const declinedProvider = collabDeclinedProvider(task);
+  if (declinedProvider) {
+    // P1 #9a: never mesh.tasks.fail — one misconfigured node must not abort a
+    // collab task mesh-wide. A claim it holds is released for triage instead of
+    // idling until the lease expires; no telemetry, since nothing ran.
+    declineCollabOnce(task.collab_session_id || task.task_id, task, declinedProvider);
+    writeAgentState('idle', null);
+    if (task.owner === NODE_ID) {
+      await natsRequest('mesh.tasks.release', {
+        task_id: task.task_id,
+        node_id: NODE_ID,
+        lease_token: task.lease_token,
+        reason: `Collab task needs a grappe-worker provider; ${NODE_ID} resolves it to "${declinedProvider}", which D11 declines.`,
+      }).catch(err => warn(`mesh.tasks.release: ${err.message}`));
+    }
     return;
   }
 
@@ -1588,50 +2041,49 @@ async function executeCollabTask(task) {
   const roundSub = nc.subscribe(`mesh.collab.${sessionId}.node.${NODE_ID}.round`);
   let roundsDone = false;
   let lastKnownSessionStatus = null; // tracks why rounds ended (completed/aborted/converged)
+  let sessionNeedsReview = false;
+  let lastRound = 0;
+  let reviewerOnly = false;
+  let lastScope = null;
+  let lastOutput = '';
 
   // Join the session using the discovered session_id
   let session;
   try {
-    const joinResult = await natsRequest('mesh.collab.join', {
+    session = await natsRequest('mesh.collab.join', {
       session_id: sessionId,
       node_id: NODE_ID,
     }, 10000);
-    session = joinResult;
   } catch (err) {
-    log(`COLLAB JOIN FAILED: ${err.message} (session: ${sessionId})`);
     roundSub.unsubscribe();
+    debug('state → idle');
+    writeAgentState('idle', null);
+    if (err.refused) {
+      // P1 #9a: a refused join (full, closed, or duplicate) means the session
+      // proceeds WITHOUT this node: a personal decline, not a task failure. Failing
+      // as owner aborted the live session. A claim this node holds stays for the
+      // session, which takes the parent over at recruit close.
+      log(`COLLAB DECLINED: session ${sessionId} refused this node's join (${err.message}) — task proceeds without ${NODE_ID}.`);
+      return;
+    }
+    log(`COLLAB JOIN FAILED: ${err.message} (session: ${sessionId})`);
     await natsRequest('mesh.tasks.fail', {
       task_id: task.task_id,
       node_id: NODE_ID,
       lease_token: task.lease_token,
       reason: `Failed to join collab session ${sessionId}: ${err.message}`,
     }).catch(err2 => warn(`mesh.tasks.fail: ${err2.message}`));
-    debug('state → idle');
-    writeAgentState('idle', null);
-    return;
-  }
-
-  if (!session) {
-    log(`COLLAB JOIN RETURNED NULL for session ${sessionId}`);
-    roundSub.unsubscribe();
-    // P1 #9a: a rejected join (full/closed/duplicate) means the session is
-    // proceeding WITHOUT this node — that is a personal decline, not a task
-    // failure. Failing the task here let a late-arriving node abort a healthy
-    // running grappe (the 2.4-era "already joined"/"full" aborts).
-    log(`COLLAB DECLINED: session ${sessionId} rejected this node's join (full, closed, or duplicate) — task proceeds without ${NODE_ID}.`);
-    debug('state → idle');
-    writeAgentState('idle', null);
     return;
   }
 
   log(`COLLAB JOINED: ${sessionId} (${session.nodes.length} nodes)`);
-  writeAgentState('working', task.task_id);
+  writeAgentState('working', task.task_id, ...taskMind(task));
   await prepareHyperagentStrategy(task);
 
   // Create worktree for isolation — FAIL-CLOSED (D14 rerun): a member that
-  // cannot get isolation withdraws before rounds start; the session's
-  // deadline sweep handles the missing member. Contaminated shared-tree
-  // contributions are worse than a member loss.
+  // cannot get isolation leaves the session it already joined (if it was the
+  // Nth joiner, rounds have already started), so no barrier waits on it.
+  // Contaminated shared-tree contributions are worse than a member loss.
   const worktreePath = createWorktree(`${task.task_id}-${NODE_ID}`);
   if (!worktreePath) {
     log(`ISOLATION FAILED: withdrawing ${NODE_ID} from collab ${sessionId} (fail-closed, no shared-workspace fallback)`);
@@ -1639,12 +2091,26 @@ async function executeCollabTask(task) {
       task_id: task.task_id,
       node_id: NODE_ID,
       lease_token: task.lease_token,
-      reason: `Worktree isolation failed for collab member ${NODE_ID} (MESH_WORKSPACE=${WORKSPACE} — must be a git repository). Fail-closed: member withdrew before rounds.`,
+      reason: `Worktree isolation failed for collab member ${NODE_ID} (MESH_WORKSPACE=${WORKSPACE} — must be a git repository). Fail-closed: member withdrew.`,
     }).catch(err => warn(`mesh.tasks.fail: ${err.message}`));
+    roundSub.unsubscribe();
+    await natsRequest('mesh.collab.leave', {
+      session_id: sessionId,
+      node_id: NODE_ID,
+      member_token: session.member_token,
+      reason: 'worktree isolation failed',
+    }).catch(err => warn(`mesh.collab.leave: ${err.message}`));
     writeAgentState('idle', null);
     return;
   }
   const taskDir = worktreePath;
+
+  const endRounds = () => {
+    lastKnownSessionStatus = 'stopped';
+    roundsDone = true;
+    roundSub.unsubscribe();
+  };
+  stopHooks.set(task.task_id, endRounds);
 
   // Periodic session heartbeat — detects abort/completion while waiting for rounds
   const sessionHeartbeat = setInterval(async () => {
@@ -1653,11 +2119,21 @@ async function executeCollabTask(task) {
       if (['aborted', 'completed'].includes(status.status)) {
         log(`COLLAB HEARTBEAT: Session ${sessionId} is ${status.status}. Unsubscribing.`);
         lastKnownSessionStatus = status.status;
+        sessionNeedsReview = !!status.needs_review;
         roundsDone = true;
         roundSub.unsubscribe();
       }
     } catch (err) { warn(`collab heartbeat: ${err.message}`); }
   }, 10000);
+
+  // runLLM renews the lease only while this node's worker runs; the owner must
+  // also renew it while waiting between rounds, or the reaper re-queues the task.
+  const leaseHeartbeat = task.owner === NODE_ID && task.lease_token
+    ? setInterval(() => {
+      natsRequest('mesh.tasks.heartbeat', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token })
+        .catch(err => warn(`collab lease heartbeat: ${err.message}`));
+    }, HEARTBEAT_INTERVAL)
+    : null;
 
   // Signal start
   await natsRequest('mesh.tasks.start', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token }).catch(err => warn(`mesh.tasks.start: ${err.message}`));
@@ -1669,6 +2145,7 @@ async function executeCollabTask(task) {
       const roundData = JSON.parse(sc.decode(roundMsg.data));
       const { round_number, shared_intel, directed_input, my_scope, my_role, mode, current_turn,
               round_role, circling_phase, circling_step, circling_subround } = roundData;
+      if (round_number > lastRound) lastRound = round_number;
 
       // Sequential mode safety guard: skip if it's not our turn.
       if (mode === 'sequential' && current_turn && current_turn !== NODE_ID) {
@@ -1677,24 +2154,29 @@ async function executeCollabTask(task) {
       }
 
       const isCircling = mode === 'circling_strategy';
+      if (isReviewOnlyScope(my_scope) || (isCircling && my_role === 'reviewer')) reviewerOnly = true;
+      lastScope = my_scope;
       const stepLabel = isCircling
         ? `${circling_phase === 'init' ? 'Init' : circling_phase === 'finalization' ? 'Final' : `SR${circling_subround}/S${circling_step}`}`
         : `R${round_number}`;
       log(`COLLAB ${stepLabel}: Starting work (role: ${my_role}, scope: ${JSON.stringify(my_scope)})`);
 
       // Build prompt — circling uses directed inputs, other modes use shared intel
+      await prepareMemoryRecall(task);
       const prompt = isCircling
         ? buildCirclingPrompt(task, roundData)
         : buildCollabPrompt(task, round_number, shared_intel, my_scope, my_role, round_role);
 
-      if (DRY_RUN) {
-        log(`[DRY RUN] Collab prompt:\n${prompt}`);
-        break;
-      }
-
       // Execute provider (LLM or shell)
       const llmResult = await runLLM(prompt, task, worktreePath);
+      const stop = stoppedFor(task.task_id);
+      if (stop) {
+        log(`COLLAB ${stepLabel}: ${stop.reason} — round abandoned, no reflection`);
+        endRounds();
+        break;
+      }
       const output = llmResult.stdout || '';
+      lastOutput = output;
 
       // Parse reflection — circling uses delimiter-based parser, others use JSON-block parser
       let reflection;
@@ -1709,7 +2191,7 @@ async function executeCollabTask(task) {
           parse_failed: false,
         };
       } else if (isCircling) {
-        const circResult = parseCirclingReflection(output);
+        const circResult = parseCirclingReflection(output, { truncated: llmResult.truncated });
         // A converged vote must have something to vote on: every circling step
         // carries a designated artifact, so ZERO artifacts — or artifacts whose
         // content is empty after sanitization — are parse failures, not
@@ -1739,7 +2221,7 @@ async function executeCollabTask(task) {
           if (wa != null && wa.length > 0 && wa.length < MIN_WORK_ARTIFACT_CHARS) {
             failReason = `degenerate workArtifact (< ${MIN_WORK_ARTIFACT_CHARS} chars, preamble-only)`;
           }
-          const isWorkerMulti = round_role === 'worker' && (circling_step === 2 || circling_phase === 'finalization');
+          const isWorkerMulti = my_role === 'worker' && (circling_step === 2 || circling_phase === 'finalization');
           if (!failReason && isWorkerMulti) {
             const secondType = circling_phase === 'finalization' ? 'completionDiff' : 'reconciliationDoc';
             if (!wa || wa.length < MIN_WORK_ARTIFACT_CHARS) {
@@ -1764,29 +2246,33 @@ async function executeCollabTask(task) {
         };
         circlingArtifacts = circResult.circling_artifacts;
       } else {
-        reflection = parseReflection(output);
+        reflection = parseReflection(output, { truncated: llmResult.truncated });
       }
 
       // List modified files
       let artifacts = [];
       try {
         if (worktreePath) {
-          const status = require('child_process').execSync('git status --porcelain', {
+          // Untrimmed: the first record's status column can start with a space.
+          const status = execSync('git status --porcelain', {
             cwd: worktreePath, timeout: 5000, encoding: 'utf-8',
-          }).trim();
+          });
           artifacts = status.split('\n').filter(Boolean).map(line => line.slice(3));
         }
       } catch { /* best effort */ }
 
-      // Per-round cost from this agent's own session JSONL (same mechanism
-      // the solo path already uses; per-agent work dir keeps it attributable).
-      const roundSessionInfo = await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
+      // Per-round cost: the CLI's own total, else this agent's own session JSONL
+      // (the per-agent work dir keeps it attributable).
+      const roundSessionInfo = llmResult.cost
+        ? { cost: llmResult.cost }
+        : await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
 
       // Submit reflection
       try {
         await natsRequest('mesh.collab.reflect', {
           session_id: sessionId,
           node_id: NODE_ID,
+          member_token: session.member_token,
           round: round_number,
           summary: reflection.summary,
           learnings: reflection.learnings || '',
@@ -1818,12 +2304,15 @@ async function executeCollabTask(task) {
         if (['converged', 'completed', 'aborted'].includes(status.status)) {
           log(`COLLAB: Session ${sessionId} is ${status.status}. Done.`);
           lastKnownSessionStatus = status.status;
+          sessionNeedsReview = !!status.needs_review;
           roundsDone = true;
         }
       } catch (err) { warn(`collab status check: ${err.message}`); }
     }
   } finally {
     clearInterval(sessionHeartbeat);
+    clearInterval(leaseHeartbeat);
+    stopHooks.delete(task.task_id);
     roundSub.unsubscribe();
   }
 
@@ -1832,13 +2321,27 @@ async function executeCollabTask(task) {
   // Uses lastKnownSessionStatus (set during round loop or heartbeat) instead of
   // a fresh network read, which could see stale state due to NATS latency.
   try {
-    if (['completed', 'converged'].includes(lastKnownSessionStatus)) {
-      // The session's merge-review vote gate (daemon evaluateRound) is the
-      // review for collab work, so merging here is already post-review.
-      const collabId = `${task.task_id}-${NODE_ID}`;
+    const blocked = ['completed', 'converged'].includes(lastKnownSessionStatus)
+      ? collabMergeBlock(task, worktreePath, { reviewerOnly, scope: lastScope, llmOutput: lastOutput })
+      : null;
+    if (blocked) {
+      log(`COLLAB MERGE BLOCKED: ${blocked} — discarding ${NODE_ID}'s contribution to ${task.task_id}`);
+      cleanupWorktree(worktreePath, false);
+    } else if (['completed', 'converged'].includes(lastKnownSessionStatus)) {
+      // A converged vote is the review for collab work, so that merge is
+      // post-review; collabMergeBlock applied the solo path's mechanical gates.
+      // A session that ran out of rounds never converged: the daemon holds the
+      // parent in pending_review and the contribution stays on its branch
+      // until the approve notice (onReviewApproved).
+      const collabId = collabBranchId(task.task_id);
       const commit = commitWorktree(worktreePath, collabId, `collab contribution from ${NODE_ID}`);
-      const merge = commit?.committed ? mergeTaskBranch(collabId) : null;
-      cleanupWorktree(worktreePath, !!commit?.committed && !merge?.merged);
+      if (sessionNeedsReview) {
+        if (commit?.committed) log(`Branch ${commit.branch} kept unmerged — collab ${sessionId} did not converge (merge after review)`);
+        cleanupWorktree(worktreePath, !!commit?.committed);
+      } else {
+        const merge = commit?.committed ? mergeTaskBranch(collabId) : null;
+        cleanupWorktree(worktreePath, !!commit?.committed && !merge?.merged);
+      }
     } else {
       log(`COLLAB: Session ${sessionId} ended as ${lastKnownSessionStatus || 'unknown'} — discarding worktree`);
       cleanupWorktree(worktreePath, false);
@@ -1851,7 +2354,7 @@ async function executeCollabTask(task) {
   const successful = ['completed', 'converged'].includes(lastKnownSessionStatus);
   await recordHyperagentTask(task, {
     outcome: successful ? 'success' : 'failure',
-    iterations: Math.max(1, session.current_round || 1),
+    iterations: Math.max(1, lastRound),
     startedAt,
     sessionId,
     notes: `Collaboration session ${sessionId} ended with status ${lastKnownSessionStatus || 'unknown'}.`,
@@ -1862,12 +2365,56 @@ async function executeCollabTask(task) {
 // ── Task Execution ────────────────────────────────────
 
 /**
+ * Why this node cannot even start `task` (a provider it refuses or does not have,
+ * a shell command the filter blocks), else null. Thrown inside the attempt loop,
+ * these reached the daemon only as a lease expiry minutes later.
+ */
+function taskStartError(task) {
+  try {
+    const provider = resolveProvider(task, CLI_PROVIDER, ENV_PROVIDER);
+    // The shell provider's argv is the task's command behind its security filter.
+    if (provider === PROVIDERS.shell) provider.buildArgs('', null, task);
+    return null;
+  } catch (err) {
+    return err.message;
+  }
+}
+
+/**
  * Execute a task with the Karpathy iteration pattern.
  * Try → measure → keep/discard → retry.
  */
 async function executeTask(task) {
   const startedAt = Date.now();
   log(`EXECUTING: ${task.task_id} "${task.title}" (budget: ${task.budget_minutes}m, metric: ${task.metric || 'none'}, max attempts: ${MAX_ATTEMPTS})`);
+
+  const startError = taskStartError(task);
+  if (startError) {
+    log(`REFUSED: ${startError}`);
+    await natsRequest('mesh.tasks.fail', {
+      task_id: task.task_id,
+      node_id: NODE_ID,
+      lease_token: task.lease_token,
+      reason: startError,
+    }).catch(err => warn(`mesh.tasks.fail: ${err.message}`));
+    writeAgentState('idle', null);
+    await recordHyperagentTask(task, { outcome: 'failure', iterations: 1, startedAt, notes: `Not started: ${startError}` });
+    return;
+  }
+
+  const preCheck = await runPreChecks({ rules: getHarnessRules(), probes: PRE_CHECK_PROBES, log });
+  if (!preCheck.pass) {
+    const reason = `Harness pre-check failed on ${NODE_ID}: ${preCheck.failures.map(f => `${f.service} (${f.reason})`).join('; ')}. Task not started.`;
+    log(`PRE-CHECK FAILED: ${task.task_id} — ${reason}`);
+    // Best effort: with the bus itself down this cannot arrive, and the
+    // claim's lease expiry re-queues the task instead.
+    await natsRequest('mesh.tasks.release', {
+      task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, reason,
+    }).catch(err => warn(`mesh.tasks.release: ${err.message}`));
+    writeAgentState('idle', null);
+    return;
+  }
+
   await prepareHyperagentStrategy(task);
 
   // Create isolated worktree for this task — FAIL-CLOSED (D14 rerun,
@@ -1892,7 +2439,7 @@ async function executeTask(task) {
   // node_id: the daemon now enforces ownership on start/complete/release
   // (only the claiming node may drive its task) — the same check fail had.
   await natsRequest('mesh.tasks.start', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, workspace_isolated: workspaceIsolated });
-  writeAgentState('working', task.task_id);
+  writeAgentState('working', task.task_id, ...taskMind(task));
   log(`Started: ${task.task_id} (dir: ${worktreePath ? 'worktree' : 'workspace'})`);
 
   const supervisor = await createTaskSupervisor(task, worktreePath);
@@ -1900,7 +2447,7 @@ async function executeTask(task) {
 }
 
 /**
- * Every exit from a supervised task — completion, release, dry run, or a throw
+ * Every exit from a supervised task — completion, release, or a throw
  * anywhere in the attempt loop — closes its supervisor: a loop left running would
  * keep assessing a task that is gone. A throw carries the supervisor's summary out
  * as `err.foremanNote`, because the telemetry row for a thrown task is written by
@@ -1918,41 +2465,64 @@ async function superviseTask(supervisor, run) {
 }
 
 /** The attempt loop — try → measure → keep/discard → retry — then release. */
+function throwIfStopped(task) {
+  const stop = stoppedFor(task.task_id);
+  // The daemon already released or failed the task: wind down as onWorkerError does for a TASK_TERMINAL refusal.
+  if (stop) throw Object.assign(new Error(`Stopped: ${stop.reason}`), { code: TASK_TERMINAL, taskStatus: stop.kind });
+}
+
 async function runAttempts(task, worktreePath, supervisor, startedAt) {
   const attempts = [];
+  // The daemon escalates to the role's on_metric_failure target only when every
+  // attempt ran and the last one failed its metric, never on an early stop.
+  let stoppedEarly = false;
+  let lastMetricFailed = false;
+  // Every run the task paid for: each attempt and each verifier pass.
+  const spent = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+  let costReported = false;
+  const addCost = (cost) => {
+    if (!cost) return;
+    costReported = true;
+    spent.inputTokens += cost.inputTokens || 0;
+    spent.outputTokens += cost.outputTokens || 0;
+    spent.estimatedCostUsd += cost.estimatedCostUsd || 0;
+  };
+  // The session-log estimate only when no run reported its own cost, read once: it re-reads
+  // the latest session file, so summing it per attempt would multiply one stale figure.
+  const reportedCost = async () => (costReported
+    ? spent
+    : (await getSessionInfo(AGENT_WORK_DIR).catch(() => null))?.cost || null);
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    lastMetricFailed = false;
+    throwIfStopped(task);
     // Check budget before each attempt
     const budgetDeadline = new Date(task.budget_deadline);
     const remaining = (budgetDeadline - Date.now()) / 60000;
     if (remaining <= 0) {
       log(`Budget exhausted before attempt ${attempt}`);
+      stoppedEarly = true;
       break;
     }
     log(`Attempt ${attempt}/${MAX_ATTEMPTS} (${remaining.toFixed(1)}m remaining)`);
 
     // Build prompt — attempt number injected as discrete integer for strategy branching
+    await prepareMemoryRecall(task);
     const prompt = attempt === 1
       ? buildInitialPrompt(task)
       : buildRetryPrompt(task, attempts, attempt);
 
-    if (DRY_RUN) {
-      log(`[DRY RUN] Prompt:\n${prompt}`);
-      await closeSupervision(supervisor, 'dry-run');
-      return;
-    }
-
     // Run LLM (with worktree isolation if available), supervised as it streams
     if (supervisor) supervisor.workerStarted({ attempt });
     const llmResult = await runLLM(prompt, task, worktreePath, supervisor);
+    throwIfStopped(task);
     const summary = llmResult.stdout.slice(-500) || '(no output)';
 
     log(`${llmResult.provider} exited with code ${llmResult.exitCode}`);
 
-    // Extract cost + summary from JSONL session file (zero-cost observability)
-    const sessionInfo = await getSessionInfo(AGENT_WORK_DIR).catch(() => null);
-    if (sessionInfo?.cost) {
-      log(`Cost: $${sessionInfo.cost.estimatedCostUsd.toFixed(4)} (${sessionInfo.cost.inputTokens} in / ${sessionInfo.cost.outputTokens} out)`);
+    addCost(llmResult.cost);
+    if (llmResult.cost) {
+      log(`Cost: $${llmResult.cost.estimatedCostUsd.toFixed(4)} (${llmResult.cost.inputTokens} in / ${llmResult.cost.outputTokens} out)`);
     }
 
     // A worker Foreman stopped is over whatever its exit code says (a CLI that traps
@@ -1960,7 +2530,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     // release when the stop was an escalation.
     const foremanStop = supervisor?.state.last_stop?.attempt === attempt ? supervisor.state.last_stop : null;
     if (foremanStop) {
-      const escalated = Boolean(supervisor.state.escalation);
+      const escalated = foremanStop.action === 'ESCALATE';
       const attemptRecord = {
         approach: `Attempt ${attempt}: ${escalated ? 'escalated' : 'stopped'} by Foreman — ${foremanStop.reason}`,
         result: (foremanStop.guidance || foremanStop.reason).slice(-500),
@@ -1970,6 +2540,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
       if (escalated) {
         log(`Attempt ${attempt}: Foreman escalated (${foremanStop.reason}). Releasing for human triage.`);
+        stoppedEarly = true;
         break;
       }
       log(`Attempt ${attempt}: stopped by Foreman (${foremanStop.reason}). Retrying with the guidance.`);
@@ -2015,14 +2586,18 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       // Secret violations block the commit entirely.
       const hasSecrets = harnessResult.violations.some(v => v.rule === 'no-hardcoded-secrets');
       if (hasSecrets) {
+        // The next attempt starts from a clean tree: left in place, the secret would ride
+        // into the next attempt and into a partial commit.
+        const reset = resetWorktree(worktreePath);
         const attemptRecord = {
           approach: `Attempt ${attempt}: harness blocked — secrets detected`,
           result: harnessResult.violations.map(v => v.message).join('; '),
           keep: false,
+          reset,
         };
         attempts.push(attemptRecord);
         await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
-        log(`Attempt ${attempt}: harness blocked commit (secrets). Retrying.`);
+        log(`Attempt ${attempt}: harness blocked commit (secrets); worktree ${reset ? 'reset to HEAD' : 'reset FAILED'}. Retrying.`);
         continue;
       }
       // Non-secret violations (scope reverts, output blocks): proceed with warnings
@@ -2039,11 +2614,13 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     // (D3); in shadow mode or without Foreman, trust the LLM output as before.
     if (!task.metric) {
       const verification = await foremanVerify(supervisor, task, worktreePath, attempt, llmResult);
+      addCost(verification.cost);
       if (verification.attemptRecord) {
         attempts.push(verification.attemptRecord);
         await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...verification.attemptRecord });
         if (verification.escalate) {
           log(`Attempt ${attempt}: ${verification.attemptRecord.approach}. Releasing for human triage.`);
+          stoppedEarly = true;
           break;
         }
         log(`Attempt ${attempt}: ${verification.attemptRecord.approach}. Retrying with the findings.`);
@@ -2056,6 +2633,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       };
       attempts.push(attemptRecord);
       await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
+
+      const artifacts = changedFiles(worktreePath);
+      const roleValidation = checkRoleOutputs(task, artifacts, worktreePath);
 
       // Commit on the task branch; merge only after the daemon's review decision
       const commit = commitWorktree(worktreePath, task.task_id, summary);
@@ -2070,8 +2650,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
         node_id: NODE_ID,
         lease_token: task.lease_token,
         result: {
-          success: true, summary, artifacts: [],
-          cost: sessionInfo?.cost || null,
+          success: true, summary, artifacts,
+          ...(roleValidation ? { role_validation: roleValidation } : {}),
+          cost: await reportedCost(),
           harness: {
             violations: harnessResult.violations,
             warnings: harnessResult.warnings,
@@ -2107,6 +2688,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
       attempts.push(attemptRecord);
       await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
 
+      const artifacts = changedFiles(worktreePath);
+      const roleValidation = checkRoleOutputs(task, artifacts, worktreePath);
+
       // Commit on the task branch; merge only after the daemon's review decision
       const commit = commitWorktree(worktreePath, task.task_id, summary);
 
@@ -2125,8 +2709,9 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
           // Full worker deliverable — the 200-char summary loses text-artifact
           // tasks (2.6 benchmark needs the whole answer, not a tail).
           output: llmResult.stdout,
-          artifacts: [],
-          cost: sessionInfo?.cost || null,
+          artifacts,
+          ...(roleValidation ? { role_validation: roleValidation } : {}),
+          cost: await reportedCost(),
           sha: commit?.sha || null,
           branch: commit?.branch || null,
           merged: commit?.committed ? false : null,
@@ -2156,6 +2741,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     };
     attempts.push(attemptRecord);
     await natsRequest('mesh.tasks.attempt', { task_id: task.task_id, node_id: NODE_ID, lease_token: task.lease_token, ...attemptRecord });
+    lastMetricFailed = true;
     log(`Attempt ${attempt}: metric failed. Quick retry (1s). Output: ${metricResult.output.slice(0, 200)}`);
     await new Promise(r => setTimeout(r, 1000)); // two-tier: normal exit → 1s continuation
   }
@@ -2165,7 +2751,7 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
   // "Failed" = a single attempt failed (used by daemon for budget/stall).
   // Commit whatever partial work exists on the task branch — preserved for
   // post-mortem, never merged (a released task failed its own verification).
-  commitWorktree(worktreePath, task.task_id, 'partial: released after exhausting attempts');
+  const partial = commitPartialWork(worktreePath, task.task_id, 'partial: released after exhausting attempts');
 
   const escalated = supervisor?.state.escalation ? `Foreman escalated: ${supervisor.state.escalation.reason}. ` : '';
   const reason = `${escalated}Exhausted ${attempts.length}/${MAX_ATTEMPTS} attempts. Last: ${attempts[attempts.length - 1]?.result?.slice(0, 200) || 'unknown'}`;
@@ -2175,9 +2761,12 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
     lease_token: task.lease_token,
     reason,
     attempts,
+    metric_exhausted: !stoppedEarly && lastMetricFailed && !escalated,
+    cost: await reportedCost(),
   });
-  // Keep worktree branch on release for post-mortem debugging (don't merge partial work)
-  cleanupWorktree(worktreePath, true);
+  // Keep worktree branch on release for post-mortem debugging (don't merge partial
+  // work); startup reconcile keeps it until MESH_KEPT_BRANCH_MAX_DAYS.
+  cleanupWorktree(worktreePath, !partial?.blocked);
   writeAgentState('idle', null);
   const foremanNote = await closeSupervision(supervisor, 'failure');
   await recordHyperagentTask(task, {
@@ -2190,32 +2779,30 @@ async function runAttempts(task, worktreePath, supervisor, startedAt) {
 // A task the daemon already ended (budget auto-fail, stall release, cancel)
 // surfaces here as the TASK_TERMINAL refusal of the worker's next call. That
 // is a stop, not a crash: wind down like the release path, so the worktree,
-// the agent state and the telemetry are not left on a dead task.
+// the agent state and the telemetry are not left on a dead task. Any other
+// error abandons the task the same way.
 async function onWorkerError(task, startedAt, err) {
-  if (task && err.code === TASK_TERMINAL) {
-    log(`STOPPED: ${task.task_id} — ${err.message}`);
-    const worktreePath = path.join(WORKTREE_BASE, task.task_id);
-    if (fs.existsSync(worktreePath)) {
-      commitWorktree(worktreePath, task.task_id, `partial: the daemon ended this task (${err.taskStatus})`);
-      cleanupWorktree(worktreePath, true);
-    }
-    writeAgentState('idle', null);
-    await recordHyperagentTask(task, { outcome: 'failure', iterations: 1, startedAt, notes: `Stopped: ${err.message}${err.foremanNote || ''}` });
-    return;
-  }
-  log(`ERROR: ${err.message}`);
+  const terminal = Boolean(task) && err.code === TASK_TERMINAL;
+  log(terminal ? `STOPPED: ${task.task_id} — ${err.message}` : `ERROR: ${err.message}`);
   if (!task) return;
+  // createWorktree's own id check: the error may be its refusal of an unsafe id.
+  const worktreePath = /^[\w][\w.-]{0,127}$/.test(task.task_id) ? path.join(WORKTREE_BASE, task.task_id) : null;
+  if (worktreePath && fs.existsSync(worktreePath)) {
+    const partial = commitPartialWork(worktreePath, task.task_id, terminal ? `partial: the daemon ended this task (${err.taskStatus})` : 'partial: abandoned after a worker error');
+    cleanupWorktree(worktreePath, !partial?.blocked);
+  }
+  writeAgentState('idle', null);
   await recordHyperagentTask(task, {
     outcome: 'failure', iterations: 1, startedAt,
-    notes: `Unhandled worker error: ${err.message}${err.foremanNote || ''}`,
+    notes: `${terminal ? 'Stopped' : 'Unhandled worker error'}: ${err.message}${err.foremanNote || ''}`,
   });
 }
 
 // ── Tracer wrapping ──────────────────────────────────
 executeTask = tracer.wrapAsync('executeTask', executeTask, { tier: 1, category: 'state_transition' });
 executeCollabTask = tracer.wrapAsync('executeCollabTask', executeCollabTask, { tier: 1, category: 'state_transition' });
-evaluateMetric = tracer.wrap('evaluateMetric', evaluateMetric, { tier: 2, category: 'compute' });
-runLLM = tracer.wrap('runLLM', runLLM, { tier: 2, category: 'compute' });
+evaluateMetric = tracer.wrapAsync('evaluateMetric', evaluateMetric, { tier: 2, category: 'compute' });
+runLLM = tracer.wrapAsync('runLLM', runLLM, { tier: 2, category: 'compute' });
 createWorktree = tracer.wrap('createWorktree', createWorktree, { tier: 2, category: 'compute' });
 commitWorktree = tracer.wrap('commitWorktree', commitWorktree, { tier: 2, category: 'compute' });
 mergeTaskBranch = tracer.wrap('mergeTaskBranch', mergeTaskBranch, { tier: 2, category: 'compute' });
@@ -2228,6 +2815,66 @@ buildCollabPrompt = tracer.wrap('buildCollabPrompt', buildCollabPrompt, { tier: 
 buildCirclingPrompt = tracer.wrap('buildCirclingPrompt', buildCirclingPrompt, { tier: 2 });
 parseReflection = tracer.wrap('parseReflection', parseReflection, { tier: 3 });
 parseCirclingReflection = tracer.wrap('parseCirclingReflection', parseCirclingReflection, { tier: 3 });
+
+// ── Dry run ───────────────────────────────────────────
+
+// A claim would take real work off the queue (and a released task cannot go back),
+// so the preview only reads: the named task, else the next queued one.
+async function dryRun(taskId = CLI_TASK_ID) {
+  const task = taskId
+    ? await natsRequest('mesh.tasks.get', { task_id: taskId })
+    : (await natsRequest('mesh.tasks.list', { status: 'queued' }))[0];
+  if (!task) {
+    log('[DRY RUN] No queued task to preview.');
+    return;
+  }
+  await prepareMemoryRecall(task);
+  const prompt = task.collaboration
+    ? buildCollabPrompt(task, 1, null, task.scope, 'worker', null)
+    : buildInitialPrompt(task);
+  log(`[DRY RUN] Prompt for ${task.task_id}:\n${prompt}`);
+}
+
+// ── Bus connection ────────────────────────────────────
+
+// The agent is on demand on both platforms and launchd never restarts it
+// (KeepAlive false), so a bus outage (a NATS reload, a cluster change) must not
+// end it: it reconnects for as long as it runs, as the deploy listener does.
+function agentConnectOptions() {
+  return { ...natsConnectOpts(), timeout: 5000, reconnect: true, maxReconnectAttempts: -1, reconnectTimeWait: 2000 };
+}
+
+async function connectToBus(connectFn = connect, { sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const opts = agentConnectOptions();
+  for (let attempt = 1; running; attempt++) {
+    try {
+      return await connectFn(opts);
+    } catch (err) {
+      const waitMs = Math.min(2000 * 2 ** (attempt - 1), 30000);
+      log(`NATS connect failed (${err.message}); retrying in ${waitMs / 1000}s`);
+      await sleep(waitMs);
+    }
+  }
+  return null;
+}
+
+// A drain during an outage waits for a bus that may never come back.
+const DRAIN_TIMEOUT_MS = 10000;
+async function drainBus(conn, timeoutMs = DRAIN_TIMEOUT_MS) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`NATS drain did not finish within ${timeoutMs}ms (bus unreachable)`)), timeoutMs);
+  });
+  try {
+    await Promise.race([conn.drain(), deadline]);
+    if (!conn.isClosed()) throw new Error('NATS drain did not close the connection');
+  } catch (err) {
+    await conn.close();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // ── Main Loop ─────────────────────────────────────────
 
@@ -2246,7 +2893,7 @@ async function main() {
   log(`  Node ID:     ${NODE_ID}`);
   log(`  NATS:        ${NATS_URL}`);
   log(`  LLM:         ${defaultProvider.name} (${defaultProvider.binary})`);
-  log(`  Model:       ${defaultModel || '(per-task)'}`);
+  log(`  Model:       ${defaultModel || "(per-task, else the CLI's configured default)"}`);
   log(`  Workspace:   ${WORKSPACE}`);
   log(`  Max attempts: ${MAX_ATTEMPTS}`);
   log(`  Poll interval: ${POLL_INTERVAL / 1000}s`);
@@ -2256,19 +2903,20 @@ async function main() {
   log(`  Harness path:       ${HARNESS_PATH}`);
   log(`  Worktree base:      ${WORKTREE_BASE}`);
 
-  const natsOpts = natsConnectOpts();
-  nc = await connect({
-    ...natsOpts,
-    timeout: 5000,
-    reconnect: true,
-    maxReconnectAttempts: 10,
-    reconnectTimeWait: 2000,
-  });
+  nc = await connectToBus();
+  if (!nc) {
+    log('Stopped before the bus came up.');
+    return;
+  }
   setNatsConnection(nc, sc);
   log(`Connected to NATS`);
+  if (DRY_RUN) {
+    await dryRun();
+    await drainBus(nc);
+    return;
+  }
   let draining = false;
 
-  // Exit on permanent NATS disconnect so launchd restarts us
   (async () => {
     for await (const s of nc.status()) {
       log(`NATS status: ${s.type}`);
@@ -2277,9 +2925,11 @@ async function main() {
       }
     }
   })();
+  // Reconnects are unbounded, so only a fatal error (an auth failure the server
+  // keeps repeating) closes the connection: the agent cannot work without it.
   nc.closed().then(err => {
     if (draining && !err) return;
-    log('NATS connection permanently closed — exiting for launchd restart');
+    log(`NATS connection closed${err ? `: ${err.message}` : ''} — exiting`);
     process.exit(1);
   });
 
@@ -2325,7 +2975,10 @@ async function main() {
     }
   })();
   log(`  Listening: mesh.agent.${NODE_ID}.approved / .rejected`);
+  const stopSubs = listenForStops();
+  log(`  Listening: mesh.agent.${NODE_ID}.${STOP_NOTICES.join(' / .')}`);
   await reconcileKeptBranches();
+  await pruneForemanTimelines().catch((err) => warn(`FOREMAN: timeline pruning failed: ${err.message}`));
 
   // Subscribe to collab recruit broadcasts — allows this node to join
   // collab sessions without being the claiming node
@@ -2333,112 +2986,28 @@ async function main() {
   (async () => {
     for await (const msg of recruitSub) {
       try {
-        const recruit = JSON.parse(sc.decode(msg.data));
-        if (currentTaskId) continue; // busy
-
-        // Fetch task to check preferences and get collab spec
-        const task = await natsRequest('mesh.tasks.get', { task_id: recruit.task_id }, 5000);
-        if (!task || !task.collaboration) continue;
-        if (task.owner === NODE_ID) continue; // we claimed it, already handling
-
-        // Check preferred_nodes
-        if (task.preferred_nodes && task.preferred_nodes.length > 0) {
-          if (!task.preferred_nodes.includes(NODE_ID)) continue;
-        }
-        // Check exclude_nodes
-        if (task.exclude_nodes && task.exclude_nodes.length > 0) {
-          if (task.exclude_nodes.includes(NODE_ID)) continue;
-        }
-
-        log(`RECRUIT: Joining collab session ${recruit.session_id} for task ${recruit.task_id}`);
-        currentTaskId = task.task_id;
-        await executeCollabTask(task);
-        currentTaskId = null;
+        await onRecruit(JSON.parse(sc.decode(msg.data)));
       } catch (err) {
         log(`RECRUIT ERROR: ${err.message}`);
-        currentTaskId = null;
       }
     }
   })();
   log(`  Listening: mesh.collab.*.recruit (collab recruiting)`);
 
-  // Also poll for recruiting sessions on idle — catches recruits we missed
-  async function checkRecruitingSessions() {
-    if (currentTaskId) return; // busy
-    try {
-      const sessions = await natsRequest('mesh.collab.recruiting', {}, 5000);
-      if (!sessions || !Array.isArray(sessions) || sessions.length === 0) return;
-
-      for (const s of sessions) {
-        if (currentTaskId) break; // became busy
-        // Skip if we already joined this session
-        if (s.node_ids && s.node_ids.includes(NODE_ID)) continue;
-        // Skip if session is full
-        if (s.max_nodes && s.current_nodes >= s.max_nodes) continue;
-
-        // Fetch task to check preferences
-        const task = await natsRequest('mesh.tasks.get', { task_id: s.task_id }, 5000);
-        if (!task || !task.collaboration) continue;
-        if (task.preferred_nodes && task.preferred_nodes.length > 0) {
-          if (!task.preferred_nodes.includes(NODE_ID)) continue;
-        }
-        if (task.exclude_nodes && task.exclude_nodes.length > 0) {
-          if (task.exclude_nodes.includes(NODE_ID)) continue;
-        }
-
-        log(`RECRUIT POLL: Joining collab session ${s.session_id} for task ${s.task_id}`);
-        currentTaskId = task.task_id;
-        await executeCollabTask(task);
-        currentTaskId = null;
-      }
-    } catch (err) { warn(`recruiting poll: ${err.message}`); }
-  }
-
-  let claimedTask = null;
-  let claimedAt = 0;
   while (running) {
-    try {
-      // Check for recruiting collab sessions before trying to claim
-      await checkRecruitingSessions();
-      if (currentTaskId) {
-        await new Promise(r => setTimeout(r, POLL_INTERVAL));
-        continue;
-      }
-
-      // Claim next available task (longer timeout — KV operations on remote NATS can be slow)
-      const task = await natsRequest('mesh.tasks.claim', { node_id: NODE_ID }, 60000);
-
-      if (!task) {
-        if (ONCE) {
-          log('No tasks available. Exiting (--once mode).');
-          break;
-        }
-        // Wait and retry
-        await new Promise(r => setTimeout(r, POLL_INTERVAL));
-        continue;
-      }
-
-      log(`CLAIMED: ${task.task_id} "${task.title}"`);
-      claimedTask = task;
-      claimedAt = Date.now();
-
-      // Execute the task (collab or solo)
-      currentTaskId = task.task_id;
-      if (task.collaboration) {
-        await executeCollabTask(task);
-      } else {
-        await executeTask(task);
-      }
-      currentTaskId = null;
-      claimedTask = null;
-
-    } catch (err) {
-      await onWorkerError(claimedTask, claimedAt, err);
-      claimedTask = null;
-      currentTaskId = null;
-      // Don't crash the loop — wait and retry
+    // Check for recruiting collab sessions before trying to claim
+    await checkRecruitingSessions();
+    const outcome = await claimAndRun();
+    if (outcome === 'busy') {
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      continue;
     }
+    if (outcome === 'none' && ONCE) {
+      log('No tasks available. Exiting (--once mode).');
+      break;
+    }
+    // Nothing claimed, or the task errored — wait before retrying.
+    if (outcome !== 'ran') await new Promise(r => setTimeout(r, POLL_INTERVAL));
 
     if (ONCE) break;
   }
@@ -2446,10 +3015,11 @@ async function main() {
   aliveSub.unsubscribe();
   approvedSub.unsubscribe();
   rejectedSub.unsubscribe();
+  for (const sub of stopSubs) sub.unsubscribe();
+  recruitSub.unsubscribe();
   draining = true;
   log('Draining NATS...');
-  await nc.drain();
-  if (!nc.isClosed()) throw new Error('NATS drain did not close the connection');
+  await drainBus(nc);
   log('Agent worker stopped.');
 }
 
@@ -2467,14 +3037,25 @@ if (require.main === module) {
 
 // Test surface (no NATS): the prompt builders + harness injectors, and the Foreman
 // completion gate + supervision wrapper (they spawn the task's provider, nothing else).
-module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, readNodeMemory, recordHyperagentTask, deriveExecutionClass, foremanVerify, superviseTask };
-// Review-gate and worker-error surfaces (test/mesh-agent-review-gate.test.js,
-// test/mesh-agent-terminal-task.test.js): the real merge/review handlers and the
-// real daemon client and error path, against a real git workspace, with only the
-// NATS connection injected.
+module.exports = { buildCirclingPrompt, buildCollabPrompt, buildInitialPrompt, buildRetryPrompt, injectRules, injectRole, injectMemory, injectHyperagentStrategy, recallForTask, prepareMemoryRecall, readNodeMemory, recordHyperagentTask, deriveExecutionClass, foremanVerify, superviseTask };
+// Review-gate, worker-error and collab-round surfaces (test/mesh-agent-review-gate.test.js,
+// test/mesh-agent-terminal-task.test.js, test/mesh-agent-collab-rounds.test.js): the real
+// merge/review handlers, the real daemon client and error path, and the real collab round
+// loop, against a real git workspace, with only the NATS connection injected.
 module.exports.__test = {
   setContext(ctx) { if (ctx.nc !== undefined) nc = ctx.nc; },
   mergeIfApproved, onReviewApproved, onReviewRejected, reconcileKeptBranches,
-  natsRequest, createWorktree, onWorkerError,
+  natsRequest, createWorktree, onWorkerError, executeCollabTask, executeTask,
+  onRecruit, checkRecruitingSessions,
+  claimAndRun,
+  runLLM,
+  runAttempts,
+  onStopNotice, listenForStops,
+  evaluateMetric,
+  parseReflection,
+  agentConnectOptions, connectToBus, drainBus,
+  dryRun,
+  taskStartError,
+  pruneForemanTimelines,
 };
 // deploy-v7f0130b

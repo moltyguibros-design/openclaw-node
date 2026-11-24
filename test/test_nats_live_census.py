@@ -225,6 +225,16 @@ class LiveCensusTest(unittest.TestCase):
             with self.assertRaisesRegex(Refused, 'identity differs'):
                 census.installed_config_census(home, os.getuid(), b'key', units)
 
+    def test_config_rendered_from_current_template_is_out_of_scope(self):
+        template = Path(__file__).resolve().parents[1] / 'services' / 'nats' / 'nats-single.conf'
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / 'nats.conf'
+            config.write_text(template.read_text().replace('${OPENCLAW_NODE_ID}', 'node')
+                              .replace('${HOME}', temporary))
+            config.chmod(0o600)
+            with self.assertRaisesRegex(Refused, 'include closure'):
+                census.config_identity(config, os.getuid(), b'k' * 32)
+
     def test_loaded_job_must_use_the_installed_config_plist(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)

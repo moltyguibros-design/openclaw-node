@@ -10,7 +10,7 @@ Each node machine needs:
 
 | Dependency | Version | Install |
 |-----------|---------|---------|
-| Node.js | ≥18.0 | [nodejs.org](https://nodejs.org) or `nvm install 18` |
+| Node.js | ≥22.12 | [nodejs.org](https://nodejs.org) or `nvm install 22` |
 | nats-server | ≥2.6.0 (JetStream) | macOS: `brew install nats-server` · Linux: [nats.io/download](https://nats.io/download/) |
 | nats CLI (optional) | any | `brew install nats-io/nats-tools/nats` or [github.com/nats-io/natscli](https://github.com/nats-io/natscli) |
 | Ollama (optional) | ≥0.24 | [ollama.com](https://ollama.com) — needed for LLM extraction + concept summaries |
@@ -18,7 +18,7 @@ Each node machine needs:
 Verify:
 
 ```bash
-node --version       # ≥ v18.0.0
+node --version       # ≥ v22.12.0
 nats-server --version # ≥ v2.6.0
 ```
 
@@ -109,13 +109,14 @@ This creates:
 
 ```
 ~/.openclaw-alpha/
-  config/node.json       # { id, port, nats_url, created_at }
-  workspace/             # MEMORY.md, .companion-state.md, etc.
+  config/node.json       # { id, port, nats_url, created_at, openclaw_home }
+  workspace/             # agent workspace (memory/, .knowledge.db)
   workspace/memory/      # daily memory files
   obsidian-local/        # concepts/, decisions/, sessions/, themes/, daily/
   artifacts/             # content-addressed artifact store
   logs/
-  state/                 # state.db (SQLite)
+  state/                 # (empty)
+  state.db               # SQLite (session, extraction, HyperAgent tables)
 ```
 
 ### 1.3 Generate identity keypairs
@@ -155,10 +156,13 @@ The memory daemon creates the `OPENCLAW_SHARED` JetStream stream (R=3) on startu
 # Run ensureSharedStream against the cluster
 node -e "
 import { connect } from 'nats';
+import natsResolve from './lib/nats-resolve.js';
 import { ensureSharedStream, inspectSharedStream, verifySharedStreamConfig }
   from './lib/shared-event-stream.mjs';
 
-const nc = await connect({ servers: 'nats://localhost:4222' });
+// URL and credentials as the daemons resolve them (OPENCLAW_NATS*, then
+// ~/.openclaw/openclaw.env): a bare connect is refused by the authenticated bus.
+const nc = await connect(natsResolve.natsConnectOpts());
 const info = await ensureSharedStream(nc);
 console.log('Stream created/verified:', info.config.name);
 
@@ -180,33 +184,64 @@ If `R=3 valid: false`, ensure all 3 NATS nodes are clustered before creating the
 
 ### 1.5 Start the daemons
 
-Start each node's memory daemon with the appropriate environment:
+Start each node's memory daemon with the appropriate environment. `OPENCLAW_HOME` is the
+node root (`bin/spawn-node.mjs` prints this line, and the consolidation line below, for each
+node): the daemon keeps its
+`config/daemon.json`, `state.db`, `workspace/` (with `.knowledge.db` and the LLM-queue
+snapshot `.tmp/ollama-queue-state.json`), `graph-cache.db` and `watcher.jsonl` there, reads
+`OLLAMA_NUM_PARALLEL` from the root's `openclaw.env`, and its flushes write vault notes into
+the root's `obsidian-local/` (unless `OBSIDIAN_VAULT_PATH` is set), so the three daemons share
+nothing but the bus. Each needs its own
+`MEMORY_INJECT_PORT`, since they all bind 127.0.0.1. The bus token still comes from
+`OPENCLAW_NATS_TOKEN` or `~/.openclaw/openclaw.env`. Federation is opt-in: without
+`OPENCLAW_FEDERATION=1` the daemon never starts the broadcaster, offerer or acceptor, so the
+round-trip below never happens.
 
 ```bash
 # Node alpha
+OPENCLAW_FEDERATION=1 \
 OPENCLAW_NODE_ID=alpha \
 OPENCLAW_HOME=$HOME/.openclaw-alpha \
-NATS_URL=nats://localhost:4222 \
+OPENCLAW_NATS=nats://localhost:4222 \
+MEMORY_INJECT_PORT=7900 \
 node workspace-bin/memory-daemon.mjs &
 
 # Node bravo
+OPENCLAW_FEDERATION=1 \
 OPENCLAW_NODE_ID=bravo \
 OPENCLAW_HOME=$HOME/.openclaw-bravo \
-NATS_URL=nats://localhost:4223 \
+OPENCLAW_NATS=nats://localhost:4223 \
+MEMORY_INJECT_PORT=7901 \
 node workspace-bin/memory-daemon.mjs &
 
 # Node charlie
+OPENCLAW_FEDERATION=1 \
 OPENCLAW_NODE_ID=charlie \
 OPENCLAW_HOME=$HOME/.openclaw-charlie \
-NATS_URL=nats://localhost:4224 \
+OPENCLAW_NATS=nats://localhost:4224 \
+MEMORY_INJECT_PORT=7902 \
 node workspace-bin/memory-daemon.mjs &
+```
+
+The daemon runs no consolidation cycle (decay, session notes, digests, promotion
+candidates), and the installed consolidation timer has no `OPENCLAW_HOME`, so it cycles only
+`~/.openclaw/state.db`. Each node runs its own scheduler on its root:
+
+```bash
+OPENCLAW_HOME=$HOME/.openclaw-alpha OPENCLAW_NODE_ID=alpha OPENCLAW_NATS=nats://localhost:4222 \
+node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=$HOME/.openclaw-bravo OPENCLAW_NODE_ID=bravo OPENCLAW_NATS=nats://localhost:4223 \
+node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=$HOME/.openclaw-charlie OPENCLAW_NODE_ID=charlie OPENCLAW_NATS=nats://localhost:4224 \
+node bin/consolidation-scheduler.mjs --daemon &
 ```
 
 The daemon will:
 1. Connect to NATS with auto-reconnect (infinite retries, 2s wait, 1s jitter)
 2. Ensure `OPENCLAW_SHARED` stream exists with R=3
-3. Refuse to start if the shared stream exists with wrong config
+3. With `OPENCLAW_FEDERATION=1`, refuse to start if the shared stream exists with wrong config (without it, log a WARNING and continue)
 4. Log reconnect/disconnect/error events to stdout
+5. With `OPENCLAW_FEDERATION=1`, start the broadcaster, offerer and acceptor
 
 ### 1.6 End-to-end round-trip test
 
@@ -222,9 +257,9 @@ Or manually trigger a broadcast and observe:
 ```bash
 # Publish a test broadcast from alpha
 node -e "
-import { connect } from 'nats';
-import { StringCodec } from 'nats';
-const nc = await connect({ servers: 'nats://localhost:4222' });
+import { connect, StringCodec } from 'nats';
+import natsResolve from './lib/nats-resolve.js';
+const nc = await connect(natsResolve.natsConnectOpts());
 const sc = StringCodec();
 const js = nc.jetstream();
 const broadcast = {
@@ -259,13 +294,13 @@ On each machine:
 
 ```bash
 # Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs   # Debian/Ubuntu
-# or: brew install node           # macOS
+# or: brew install node@22       # macOS
 
 # Install nats-server
 # Linux:
-curl -L https://github.com/nats-io/nats-server/releases/latest/download/nats-server-v2.10.24-linux-amd64.tar.gz | \
+curl -L https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-amd64.tar.gz | \
   sudo tar -xz -C /usr/local/bin --strip-components=1 --wildcards '*/nats-server'
 # macOS:
 brew install nats-server
@@ -279,8 +314,9 @@ npm install
 ### 2.2 NATS cluster config
 
 **Automated (recommended).** On each machine, point the installer at the OTHER machines'
-addresses — it renders that machine's `~/.openclaw/config/nats.conf` (binds `0.0.0.0`, routes
-to the peers) and records the R=3 replica target (`OPENCLAW_KV_REPLICAS`) in `openclaw.env`:
+addresses — it renders that machine's `~/.openclaw/config/nats.conf` (binds its own
+`--cluster-bind` address, credentialed routes to the peers) and records the R=3 replica target
+(`OPENCLAW_KV_REPLICAS`) in `openclaw.env`:
 
 ```bash
 # Machine A (100.64.0.1) — peers are B and C:
@@ -293,6 +329,11 @@ bash install.sh --cluster-peers=100.64.0.1,100.64.0.2 --cluster-bind=100.64.0.3
 #  REFUSES to bind 0.0.0.0.)
 ```
 
+The peers and bind address are saved in `openclaw.env` (`OPENCLAW_NATS_CLUSTER_PEERS`,
+`OPENCLAW_NATS_CLUSTER_BIND`), so a later `install.sh --update` re-renders the cluster
+`nats.conf` without the flags. An existing `nats.conf` that differs from that render is kept, and
+the render goes beside it as `nats.conf.new`.
+
 **Security (D2/D4):** each server binds its OWN tailnet address only; the monitor stays on
 loopback; the cluster port is authenticated (user `openclaw-route` + `OPENCLAW_NATS_CLUSTER_PASS`).
 **Copy BOTH shared secrets to every machine's `~/.openclaw/openclaw.env` before starting:**
@@ -302,37 +343,47 @@ wrong route password is rejected with an authentication failure (verified).
 This replaces the single-node `nats.conf` with the cross-machine cluster config from
 `services/nats/nats-cluster-node.conf`. **Order of operations matters:** start `nats-server` on
 ALL machines first (so the cluster forms and can hold 3 replicas), THEN start the daemons — a
-stream can't be created at R=3 until ≥3 cluster members are up.
+stream can't be created at R=3 until ≥3 cluster members are up. Every mesh KV bucket (tasks,
+collab, plans, deploy results, nodes, health, tools) is created at `OPENCLAW_KV_REPLICAS`
+(`lib/mesh-kv.js`). A daemon that starts first waits up to 10 minutes for the cluster to place
+the replicas, then exits for its service manager to restart it; it never falls back to R=1. A
+CLI fails at once. The count applies only when a bucket is created: a bucket that already exists
+at R=1 stays R=1 until it is scaled, e.g. `nats stream edit KV_MESH_TASKS --replicas 3`.
 
-**Manual (what the automated path produces).** Each machine's config, routes → peer IPs:
-
-**Machine A** (e.g., `10.0.1.10`):
+**Manual (what the automated path produces).** `install.sh` fills in
+`services/nats/nats-cluster-node.conf`; the `nats-auth.conf` it includes is written beside it by
+`node bin/nats-auth-render.mjs`. Machine A (`10.0.1.10`):
 ```
-# /etc/openclaw/nats.conf
-server_name: openclaw-nats-1
-listen: 0.0.0.0:4222
-http_port: 8222
+server_name: openclaw-nats-<node id>
+listen: 10.0.1.10:4222
+http: 127.0.0.1:8222
+include "nats-auth.conf"
 
 jetstream {
-  store_dir: /var/lib/openclaw/nats/jetstream
+  store_dir: <home>/.openclaw/nats/jetstream
   max_mem: 256MB
-  max_file: 1GB
+  max_file: 2GB
 }
 
 cluster {
   name: openclaw-cluster
-  listen: 0.0.0.0:6222
+  listen: 10.0.1.10:6222
+  authorization {
+    user: "openclaw-route"
+    password: "<OPENCLAW_NATS_CLUSTER_PASS>"
+  }
   routes = [
-    nats-route://10.0.1.11:6222
-    nats-route://10.0.1.12:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.11:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.12:6222
   ]
 }
 ```
 
-**Machine B** (`10.0.1.11`): same, but routes point to A and C.
-**Machine C** (`10.0.1.12`): same, but routes point to A and B.
+**Machine B** (`10.0.1.11`) and **Machine C** (`10.0.1.12`): same, with their own address in both
+`listen` lines and routes to the other two.
 
-All machines use port 4222 (client), 6222 (cluster), 8222 (monitor) since they are on separate hosts.
+Clients use 4222 and routes use 6222 on each machine's own address; the 8222 monitor answers on
+loopback only.
 
 ### 2.3 Firewall rules
 
@@ -342,11 +393,10 @@ Open between all three machines:
 |------|----------|---------|
 | 4222 | TCP | NATS client connections |
 | 6222 | TCP | NATS cluster gossip + replication |
-| 8222 | TCP | HTTP monitoring (restrict to admin network) |
 
 ```bash
 # UFW (Ubuntu/Debian)
-sudo ufw allow from 10.0.1.0/24 to any port 4222,6222,8222 proto tcp
+sudo ufw allow from 10.0.1.0/24 to any port 4222,6222 proto tcp
 
 # firewalld (RHEL/CentOS)
 sudo firewall-cmd --permanent --add-rich-rule='
@@ -355,9 +405,6 @@ sudo firewall-cmd --permanent --add-rich-rule='
 sudo firewall-cmd --permanent --add-rich-rule='
   rule family="ipv4" source address="10.0.1.0/24"
   port port="6222" protocol="tcp" accept'
-sudo firewall-cmd --permanent --add-rich-rule='
-  rule family="ipv4" source address="10.0.1.0/24"
-  port port="8222" protocol="tcp" accept'
 sudo firewall-cmd --reload
 ```
 
@@ -427,17 +474,20 @@ node bin/spawn-node.mjs --id charlie --nats-url nats://localhost:4222
 
 Note: each machine connects to its local NATS instance (`localhost:4222`). NATS cluster routing handles cross-machine communication.
 
-Generate the identity keypair:
+Generate the identity keypair. The daemon signs with `~/.openclaw/identity.key` of the user
+the unit runs as (not `OPENCLAW_HOME`), so run this as that user:
 
 ```bash
 node -e "
 import { getOrCreateIdentity } from './lib/node-identity.mjs';
-const id = getOrCreateIdentity('$HOME/.openclaw-\$(hostname)');
-console.log('Public key:', id.publicKeyBase64);
+console.log('Public key:', getOrCreateIdentity().publicKeyBase64);
 "
 ```
 
 ### 2.7 Start the daemon (systemd)
+
+Machine A shown; on machines B and C use `bravo` / `charlie` (the `--id` you spawned).
+Replace `<operator>` with the account that cloned the repo and spawned the tree.
 
 ```ini
 # /etc/systemd/system/openclaw-daemon.service
@@ -448,10 +498,34 @@ Requires=openclaw-nats.service
 
 [Service]
 Type=simple
-Environment=OPENCLAW_NODE_ID=%H
-Environment=OPENCLAW_HOME=%h/.openclaw-%H
-Environment=NATS_URL=nats://localhost:4222
-ExecStart=/usr/bin/node /home/user/openclaw-nodedev/workspace-bin/memory-daemon.mjs
+User=<operator>
+Environment=OPENCLAW_FEDERATION=1
+Environment=OPENCLAW_NODE_ID=alpha
+Environment=OPENCLAW_HOME=/home/<operator>/.openclaw-alpha
+Environment=OPENCLAW_NATS=nats://localhost:4222
+ExecStart=/usr/bin/node /home/<operator>/openclaw-nodedev/workspace-bin/memory-daemon.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The node's consolidation cycles run beside it, on the same root:
+
+```ini
+# /etc/systemd/system/openclaw-consolidation.service
+[Unit]
+Description=OpenClaw Consolidation Scheduler
+After=openclaw-daemon.service
+
+[Service]
+Type=simple
+User=<operator>
+Environment=OPENCLAW_NODE_ID=alpha
+Environment=OPENCLAW_HOME=/home/<operator>/.openclaw-alpha
+Environment=OPENCLAW_NATS=nats://localhost:4222
+ExecStart=/usr/bin/node /home/<operator>/openclaw-nodedev/bin/consolidation-scheduler.mjs --daemon
 Restart=always
 RestartSec=10
 
@@ -461,8 +535,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable openclaw-daemon
-sudo systemctl start openclaw-daemon
+sudo systemctl enable openclaw-daemon openclaw-consolidation
+sudo systemctl start openclaw-daemon openclaw-consolidation
 ```
 
 ---
@@ -473,13 +547,11 @@ sudo systemctl start openclaw-daemon
 
 ```bash
 # All three NATS nodes see each other
-for host in 10.0.1.10 10.0.1.11 10.0.1.12; do
-  echo "--- $host ---"
-  curl -s http://$host:8222/routez | python3 -c "
+# the monitor is loopback-only: run this on each machine
+curl -s http://127.0.0.1:8222/routez | python3 -c "
 import sys, json; d = json.load(sys.stdin)
 print(f'  Routes: {len(d.get(\"routes\", []))} (expect 2)')
 "
-done
 ```
 
 ### 3.2 Shared stream R=3
@@ -537,15 +609,23 @@ All three require `nats-server` on PATH. Tests auto-skip if not available.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCLAW_NODE_ID` | `os.hostname()` | Node identifier for event attribution |
-| `OPENCLAW_HOME` | `~/.openclaw` | Root directory for node state |
+| `OPENCLAW_HOME` | `~/.openclaw` | Node root: the memory daemon's config, `state.db`, `workspace/` (unless `OPENCLAW_WORKSPACE` is set), `graph-cache.db`, `watcher.jsonl`, the LLM-queue snapshot, the `OLLAMA_NUM_PARALLEL` env file and the flush's `obsidian-local/` vault |
+| `MEMORY_INJECT_PORT` | `7893` | Loopback port of the memory daemon's inject endpoint (one per daemon on a machine) |
 
 ### NATS connection
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `OPENCLAW_NATS` | `~/.openclaw/openclaw.env`, else `nats://127.0.0.1:4222` | NATS server URL (`lib/nats-resolve.js`) |
+| `OPENCLAW_NATS_TOKEN` | `~/.openclaw/openclaw.env` | Bus credential |
 
 The daemon uses auto-reconnect with infinite retries, 2-second base wait, and 1-second jitter (`NATS_RECONNECT_OPTS` from `lib/federation-resilience.mjs`).
+
+### Federation
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCLAW_FEDERATION` | unset (off) | `1` starts the broadcaster/offerer/acceptor and makes a shared-stream config mismatch fatal |
 
 ### Federation resilience
 
@@ -568,7 +648,7 @@ Dead peers are tracked by the offerer and acceptor. A dead peer's offers are fil
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INJECTION_TOKEN_BUDGET` | `750` | Max tokens for ambient memory injection |
+| `INJECTION_TOKEN_BUDGET` | `1500` | Safety ceiling (tokens) for the injected related-sessions list; per-category recall caps are the primary limit |
 | `ANALYSIS_MODE` | (auto) | `embedding` or `llm` for query analysis |
 | `EXTRACTION_IDLE_THRESHOLD_SEC` | `2700` | Seconds of idle before auto-extraction |
 
@@ -633,7 +713,7 @@ sudo systemctl stop nats-server
 
 ### Daemon won't start (shared stream config mismatch)
 
-The daemon refuses to start if `OPENCLAW_SHARED` exists with wrong config (e.g., R=1 instead of R=3). Fix:
+With `OPENCLAW_FEDERATION=1` the daemon refuses to start if `OPENCLAW_SHARED` exists with wrong config (e.g., R=1 instead of R=3); without it, it logs a WARNING and continues. Fix:
 
 ```bash
 # Delete the stream and let the daemon recreate it
@@ -655,7 +735,7 @@ nats stream rm OPENCLAW_SHARED --server nats://localhost:4222 --force
 
 1. Stop all daemons except one
 2. Stop the NATS cluster
-3. Start the remaining daemon with `NATS_URL` unset or pointing to a single NATS instance
+3. Start the remaining daemon with `OPENCLAW_NATS` unset or pointing to a single NATS instance
 4. The daemon gracefully continues without federation — shared stream unavailable, local operation works fully
 
 ### Clean up spawned node trees
@@ -679,5 +759,5 @@ rm -rf ~/.openclaw/nats/jetstream-{1,2,3}
 2. **Shared stream** — first daemon to start creates `OPENCLAW_SHARED` (R=3)
 3. **Node trees** — `spawn-node.mjs` for each node (idempotent)
 4. **Identity keys** — generated on first use (idempotent)
-5. **Daemons** — start each node's `memory-daemon.mjs` with correct env vars
+5. **Daemons** — start each node's `memory-daemon.mjs` with `OPENCLAW_FEDERATION=1` and the node's env vars, and its `consolidation-scheduler.mjs --daemon` on the same `OPENCLAW_HOME`
 6. **Verify** — run integration tests or manual broadcast round-trip

@@ -16,19 +16,19 @@
  * Run: node --test test/mesh-agent-review-gate.test.js
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
 
 // The agent reads its workspace, lease dir, node id and obs DB at require time.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'review-gate-'));
+const TMP = tmpDir('review-gate-');
 const WORKSPACE = path.join(TMP, 'workspace');
 const LEASE_DIR = path.join(TMP, 'leases');
 Object.assign(process.env, {
   MESH_WORKSPACE: WORKSPACE,
   MESH_LEASE_DIR: LEASE_DIR,
   OPENCLAW_NODE_ID: 'node-self',
-  OPENCLAW_OBS_DB: path.join(TMP, 'obs.db'),
+  OPENCLAW_OBS_DB: ':memory:',
   // git in a sandbox: no user/system config (hooks, signing), fixed identity.
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_NOSYSTEM: '1',
@@ -175,5 +175,44 @@ describe('startup reconcile reports under the kept lease', () => {
     assert.equal(onMain(sha), true);
     const report = sent.find((m) => m.subject === 'mesh.tasks.merged');
     assert.equal(report.payload.lease_token, 'lease-from-claim');
+  });
+});
+
+describe('startup reconcile keeps post-mortem branches (mesh-core #17)', () => {
+  for (const [label, task] of [
+    ['released after exhausting attempts', { status: 'released', owner: 'node-self' }],
+    ['failed on budget or stall', { status: 'failed', owner: 'node-self' }],
+  ]) {
+    it(`the partial-work branch of a task ${label} survives a restart`, async () => {
+      await keptForReview();
+      daemonReports(task);
+      await agent.__test.reconcileKeptBranches();
+      assert.equal(branchExists('mesh/T-1'), true);
+    });
+  }
+
+  for (const [label, task] of [
+    ['cancelled', { status: 'cancelled', owner: 'node-self' }],
+    ['failed at the review-rejection cap', { status: 'failed', owner: 'node-self', rejection_count: 3 }],
+  ]) {
+    it(`the branch of a task ${label} is dropped`, async () => {
+      await keptForReview();
+      daemonReports(task);
+      await agent.__test.reconcileKeptBranches();
+      assert.equal(branchExists('mesh/T-1'), false);
+    });
+  }
+
+  it('a post-mortem branch older than the age cap is dropped', async () => {
+    await keptForReview();
+    git('checkout', '-q', 'mesh/T-1');
+    fs.writeFileSync(path.join(WORKSPACE, 'work.txt'), 'partial\n');
+    execFileSync('git', ['commit', '-q', '-am', 'partial: released'], {
+      cwd: WORKSPACE, stdio: 'pipe', env: { ...process.env, GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z' },
+    });
+    git('checkout', '-q', 'main');
+    daemonReports({ status: 'released', owner: 'node-self' });
+    await agent.__test.reconcileKeptBranches();
+    assert.equal(branchExists('mesh/T-1'), false);
   });
 });

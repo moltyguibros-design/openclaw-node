@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -27,7 +27,7 @@ function fakeChild() {
   return child;
 }
 function timelineFor(name) {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), `foreman-sup-${name}-`)), 'task-42.jsonl');
+  return path.join(tmpDir(`foreman-sup-${name}-`), 'task-42.jsonl');
 }
 function readTimeline(file) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
@@ -150,7 +150,7 @@ describe('foreman supervisor — shadow loop', () => {
   });
 
   it('keeps running without a timeline when the directory cannot be created', async () => {
-    const blocker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-block-')), 'file');
+    const blocker = path.join(tmpDir('foreman-block-'), 'file');
     fs.writeFileSync(blocker, 'not a directory');
     const logs = [];
     const supervisor = createSupervisor({ task, assessor: createSimulatedAssessor([HEALTHY]), config: fastConfig, timelinePath: path.join(blocker, 'task-42.jsonl'), log: (m) => logs.push(m) }).start();
@@ -177,7 +177,7 @@ describe('foreman supervisor — shadow loop', () => {
 });
 
 function tempRepo() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-sup-repo-'));
+  const dir = tmpDir('foreman-sup-repo-');
   execFileSync('git', ['init', '-q', dir]);
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@example.com']);
   execFileSync('git', ['-C', dir, 'config', 'user.name', 'test']);
@@ -260,6 +260,33 @@ describe('foreman supervisor — STOP hysteresis on the tree (D3)', () => {
     assert.match(decisions[0].reason, /unconfirmed \(1\/3/);
     assert.match(decisions[1].reason, /unconfirmed \(2\/3/);
     assert.equal(supervisor.state.workers[0].warning_streak >= 3, true);
+  });
+
+  it('shadow records the stop it would enforce once: no repeated STOP, no ceiling ESCALATE, one intervention', async () => {
+    const dir = tempRepo();
+    fs.writeFileSync(path.join(dir, 'wip.txt'), 'half done\n');
+    const timelinePath = timelineFor('shadow-once');
+    const supervisor = createSupervisor({ task, worktreePath: dir, assessor: createSimulatedAssessor([STUCK]), config: { ...fastConfig, enforce: false }, timelinePath }).start();
+    supervisor.workerStarted({ attempt: 1 }); supervisor.attach(fakeChild());
+    for (let i = 0; i < 30; i += 1) await supervisor.assessNow();
+    await supervisor.close();
+    assert.equal(supervisor.state.actions.STOP_WORKER, 1, JSON.stringify(supervisor.state.actions));
+    assert.equal(supervisor.state.actions.ESCALATE ?? 0, 0, JSON.stringify(supervisor.state.actions));
+    assert.equal(supervisor.state.interventions, 1);
+    const decisions = readTimeline(timelinePath).filter((r) => r.type === 'foreman.intervened');
+    const after = decisions.slice(decisions.findIndex((r) => r.action === ACTIONS.STOP_WORKER) + 1);
+    assert.ok(after.length >= 20);
+    assert.ok(after.every((r) => r.action === ACTIONS.CONTINUE && r.reason === 'worker already stopped in shadow'));
+
+    // A retry is a new worker: it is assessed from scratch.
+    const retry = createSupervisor({ task, worktreePath: dir, assessor: createSimulatedAssessor([STUCK]), config: { ...fastConfig, enforce: false } }).start();
+    retry.workerStarted({ attempt: 1 }); retry.attach(fakeChild());
+    for (let i = 0; i < 3; i += 1) await retry.assessNow();
+    retry.workerExited({ exitCode: 1 });
+    retry.workerStarted({ attempt: 2 }); retry.attach(fakeChild());
+    for (let i = 0; i < 3; i += 1) await retry.assessNow();
+    await retry.close();
+    assert.equal(retry.state.actions.STOP_WORKER, 2, JSON.stringify(retry.state.actions));
   });
 
   it('a tree that cannot be snapshotted never confirms a stop — a null snapshot reads as changed', async () => {
@@ -407,5 +434,18 @@ describe('foreman supervisor — configuration from the environment', () => {
     for (const value of [undefined, '', '0', 'true', 'yes']) {
       assert.equal(foremanConfigFromEnv({ MESH_FOREMAN_ENFORCE: value }).enforce, false, String(value));
     }
+  });
+});
+
+describe('docs/foreman.md matches the worker runner', () => {
+  it('names the function that spawns the detached group and the output format the claude provider passes', async () => {
+    const doc = fs.readFileSync(new URL('../docs/foreman.md', import.meta.url), 'utf8');
+    const { PROVIDERS } = (await import('../lib/llm-providers.js')).default;
+    const args = PROVIDERS.claude.buildArgs('p', 'm', {}, '/tmp');
+    const format = args[args.indexOf('--output-format') + 1];
+    assert.match(fs.readFileSync(new URL('../lib/llm-run.js', import.meta.url), 'utf8'), /function runCli\([^)]*\) \{[\s\S]*?detached: true/);
+    assert.ok(doc.includes('`detached: true` in `runCli`'), 'docs/foreman.md must place the detached spawn in runCli');
+    for (const [hit, named] of doc.matchAll(/--output-format (\w+)/g)) assert.equal(named, format, `docs/foreman.md: "${hit}"`);
+    assert.ok(doc.includes(`\`claude -p --output-format ${format}\``));
   });
 });

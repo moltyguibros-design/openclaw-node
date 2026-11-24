@@ -25,11 +25,11 @@ process.env.OPENCLAW_REQUIRE_SIGNED = '0';
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { execSync, spawn as spawnProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { natsServerBin, freePort, startNatsServer, writeServerConfig } from './helpers/nats-server.mjs';
 
 import {
   createPeerTracker,
@@ -37,6 +37,9 @@ import {
   NATS_RECONNECT_OPTS,
   DEAD_PEER_TIMEOUT_MS,
   OFFER_CLEANUP_INTERVAL_MS,
+  FEDERATION_MAX_DELIVER,
+  FEDERATION_NAK_DELAY_MS,
+  settleFederationMessage,
 } from '../lib/federation-resilience.mjs';
 
 import { spawnNode } from '../bin/spawn-node.mjs';
@@ -48,46 +51,7 @@ import { SHARED_STREAM_NAME, SHARED_SUBJECTS } from '../lib/shared-event-stream.
 
 const _require = createRequire(import.meta.url);
 
-// ─── nats-server availability check ──────────────────────────────────────────
-
-let NATS_SERVER_BIN = null;
-try {
-  NATS_SERVER_BIN = execSync('which nats-server', { encoding: 'utf8' }).trim();
-} catch {
-  // nats-server not on PATH
-}
-const SKIP_INTEGRATION = !NATS_SERVER_BIN;
-
-// ─── NATS helpers (reused from federation-2node test) ────────────────────────
-
-function startNatsServer(opts) {
-  return new Promise((resolve, reject) => {
-    const args = ['-p', String(opts.port), '-a', '127.0.0.1', '-js', '-sd', opts.storeDir];
-    const proc = spawnProcess(NATS_SERVER_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) { resolved = true; proc.kill('SIGTERM'); reject(new Error(`nats-server start timeout. stderr: ${stderr}`)); }
-    }, 15_000);
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-      if (!resolved && stderr.includes('Listening for client connections')) {
-        resolved = true; clearTimeout(timeout); resolve({ proc, port: opts.port });
-      }
-    });
-    proc.on('error', (err) => { if (!resolved) { resolved = true; clearTimeout(timeout); reject(err); } });
-    proc.on('exit', (code) => { if (!resolved) { resolved = true; clearTimeout(timeout); reject(new Error(`nats-server exited ${code}. stderr: ${stderr}`)); } });
-  });
-}
-
-function stopNatsServer(proc) {
-  return new Promise((resolve) => {
-    if (!proc || proc.killed) { resolve(); return; }
-    proc.on('exit', () => resolve());
-    proc.kill('SIGTERM');
-    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* */ } resolve(); }, 3000);
-  });
-}
+const SKIP_INTEGRATION = !natsServerBin();
 
 async function createTestSharedStream(nc) {
   const { StorageType } = _require('nats');
@@ -113,10 +77,12 @@ describe('federation-resilience: createPeerTracker', () => {
     tracker.recordSeen('node-b');
     assert.equal(tracker.isAlive('node-a'), true);
     assert.equal(tracker.isAlive('node-b'), true);
-    assert.deepEqual(tracker.getDeadPeers(), []);
-    const status = tracker.getPeerStatus();
-    assert.equal(status.length, 2);
-    assert.equal(status.every(s => s.alive), true);
+    tracker.stop();
+  });
+
+  it('exposes only the methods the offerer and acceptor use', () => {
+    const tracker = createPeerTracker({ timeoutMs: 5000 });
+    assert.deepEqual(Object.keys(tracker).sort(), ['cleanup', 'isAlive', 'recordSeen', 'stop']);
     tracker.stop();
   });
 
@@ -129,9 +95,6 @@ describe('federation-resilience: createPeerTracker', () => {
     await new Promise(r => setTimeout(r, 80));
 
     assert.equal(tracker.isAlive('node-a'), false);
-    const dead = tracker.getDeadPeers();
-    assert.equal(dead.length, 1);
-    assert.equal(dead[0], 'node-a');
     tracker.stop();
   });
 
@@ -154,46 +117,56 @@ describe('federation-resilience: createPeerTracker', () => {
   it('returns true for never-tracked peers (unknown is not dead)', () => {
     const tracker = createPeerTracker({ timeoutMs: 5000 });
     assert.equal(tracker.isAlive('never-seen'), true);
-    assert.deepEqual(tracker.getDeadPeers(), []);
     tracker.stop();
   });
 });
 
 describe('federation-resilience: cleanupExpiredOffers', () => {
-  it('removes expired offers from array', () => {
+  it('removes expired offers from the pending Map', () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     const future = new Date(Date.now() + 60_000).toISOString();
-    const offers = [
-      { event_id: 'a', data: { expires_at: past } },
-      { event_id: 'b', data: { expires_at: future } },
-      { event_id: 'c', data: { expires_at: past } },
-    ];
+    const offers = new Map([
+      ['a', { event_id: 'a', data: { expires_at: past } }],
+      ['b', { event_id: 'b', data: { expires_at: future } }],
+      ['c', { event_id: 'c', data: { expires_at: past } }],
+    ]);
     const removed = cleanupExpiredOffers(offers);
     assert.equal(removed, 2);
-    assert.equal(offers.length, 1);
-    assert.equal(offers[0].event_id, 'b');
+    assert.equal(offers.size, 1);
+    assert.deepEqual([...offers.keys()], ['b']);
   });
 
   it('keeps all valid offers', () => {
     const future = new Date(Date.now() + 60_000).toISOString();
-    const offers = [
-      { event_id: 'a', data: { expires_at: future } },
-      { event_id: 'b', data: { expires_at: future } },
-    ];
+    const offers = new Map([
+      ['a', { event_id: 'a', data: { expires_at: future } }],
+      ['b', { event_id: 'b', data: { expires_at: future } }],
+    ]);
     const removed = cleanupExpiredOffers(offers);
     assert.equal(removed, 0);
-    assert.equal(offers.length, 2);
+    assert.equal(offers.size, 2);
   });
 
   it('handles offers without expires_at (keeps them)', () => {
-    const offers = [
-      { event_id: 'a', data: {} },
-      { event_id: 'b', data: { expires_at: new Date(Date.now() - 60_000).toISOString() } },
-    ];
+    const offers = new Map([
+      ['a', { event_id: 'a', data: {} }],
+      ['b', { event_id: 'b', data: { expires_at: new Date(Date.now() - 60_000).toISOString() } }],
+    ]);
     const removed = cleanupExpiredOffers(offers);
     assert.equal(removed, 1);
+    assert.deepEqual([...offers.keys()], ['a']);
+  });
+
+  it('does not take an Array of offers', () => {
+    const offers = [{ event_id: 'a', data: { expires_at: new Date(Date.now() - 60_000).toISOString() } }];
+    assert.equal(cleanupExpiredOffers(offers), 0);
     assert.equal(offers.length, 1);
-    assert.equal(offers[0].event_id, 'a');
+  });
+
+  it('the acceptor cleans up on the shared OFFER_CLEANUP_INTERVAL_MS', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile(new URL('../lib/broadcast-acceptor.mjs', import.meta.url), 'utf8');
+    assert.match(src, /opts\.cleanupIntervalMs \?\? OFFER_CLEANUP_INTERVAL_MS/);
   });
 });
 
@@ -213,15 +186,51 @@ describe('federation-resilience: NATS_RECONNECT_OPTS', () => {
   });
 });
 
+describe('federation-resilience: settleFederationMessage', () => {
+  const message = (info) => {
+    const msg = { info, settled: null, ack() { msg.settled = ['ack']; }, nak(ms) { msg.settled = ['nak', ms]; } };
+    return msg;
+  };
+
+  it('acks a processed message', () => {
+    const msg = message({ deliveryCount: 1 });
+    assert.equal(settleFederationMessage(msg, { failed: false }), 'ack');
+    assert.deepEqual(msg.settled, ['ack']);
+  });
+
+  it('forgets a failed event in the replay cache, so its redelivery verifies again', async () => {
+    const { createSeenEventCache, verifyEvent } = await import('../lib/node-identity.mjs');
+    const seenIds = createSeenEventCache();
+    const { privateKey } = crypto.generateKeyPairSync('ed25519');
+    const event = signEvent({ event_id: 'evt-1', node_id: 'peer', timestamp: new Date().toISOString() }, privateKey);
+    assert.equal(verifyEvent(event, { seenIds, requireSigned: false }).ok, true);
+    assert.equal(verifyEvent(event, { seenIds, requireSigned: false }).reason, 'replay');
+
+    const msg = message({ deliveryCount: 2 });
+    assert.equal(settleFederationMessage(msg, { failed: true, eventId: 'evt-1', seenIds }), 'nak');
+    assert.deepEqual(msg.settled, ['nak', 2 * FEDERATION_NAK_DELAY_MS], 'the delay grows per attempt');
+    assert.equal(verifyEvent(event, { seenIds, requireSigned: false }).ok, true, 'the redelivery is not a replay');
+  });
+
+  it('drops (acks) a message at the delivery cap and keeps it in the replay cache', async () => {
+    const { createSeenEventCache } = await import('../lib/node-identity.mjs');
+    const seenIds = createSeenEventCache();
+    seenIds.add('evt-2');
+    const msg = message({ deliveryCount: FEDERATION_MAX_DELIVER });
+    assert.equal(settleFederationMessage(msg, { failed: true, eventId: 'evt-2', seenIds }), 'dropped');
+    assert.deepEqual(msg.settled, ['ack']);
+    assert.equal(seenIds.has('evt-2'), true);
+  });
+});
+
 // ─── Integration Tests (require nats-server) ────────────────────────────────
 
 describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEGRATION ? 'nats-server not found on PATH' : false }, () => {
-  const BASE_PORT = 15_222 + Math.floor(Math.random() * 1000);
   const NODE_A = 'resilience-alpha';
   const NODE_B = 'resilience-beta';
 
   let tmpDir;
-  let natsProc;
+  let nats;
   let ncA, ncB;
   let identityA, identityB;
 
@@ -230,13 +239,13 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
 
     // Start a single NATS server
     const storeDir = join(tmpDir, 'nats-store');
-    const result = await startNatsServer({ port: BASE_PORT, storeDir });
-    natsProc = result.proc;
+    const port = await freePort();
+    nats = await startNatsServer(writeServerConfig(storeDir, port, { auth: false }), { timeoutMs: 15_000 });
 
     // Connect two clients
     const { connect: natsConnect } = _require('nats');
-    ncA = await natsConnect({ servers: `nats://127.0.0.1:${BASE_PORT}`, name: NODE_A });
-    ncB = await natsConnect({ servers: `nats://127.0.0.1:${BASE_PORT}`, name: NODE_B });
+    ncA = await natsConnect({ servers: `nats://127.0.0.1:${port}`, name: NODE_A });
+    ncB = await natsConnect({ servers: `nats://127.0.0.1:${port}`, name: NODE_B });
 
     // Create shared stream
     await createTestSharedStream(ncA);
@@ -254,7 +263,7 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
   after(async () => {
     try { await ncA?.drain(); } catch { /* */ }
     try { await ncB?.drain(); } catch { /* */ }
-    await stopNatsServer(natsProc);
+    await nats?.stop();
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -397,6 +406,8 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
       cleanupIntervalMs: 50, // fast cleanup for test
       log: (m) => logs.push(m),
     });
+    await acceptor.start();
+    assert.ok(logs.some(l => /started/.test(l)), `acceptor did not start: ${logs.join(' | ')}`);
 
     // Queue an offer that expires very soon
     const offer = {
@@ -426,39 +437,28 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
       },
     };
 
-    await acceptor._processOffer(offer);
-    assert.equal(acceptor.getPendingOffers().length, 1);
+    try {
+      await acceptor._processOffer(offer);
+      assert.equal(acceptor.getPendingOffers().length, 1);
 
-    // Start the acceptor to activate the cleanup timer
-    // We need to start but the subscription will fail since we're not fully set up —
-    // just test the processOffer + cleanup directly
-    // Wait for expiry + cleanup interval
-    await new Promise(r => setTimeout(r, 200));
-
-    // Manually verify the cleanup would work
-    const { cleanupExpiredOffers: cleanup } = await import('../lib/federation-resilience.mjs');
-    const pending = acceptor.getPendingOffers(); // returns a copy
-    // The original internal array may have been cleaned by the timer if start() was called
-    // Test the cleanup function directly on a copy
-    const testOffers = [
-      { event_id: 'exp1', data: { expires_at: new Date(Date.now() - 1000).toISOString() } },
-      { event_id: 'valid1', data: { expires_at: new Date(Date.now() + 60_000).toISOString() } },
-    ];
-    const removed = cleanup(testOffers);
-    assert.equal(removed, 1);
-    assert.equal(testOffers.length, 1);
-    assert.equal(testOffers[0].event_id, 'valid1');
-
-    acceptor.stop();
+      const deadline = Date.now() + 1000;
+      while (acceptor.getPendingOffers().length > 0 && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 25));
+      }
+      assert.equal(acceptor.getPendingOffers().length, 0);
+      assert.equal(acceptor.stats.expiredCleaned, 1);
+    } finally {
+      await acceptor.stop();
+    }
   });
 
   it('peer offline mid-federation: surviving node continues processing', async () => {
     // Start a second NATS server
-    const port2 = BASE_PORT + 1;
+    const port2 = await freePort();
     const storeDir2 = join(tmpDir, 'nats-store-2');
-    let natsProc2;
+    let nats2;
     try {
-      natsProc2 = (await startNatsServer({ port: port2, storeDir: storeDir2 })).proc;
+      nats2 = await startNatsServer(writeServerConfig(storeDir2, port2, { auth: false }), { timeoutMs: 15_000 });
     } catch {
       // If we can't start a second server, skip
       return;
@@ -487,7 +487,7 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
       sub.unsubscribe();
 
       // SIGKILL the second server
-      natsProc2.kill('SIGKILL');
+      nats2.proc.kill('SIGKILL');
       await new Promise(r => setTimeout(r, 500));
 
       // The first NATS server and its connections should still work
@@ -503,7 +503,7 @@ describe('federation-resilience: integration with real NATS', { skip: SKIP_INTEG
       subA.unsubscribe();
     } finally {
       try { await nc2?.close(); } catch { /* connection may already be broken */ }
-      await stopNatsServer(natsProc2);
+      await nats2.stop();
     }
   });
 

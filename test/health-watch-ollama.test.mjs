@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { maybeAutoRestartOllama } from '../bin/health-watch.mjs';
+import { deriveQueueStatus, maybeAutoRestartOllama } from '../bin/health-watch.mjs';
 
 function stuckSnapshot(dir, llmBaseUrl, llmModel = 'qwen3:8b') {
   const path = join(dir, 'queue.json');
@@ -118,4 +118,11 @@ it('does not evict a different local model after a timeout clears the current jo
     globalThis.fetch = previousFetch;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+it('derives stuck from extraction timeouts only; analysis timeouts are degraded', () => {
+  const base = { recent_fallbacks: [], recent_slow_alarms: [] };
+  assert.equal(deriveQueueStatus({ ...base, consecutive_timeouts: { extraction: 0, analysis: 3 } }), 'degraded');
+  assert.equal(deriveQueueStatus({ ...base, consecutive_timeouts: { extraction: 3, analysis: 0 } }), 'stuck');
+  assert.equal(deriveQueueStatus({ ...base, consecutive_timeouts: { extraction: 0, analysis: 0 } }), 'healthy');
 });

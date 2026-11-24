@@ -2,13 +2,13 @@
 # mesh-install.sh — One-command mesh node bootstrapper.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=<token> sh
+#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/mesh-install.sh | MESH_JOIN_TOKEN=<token> bash
 #   MESH_JOIN_TOKEN=<token> bash mesh-install.sh
 #   bash mesh-install.sh --token <token>
 #
 # This script:
 #   1. Detects OS (macOS/Linux)
-#   2. Ensures Node.js 18+ and git are available
+#   2. Ensures Node.js 22.12+ and git are available
 #   3. Clones the openclaw mesh code (or updates if exists)
 #   4. Runs openclaw-node-init.js with the join token
 #
@@ -28,6 +28,27 @@ ok()   { echo -e "${GREEN}  ✓${RESET} $1"; }
 warn() { echo -e "${YELLOW}  ⚠${RESET} $1"; }
 fail() { echo -e "${RED}  ✗${RESET} $1"; }
 die()  { fail "$1"; exit 1; }
+
+# ── Install root ───────────────────────────────────────
+# openclaw-node-init refuses a custom OPENCLAW_ROOT (the services read ~/.openclaw);
+# refuse before installing Node or cloning, in the words scripts/install/root-guard.sh
+# uses, which this file cannot source: the repo is not on disk yet.
+
+if [ -n "${OPENCLAW_ROOT:-}" ]; then
+  _want="$HOME/.openclaw" _got="$OPENCLAW_ROOT"
+  while [ "${_want#*//}" != "$_want" ]; do _want="${_want%%//*}/${_want#*//}"; done
+  while [ "${_got#*//}" != "$_got" ]; do _got="${_got%%//*}/${_got#*//}"; done
+  [ "$_got" = / ] || _got="${_got%/}"
+  if [ "$_got" != "$_want" ] && ! { [ -d "$_got" ] && [ -d "$_want" ] &&
+       [ "$(CDPATH='' cd -P -- "$_got" && pwd -P)" = "$(CDPATH='' cd -P -- "$_want" && pwd -P)" ]; }; then
+    printf '%s\n' \
+      "OPENCLAW_ROOT=$OPENCLAW_ROOT: a custom install root is not supported. OpenClaw installs only to $_want." \
+      "Its services (the NATS clients, the memory daemon, the mesh agent, the gateway plugin) would still read ~/.openclaw, so a node installed anywhere else would be half-configured." \
+      "Nothing was written. Run \"unset OPENCLAW_ROOT\", then run this again." \
+      "For a second node on one machine, the repo's bin/spawn-node.mjs --id <name> creates ~/.openclaw-<name> and prints the OPENCLAW_HOME=... commands that run its memory daemon and consolidation." >&2
+    exit 1
+  fi
+fi
 
 # ── Token ──────────────────────────────────────────────
 
@@ -65,31 +86,48 @@ log "Detected OS: $OS ($(uname -m))"
 
 # ── Node.js Check / Install ──────────────────────────
 
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (openclaw-node-init loads lib/node-identity.mjs).
+node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
+
 ensure_node() {
+  if node_ok; then
+    ok "Node.js $(node --version)"
+    return
+  fi
   if command -v node &>/dev/null; then
-    local ver
-    ver=$(node --version | sed 's/v//' | cut -d. -f1)
-    if [ "$ver" -ge 18 ]; then
-      ok "Node.js $(node --version)"
-      return
-    fi
-    warn "Node.js $(node --version) is too old (need 18+)"
+    warn "Node.js $(node --version) is too old (need 22.12+)"
   else
     warn "Node.js not found"
   fi
 
-  log "Installing Node.js..."
+  log "Installing Node.js 22..."
   if [ "$OS" = "macos" ]; then
     if command -v brew &>/dev/null; then
-      brew install node@22
+      # node@22 is keg-only: without the link the old node (or none) stays on PATH.
+      brew install node@22 && brew link --overwrite --force node@22
     else
-      die "Homebrew not found. Install Node.js 18+ manually or install Homebrew first."
+      die "Homebrew not found. Install Node.js 22.12+ manually or install Homebrew first."
     fi
   else
-    # Linux: NodeSource
+    # Linux: NodeSource. On apt, its signed source (as bootstrap.sh and prereqs.sh add it)
+    # rather than its setup script piped into a root shell; gpg and the CA bundle were
+    # that script's own first install.
     if command -v apt-get &>/dev/null; then
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-      sudo apt-get install -y nodejs
+      sudo apt-get update -y && sudo apt-get install -y ca-certificates gnupg
+      sudo mkdir -p /etc/apt/keyrings
+      curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | sudo gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+      echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+        | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+      sudo apt-get update -y && sudo apt-get install -y nodejs
     elif command -v dnf &>/dev/null; then
       curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
       sudo dnf install -y nodejs
@@ -97,10 +135,11 @@ ensure_node() {
       curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
       sudo yum install -y nodejs
     else
-      die "No supported package manager. Install Node.js 18+ manually."
+      die "No supported package manager. Install Node.js 22.12+ manually."
     fi
   fi
 
+  node_ok || die "Node.js 22.12+ still unavailable after install (found: $(node --version 2>/dev/null || echo none))"
   ok "Node.js installed: $(node --version)"
 }
 
@@ -201,9 +240,18 @@ ensure_mesh_code() {
     ok "Mesh code exists at $MESH_DIR"
     log "Updating..."
     cd "$MESH_DIR"
-    git pull --ff-only 2>/dev/null || warn "Git pull failed (local changes?) — continuing with existing code"
-    npm install --production 2>/dev/null
-    ok "Dependencies updated"
+    # The deploy listener checks out each signed sha detached; moving that tree
+    # here would update code outside the signed path.
+    if git symbolic-ref -q HEAD >/dev/null; then
+      git pull --ff-only 2>/dev/null || warn "Git pull failed (local changes?) — continuing with existing code"
+    else
+      ok "Code left at $(git rev-parse --short HEAD): signed deploys manage this checkout, and updates arrive only through them"
+    fi
+    if npm install --production 2>/dev/null; then
+      ok "Dependencies updated"
+    else
+      warn "npm install failed — dependencies may be incomplete"
+    fi
     return
   fi
 
@@ -233,9 +281,6 @@ echo ""
 EXTRA_ARGS=""
 if [ "$DRY_RUN" = "1" ]; then
   EXTRA_ARGS="--dry-run"
-fi
-if [ "$REPAIR" = "1" ]; then
-  EXTRA_ARGS="$EXTRA_ARGS --repair"
 fi
 
 cd "$MESH_DIR"

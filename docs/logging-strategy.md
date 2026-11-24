@@ -12,7 +12,7 @@ OpenClaw uses a **hybrid logging architecture** with three tiers:
 | Tier | Transport | Persistence | Purpose |
 |------|-----------|-------------|---------|
 | **Console** | `console.log/error/warn` → stdout/stderr | Ephemeral (service manager) | Human-readable diagnostics |
-| **Tracer** | NATS publish → `openclaw.trace.{nodeId}.{module}` | In-memory ring buffer (2000 events) + SQLite | Structured observability |
+| **Tracer** | NATS publish → `openclaw.trace.{nodeId}.{module}` | SQLite | Structured observability |
 | **Activity Log** | SQLite `activity_log` table | Persistent | Audit trail for task/project operations |
 
 **No external logging libraries.** Zero use of winston, pino, bunyan, debug, or log4js. All logging is native Node.js console + custom tracer.
@@ -49,7 +49,6 @@ The unified observability layer across all components.
 ### Transport
 
 - **NATS subject:** `openclaw.trace.{NODE_ID}.{module}` (fire-and-forget)
-- **Ring buffer:** 2000 events FIFO, survives NATS outages
 - **SQLite:** `observability_events` table (mission-control, 24h TTL cleanup on startup)
 
 ### Instrumentation Methods
@@ -129,7 +128,7 @@ Every API route follows the same pattern:
 try { ... } catch (err) { console.error("METHOD /api/path error:", err); }
 ```
 
-All routes additionally wrapped with `withTrace()` for structured observability.
+Some routes (mesh/nodes, workspace/files, workspace/read, memory/doc) are additionally wrapped with `withTrace()` for structured observability.
 
 ### Complete API Route Error Log Inventory
 
@@ -148,8 +147,6 @@ All routes additionally wrapped with `withTrace()` for structured observability.
 |-------|-------------|
 | `POST /api/memory/flush` | `POST /api/memory/flush error:` |
 | `GET /api/memory/flush` | `GET /api/memory/flush error:` |
-| `GET /api/memory/graph` | `[memory/graph] GET error:` |
-| `POST /api/memory/graph` | `[memory/graph] POST error:` |
 | `GET /api/memory/search` | `GET /api/memory/search error:` |
 | `GET /api/memory/wikilinks` | `GET /api/memory/wikilinks error:` |
 | `GET /api/memory/list` | `GET /api/memory/list error:` |
@@ -190,7 +187,6 @@ All routes additionally wrapped with `withTrace()` for structured observability.
 | Route | Log Message |
 |-------|-------------|
 | `GET /api/mesh/nodes` | `[mesh/nodes] error:` |
-| `GET /api/mesh/identity` | `[mesh/identity] error:` |
 
 #### Other
 | Route | Log Message |
@@ -401,7 +397,6 @@ All routes additionally wrapped with `withTrace()` for structured observability.
 |-------|---------|
 | INFO | Startup: Node ID, Repo, NATS URL |
 | INFO | Deploy triggered (SHA, initiator) |
-| INFO | Already deploying (SHA, initiator) |
 | INFO | Running command |
 | INFO | Success at SHA |
 | ERROR | Deploy failed |
@@ -558,7 +553,6 @@ Publishes memory lifecycle events to NATS:
 | SQLite `activity_log` | Rows | Permanent | Task/project audit trail |
 | SQLite `observability_events` | Rows | 24 hours (auto-cleanup) | Structured traces |
 | NATS `openclaw.trace.*` | Messages | JetStream config | Distributed traces |
-| In-memory ring buffer | Objects | Process lifetime (2000 max) | Recent traces |
 | `~/.openclaw/workspace/memory/mesh-logs/{taskId}.md` | Markdown | Permanent | Per-task execution logs |
 | `~/.openclaw/workspace/memory/mesh-events.jsonl` | JSONL | Permanent | Cross-node memory events |
 

@@ -21,12 +21,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { execSync, spawn as spawnProcess } from 'node:child_process';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { natsServerBin, freePort, startNatsServer } from './helpers/nats-server.mjs';
 
 import { spawnNode } from '../bin/spawn-node.mjs';
 import {
@@ -54,132 +54,62 @@ import {
 
 const _require = createRequire(import.meta.url);
 
-// ─── nats-server availability check ──────────────────────────────────────────
-
-let NATS_SERVER_BIN = null;
-try {
-  NATS_SERVER_BIN = execSync('which nats-server', { encoding: 'utf8' }).trim();
-} catch {
-  // nats-server not on PATH
-}
-
-const SKIP = !NATS_SERVER_BIN;
+const SKIP = !natsServerBin();
 
 // ─── Helper: start a nats-server with cluster routing ────────────────────────
 
 /**
- * Start a nats-server process with JetStream and cluster routing.
+ * Write the config for one cluster node and start it.
  *
  * @param {{ port: number, clusterPort: number, monitorPort: number, storeDir: string, serverName: string, routes: string[] }} opts
- * @returns {Promise<{ proc: ChildProcess, port: number }>}
  */
-function startNatsServer(opts) {
-  return new Promise((resolve, reject) => {
-    // Build inline config for the cluster node
-    const routesList = opts.routes.map(r => `    ${r}`).join('\n');
-    const config = [
-      `server_name: ${opts.serverName}`,
-      `listen: 127.0.0.1:${opts.port}`,
-      `http_port: ${opts.monitorPort}`,
-      '',
-      'jetstream {',
-      `  store_dir: ${opts.storeDir}`,
-      '  max_mem: 64MB',
-      '  max_file: 256MB',
-      '}',
-      '',
-      'cluster {',
-      '  name: test-council-cluster',
-      `  listen: 127.0.0.1:${opts.clusterPort}`,
-      '  routes = [',
-      routesList,
-      '  ]',
-      '}',
-    ].join('\n');
+function startClusterNode(opts) {
+  const routesList = opts.routes.map(r => `    ${r}`).join('\n');
+  const config = [
+    `server_name: ${opts.serverName}`,
+    `listen: 127.0.0.1:${opts.port}`,
+    `http_port: ${opts.monitorPort}`,
+    '',
+    'jetstream {',
+    `  store_dir: ${opts.storeDir}`,
+    '  max_mem: 64MB',
+    '  max_file: 256MB',
+    '}',
+    '',
+    'cluster {',
+    '  name: test-council-cluster',
+    `  listen: 127.0.0.1:${opts.clusterPort}`,
+    '  routes = [',
+    routesList,
+    '  ]',
+    '}',
+  ].join('\n');
 
-    // Write config to a temp file in the store dir
-    const configPath = join(opts.storeDir, 'nats.conf');
-    mkdirSync(opts.storeDir, { recursive: true });
-    writeFileSync(configPath, config);
-
-    const args = ['-c', configPath];
-
-    const proc = spawnProcess(NATS_SERVER_BIN, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let output = '';
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        proc.kill('SIGTERM');
-        reject(new Error(`nats-server ${opts.serverName} failed to start within 15s. output: ${output}`));
-      }
-    }, 15_000);
-
-    const onData = (chunk) => {
-      output += chunk.toString();
-      // Wait for client connections ready
-      if (!resolved && output.includes('Listening for client connections')) {
-        resolved = true;
-        clearTimeout(timeout);
-        resolve({ proc, port: opts.port });
-      }
-    };
-
-    proc.stdout.on('data', onData);
-    proc.stderr.on('data', onData);
-
-    proc.on('error', (err) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    proc.on('exit', (code) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(new Error(`nats-server ${opts.serverName} exited with code ${code}. output: ${output}`));
-      }
-    });
-  });
+  const configPath = join(opts.storeDir, 'nats.conf');
+  mkdirSync(opts.storeDir, { recursive: true });
+  writeFileSync(configPath, config);
+  return startNatsServer(configPath, { timeoutMs: 15_000 });
 }
 
-/**
- * Kill a nats-server process and wait for it to exit.
- * @param {ChildProcess} proc
- * @returns {Promise<void>}
- */
-function stopNatsServer(proc) {
-  return new Promise((resolve) => {
-    if (!proc || proc.killed) {
-      resolve();
-      return;
-    }
-    proc.on('exit', () => resolve());
-    proc.kill('SIGTERM');
-    setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
-      resolve();
-    }, 3000);
-  });
+/** `n` distinct free loopback ports. */
+async function freePorts(n) {
+  const ports = new Set();
+  while (ports.size < n) ports.add(await freePort());
+  return [...ports];
 }
 
 /**
  * Start a 3-node NATS cluster on ephemeral ports.
  *
- * @param {{ basePort: number, baseDir: string }} opts
- * @returns {Promise<{ procs: ChildProcess[], ports: number[], clusterPorts: number[] }>}
+ * @param {{ baseDir: string }} opts
+ * @returns {Promise<{ servers: object[], ports: number[], clusterPorts: number[] }>}
  */
 async function startNatsCluster(opts) {
-  const { basePort, baseDir } = opts;
-  const clientPorts = [basePort, basePort + 1, basePort + 2];
-  const clusterPorts = [basePort + 100, basePort + 101, basePort + 102];
-  const monitorPorts = [basePort + 200, basePort + 201, basePort + 202];
+  const { baseDir } = opts;
+  const all = await freePorts(9);
+  const clientPorts = all.slice(0, 3);
+  const clusterPorts = all.slice(3, 6);
+  const monitorPorts = all.slice(6, 9);
 
   // Each server routes to the other two
   const routeSets = [
@@ -188,10 +118,10 @@ async function startNatsCluster(opts) {
     [`nats-route://127.0.0.1:${clusterPorts[0]}`, `nats-route://127.0.0.1:${clusterPorts[1]}`],
   ];
 
-  const procs = [];
+  const servers = [];
   for (let i = 0; i < 3; i++) {
     const storeDir = join(baseDir, `nats-store-${i + 1}`);
-    const server = await startNatsServer({
+    const server = await startClusterNode({
       port: clientPorts[i],
       clusterPort: clusterPorts[i],
       monitorPort: monitorPorts[i],
@@ -199,7 +129,7 @@ async function startNatsCluster(opts) {
       serverName: `test-council-${i + 1}`,
       routes: routeSets[i],
     });
-    procs.push(server.proc);
+    servers.push(server);
   }
 
   // Wait for the cluster to actually converge: every server must report the
@@ -209,7 +139,7 @@ async function startNatsCluster(opts) {
   // hook threw and every subtest was cancelled.
   await waitForClusterReady(monitorPorts);
 
-  return { procs, ports: clientPorts, clusterPorts };
+  return { servers, ports: clientPorts, clusterPorts };
 }
 
 /**
@@ -238,13 +168,8 @@ async function waitForClusterReady(monitorPorts, { timeoutMs = 30_000, intervalM
   throw new Error(`NATS cluster did not converge within ${timeoutMs}ms: ${last}`);
 }
 
-/**
- * Stop all nats-server processes in the cluster.
- * @param {ChildProcess[]} procs
- * @returns {Promise<void>}
- */
-async function stopNatsCluster(procs) {
-  await Promise.all(procs.map(p => stopNatsServer(p)));
+async function stopNatsCluster(servers) {
+  await Promise.all(servers.map(s => s.stop()));
 }
 
 /**
@@ -290,13 +215,12 @@ function mockRetrieval(results) {
 // ─── Test Suite ──────────────────────────────────────────────────────────────
 
 describe('federation-3node: council test with real NATS cluster', { skip: SKIP ? 'nats-server not found on PATH' : false }, () => {
-  const BASE_PORT = 15_000 + Math.floor(Math.random() * 1000);
   const NODE_A = 'council-alpha';
   const NODE_B = 'council-beta';
   const NODE_C = 'council-gamma';
 
   let tmpDir;
-  let clusterProcs;
+  let clusterServers;
   let clusterPorts;
   let ncA; // NATS connection for node A (via cluster node 1)
   let ncB; // NATS connection for node B (via cluster node 2)
@@ -313,8 +237,8 @@ describe('federation-3node: council test with real NATS cluster', { skip: SKIP ?
     tmpDir = await mkdtemp(join(tmpdir(), 'openclaw-fed3-'));
 
     // 2. Start 3-node NATS cluster
-    const cluster = await startNatsCluster({ basePort: BASE_PORT, baseDir: tmpDir });
-    clusterProcs = cluster.procs;
+    const cluster = await startNatsCluster({ baseDir: tmpDir });
+    clusterServers = cluster.servers;
     clusterPorts = cluster.ports;
 
     // 3. Spawn 3 isolated node trees
@@ -347,7 +271,7 @@ describe('federation-3node: council test with real NATS cluster', { skip: SKIP ?
     try { if (ncC) await ncC.drain(); } catch { /* ignore */ }
 
     // Stop NATS cluster
-    if (clusterProcs) await stopNatsCluster(clusterProcs);
+    if (clusterServers) await stopNatsCluster(clusterServers);
 
     // Clean up temp directories
     if (tmpDir) {

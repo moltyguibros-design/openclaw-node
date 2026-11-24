@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { Search, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/hooks";
+import { eventsUrl, MAX_EVENTS } from "@/lib/observability-query";
 
 export interface TraceEvent {
   id: string;
@@ -90,32 +90,33 @@ function fmtDuration(ms: number): string {
 
 // ── Main page ──────────────────────────────────────────
 
+const NO_EVENTS: TraceEvent[] = [];
+
 export default function ObservabilityPage() {
-  const [events, setEvents] = useState<TraceEvent[]>([]);
   const [filterModule, setFilterModule] = useState<string>("all");
   const [filterLevel, setFilterLevel] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
   const [follow, setFollow] = useState(true);
   const [limit, setLimit] = useState(500);
+  const [moduleOptions, setModuleOptions] = useState<string[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
-  const eventIdSet = useRef(new Set<string>());
 
-  // Fetch all events from DB — no artificial cap, real data
   const { data: historyData, mutate } = useSWR<{ events: TraceEvent[] }>(
-    `/api/observability/events?hours=24&limit=${limit}`,
+    eventsUrl(limit, filterLevel, filterModule),
     fetcher,
-    { refreshInterval: 3000 }
+    { refreshInterval: 3000, keepPreviousData: true }
   );
+  const events = historyData?.events ?? NO_EVENTS;
 
-  // Seed events
+  // A server-side module filter returns one module, so the options accumulate across fetches.
   useEffect(() => {
-    if (!historyData?.events) return;
-    const incoming = historyData.events;
-    const ids = new Set(incoming.map((e) => e.id));
-    eventIdSet.current = ids;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds an append-only live event list from the initial fetch; live SSE appends afterwards
-    setEvents(incoming);
-  }, [historyData]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- accumulates module options across server-filtered fetches
+    setModuleOptions((prev) => {
+      const seen = new Set(prev);
+      for (const ev of events) if (ev.module) seen.add(ev.module);
+      return seen.size === prev.length ? prev : [...seen].sort();
+    });
+  }, [events]);
 
   // Auto-scroll to bottom when following
   useEffect(() => {
@@ -132,11 +133,6 @@ export default function ObservabilityPage() {
     if (!atBottom && follow) setFollow(false);
     if (atBottom && !follow) setFollow(true);
   }, [follow]);
-
-  // Derive filter options from data
-  const moduleOptions = Array.from(
-    new Set(events.map((e) => e.module).filter(Boolean))
-  ).sort();
 
   // Apply filters
   const filtered = events.filter((e) => {
@@ -204,9 +200,9 @@ export default function ObservabilityPage() {
           {filtered.length}/{events.length}
         </span>
 
-        {limit <= events.length && (
+        {limit < MAX_EVENTS && limit <= events.length && (
           <button
-            onClick={() => setLimit((l) => l + 500)}
+            onClick={() => setLimit((l) => Math.min(l + 500, MAX_EVENTS))}
             className="text-[10px] text-[#58a6ff] hover:text-[#79c0ff] font-mono px-2 py-1 rounded hover:bg-[#1f2937]"
           >
             load more

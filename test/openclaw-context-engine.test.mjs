@@ -8,11 +8,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createMemoryClient } from '../packages/openclaw-memory-context-engine/memory-client.js';
+import { createMemoryClient, DEFAULT_TIMEOUT_MS } from '../packages/openclaw-memory-context-engine/memory-client.js';
+import { DEFAULT_ANALYSIS_TIMEOUT } from '../lib/llm-client.mjs';
 import {
   createMemoryContextEngine,
   compileSessionPattern,
@@ -77,6 +78,18 @@ describe('memory-client', () => {
     failNext = 500;
     await assert.rejects(() => mkClient().inject({ prompt: 'x' }), (e) => e.status === 500 && /boom/.test(e.message));
   });
+  // A 4 s default sat under the daemon's 8 s analysis wall: cold or contended
+  // turns ran without memory while the daemon still did the work.
+  it('the default timeout outlasts the daemon analysis wall plus retrieval, and the docs say so', () => {
+    assert.ok(DEFAULT_TIMEOUT_MS >= DEFAULT_ANALYSIS_TIMEOUT + 3000,
+      `plugin timeout ${DEFAULT_TIMEOUT_MS} ms vs analysis wall ${DEFAULT_ANALYSIS_TIMEOUT} ms`);
+    const pkg = new URL('../packages/openclaw-memory-context-engine/', import.meta.url);
+    const manifest = JSON.parse(readFileSync(new URL('openclaw.plugin.json', pkg), 'utf8'));
+    const hint = Object.values(manifest).find((v) => v && typeof v === 'object' && v.timeoutMs?.placeholder)?.timeoutMs;
+    assert.equal(hint.placeholder, String(DEFAULT_TIMEOUT_MS));
+    assert.doesNotMatch(hint.help, /well under a second/);
+    assert.match(readFileSync(new URL('README.md', pkg), 'utf8'), new RegExp(`\\| \`timeoutMs\` \\| \`${DEFAULT_TIMEOUT_MS}\` \\|`));
+  });
 });
 
 describe('pure helpers', () => {
@@ -96,9 +109,9 @@ describe('pure helpers', () => {
 
 describe('context engine', () => {
   it('declares the OpenClaw ≥2026.8.1 transcript semantics', () => {
-    const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
+    const e = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => ({ ok: true }) });
     assert.equal(e.info.id, ENGINE_ID);
-    assert.equal(e.info.ownsCompaction, true);
+    assert.equal(e.info.ownsCompaction, false);
     assert.equal(e.info.transcriptSemantics.currentTurnFence, 'before-current-turn-entry-v1');
     assert.equal(e.info.transcriptSemantics.turnAdvancementIdempotency, 'atomic-idempotent-v1');
   });
@@ -168,26 +181,66 @@ describe('context engine', () => {
     assert.equal(received.length, before, 'no daemon calls');
   });
 
-  it('commitTurn is idempotent per advancementKey; ingest/afterTurn are no-ops', async () => {
+  // A heartbeat runs in the main session with no user behind it: recall would
+  // queue a query analysis beside extraction and boost whatever it matched.
+  it('skips recall on heartbeat turns (flag or HEARTBEAT.md/HEARTBEAT_OK prompt) unless skipHeartbeats is false', async () => {
+    const beat = 'Read HEARTBEAT.md if it exists and follow it. If nothing needs attention, reply HEARTBEAT_OK.';
+    const before = received.length;
+    const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
+    let out = await e.assemble({ sessionId: 's', sessionKey: 'agent:main:main', messages: [userMsg(beat)], tokenBudget: 100000 });
+    assert.equal(out.systemPromptAddition, undefined);
+    out = await e.assemble({ sessionId: 's', sessionKey: 'agent:main:main', messages: [userMsg('check the inbox and calendar')], isHeartbeat: true, tokenBudget: 100000 });
+    assert.equal(out.systemPromptAddition, undefined);
+    assert.equal(received.length, before, 'no daemon calls for heartbeats');
+
+    out = await e.assemble({ sessionId: 's', sessionKey: 'agent:main:main', messages: [userMsg(beat), userMsg('what did we decide about jetstream?')], tokenBudget: 100000 });
+    assert.match(out.systemPromptAddition, /^\[memory: /);
+    assert.equal(received.at(-1).prompt, 'what did we decide about jetstream?');
+
+    const recallAll = createMemoryContextEngine({ client: mkClient(), config: { skipHeartbeats: false }, logger: logger() });
+    out = await recallAll.assemble({ sessionId: 's', messages: [userMsg(beat)], isHeartbeat: true, tokenBudget: 100000 });
+    assert.match(out.systemPromptAddition, /^\[memory: /);
+    assert.equal(received.at(-1).prompt, beat);
+  });
+
+  it('documents skipHeartbeats in the manifest schema, the UI hints and the README', () => {
+    const pkg = new URL('../packages/openclaw-memory-context-engine/', import.meta.url);
+    const manifest = JSON.parse(readFileSync(new URL('openclaw.plugin.json', pkg), 'utf8'));
+    assert.deepEqual(manifest.configSchema.properties.skipHeartbeats, { type: 'boolean' });
+    assert.match(manifest.uiHints.skipHeartbeats.help, /heartbeat/i);
+    assert.match(readFileSync(new URL('README.md', pkg), 'utf8'), /^\| `skipHeartbeats` \| `true` \|/m);
+  });
+
+  it('lifecycle hooks are no-ops and say so', async () => {
     const e = createMemoryContextEngine({ client: mkClient(), logger: logger() });
     assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'committed' });
-    assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'duplicate' });
-    assert.deepEqual(await e.commitTurn({ advancementKey: 'k2', messages: [], sessionId: 's' }), { status: 'committed' });
-    assert.deepEqual(await e.ingest({ sessionId: 's', message: userMsg('x') }), { ingested: true });
-    assert.deepEqual(await e.ingestBatch({ sessionId: 's', messages: [userMsg('x'), userMsg('y')] }), { ingestedCount: 2 });
+    assert.deepEqual(await e.commitTurn({ advancementKey: 'k1', messages: [], sessionId: 's' }), { status: 'committed' });
+    assert.deepEqual(await e.ingest({ sessionId: 's', message: userMsg('x') }), { ingested: false });
+    assert.equal('ingestBatch' in e, false);
     assert.equal(await e.afterTurn({ sessionId: 's', sessionFile: '/x', messages: [], prePromptMessageCount: 0 }), undefined);
   });
 
-  it('compact delegates to the host compactor and reports honestly without one', async () => {
+  it('compact delegates to the host compactor and reports ok:false when it cannot', async () => {
     const calls = [];
-    const withHost = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async (p) => { calls.push(p); return { ok: true, compacted: true, result: { tokensBefore: 10, tokensAfter: 5 } }; } });
-    const r = await withHost.compact({ sessionId: 's', sessionFile: '/x', tokenBudget: 100 });
-    assert.equal(r.compacted, true);
+    const hostResult = { ok: true, compacted: true, result: { tokensBefore: 10, tokensAfter: 5 } };
+    const withHost = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async (p) => { calls.push(p); return hostResult; } });
+    assert.equal(await withHost.compact({ sessionId: 's', sessionFile: '/x', tokenBudget: 100 }), hostResult);
     assert.equal(calls[0].sessionId, 's');
+    const unavailable = { ok: false, compacted: false, reason: 'host_compaction_unavailable' };
     const without = createMemoryContextEngine({ client: mkClient(), logger: logger() });
-    assert.deepEqual(await without.compact({ sessionId: 's', sessionFile: '/x' }), { ok: true, compacted: false, reason: 'no_engine_archive_host_compaction_unavailable' });
+    assert.deepEqual(await without.compact({ sessionId: 's', sessionFile: '/x' }), unavailable);
+    const empty = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => undefined });
+    assert.deepEqual(await empty.compact({ sessionId: 's', sessionFile: '/x' }), unavailable);
     const broken = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact: async () => { throw new Error('nope'); } });
-    assert.equal((await broken.compact({ sessionId: 's', sessionFile: '/x' })).compacted, false);
+    assert.deepEqual(await broken.compact({ sessionId: 's', sessionFile: '/x' }), { ok: false, compacted: false, reason: 'host compaction failed: nope' });
+  });
+
+  it('never claims compaction (delegating mode)', () => {
+    for (const runtimeCompact of [undefined, async () => ({ ok: true, compacted: true })]) {
+      const e = createMemoryContextEngine({ client: mkClient(), logger: logger(), runtimeCompact });
+      assert.equal(e.info.ownsCompaction, false);
+      assert.equal(Object.getOwnPropertyDescriptor(e.info, 'ownsCompaction').get, undefined);
+    }
   });
 });
 
@@ -210,8 +263,11 @@ describe('plugin entry', () => {
     const engine = engines.get(ENGINE_ID)();
     const out = await engine.assemble({ sessionId: 's', messages: [userMsg('hello there')], tokenBudget: 100000 });
     assert.match(out.systemPromptAddition, /\[memory:/);
-    // compact without the host SDK installed → honest not-compacted
-    assert.equal((await engine.compact({ sessionId: 's', sessionFile: '/x' })).compacted, false);
+    // without the host SDK installed compact() reports it could not compact,
+    // with one warning, and the engine still never claims compaction
+    assert.deepEqual(await engine.compact({ sessionId: 's', sessionFile: '/x' }), { ok: false, compacted: false, reason: 'host_compaction_unavailable' });
+    assert.equal(engine.info.ownsCompaction, false);
+    assert.equal(log.lines.filter(([lvl, m]) => lvl === 'warn' && /plugin-sdk\/core did not load/.test(m)).length, 1);
     const recall = await tools.get('memory_recall').execute('t1', { query: 'jetstream' });
     assert.match(recall.content[0].text, /\[memory:/);
     const status = await tools.get('memory_status').execute('t2', {});

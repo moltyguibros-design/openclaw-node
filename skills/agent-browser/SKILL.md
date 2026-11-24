@@ -1,5 +1,5 @@
 ---
-name: Agent Browser
+name: agent-browser
 description: "Headless browser automation CLI (Rust + Node.js fallback) for navigating, clicking, typing, and snapshotting web pages. Use when automating web interactions, scraping structured data, filling forms, or testing UIs via agent-browser commands."
 read_when:
   - Automating web interactions

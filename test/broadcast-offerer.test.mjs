@@ -5,10 +5,9 @@ process.env.OPENCLAW_REQUIRE_SIGNED = '0';
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, generateKeyPairSync } from 'node:crypto';
 
 import {
-  RELEVANCE_THRESHOLD,
   MAX_ARTIFACTS_PER_OFFER,
   generateRelevanceSummary,
   buildOfferFromResults,
@@ -77,10 +76,17 @@ function mockNatsConnection() {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 describe('broadcast-offerer constants', () => {
-  it('RELEVANCE_THRESHOLD defaults to 0.55', () => {
-    // May be overridden by env, but default is 0.55
-    assert.equal(typeof RELEVANCE_THRESHOLD, 'number');
-    assert.ok(RELEVANCE_THRESHOLD > 0 && RELEVANCE_THRESHOLD < 1);
+  it('RELEVANCE_THRESHOLD defaults to 0.55 and OFFERER_RELEVANCE_THRESHOLD overrides it', async () => {
+    const saved = process.env.OFFERER_RELEVANCE_THRESHOLD;
+    try {
+      delete process.env.OFFERER_RELEVANCE_THRESHOLD;
+      assert.equal((await import('../lib/broadcast-offerer.mjs?default')).RELEVANCE_THRESHOLD, 0.55);
+      process.env.OFFERER_RELEVANCE_THRESHOLD = '0.8';
+      assert.equal((await import('../lib/broadcast-offerer.mjs?env')).RELEVANCE_THRESHOLD, 0.8);
+    } finally {
+      if (saved === undefined) delete process.env.OFFERER_RELEVANCE_THRESHOLD;
+      else process.env.OFFERER_RELEVANCE_THRESHOLD = saved;
+    }
   });
 
   it('MAX_ARTIFACTS_PER_OFFER is 3', () => {
@@ -91,7 +97,7 @@ describe('broadcast-offerer constants', () => {
 // ─── generateRelevanceSummary ───────────────────────────────────────────────
 
 describe('generateRelevanceSummary', () => {
-  it('returns data-only summary when no requestAnalysis provided', async () => {
+  it('returns data-only summary when no llmClient provided', async () => {
     const broadcast = { themes: ['memory', 'retrieval'], entities: ['NATS'] };
     const result = { snippet: 'Test snippet content', session_id: 'sess-1', score: 0.75 };
 
@@ -106,7 +112,7 @@ describe('generateRelevanceSummary', () => {
     const result = { snippet: 'Test', session_id: 'sess-1', score: 0.6 };
 
     const mockAnalysis = async () => ({ mode: 'fallback', reason: 'ollama-busy-extraction' });
-    const summary = await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis });
+    const summary = await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis } });
     assert.ok(summary.includes('Relevant to:'));
   });
 
@@ -114,23 +120,26 @@ describe('generateRelevanceSummary', () => {
     const broadcast = { themes: ['memory'], entities: ['NATS'] };
     const result = { snippet: 'Test snippet', session_id: 'sess-1', score: 0.8 };
 
-    const mockAnalysis = async (run) => {
-      const mockClient = {
-        generate: async () => 'This snippet discusses NATS-based memory retrieval.',
-      };
-      const value = await run(mockClient);
-      return { mode: 'llm', value };
+    let captured = null;
+    const llmClient = {
+      generateAnalysis: async (messages, o) => {
+        captured = { messages, o };
+        return { mode: 'llm', value: { content: 'This snippet discusses NATS-based memory retrieval.' } };
+      },
     };
-    const summary = await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis });
+    const summary = await generateRelevanceSummary(broadcast, result, { llmClient });
     assert.ok(summary.includes('NATS-based memory retrieval'));
+    assert.equal(captured.o.waitTimeoutMs, 3000);
+    assert.equal(captured.o.maxTokens, 150);
+    assert.ok(captured.messages[1].content.includes('Test snippet'));
   });
 
-  it('falls back gracefully on requestAnalysis error', async () => {
+  it('falls back gracefully on generateAnalysis error', async () => {
     const broadcast = { themes: ['theme1'], entities: [] };
     const result = { snippet: 'snippet', session_id: 's1', score: 0.5 };
 
     const mockAnalysis = async () => { throw new Error('queue crash'); };
-    const summary = await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis });
+    const summary = await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis } });
     assert.ok(summary.includes('Relevant to:'));
   });
 
@@ -140,11 +149,8 @@ describe('generateRelevanceSummary', () => {
     const result = { snippet: 'snip', session_id: 's1', score: 0.8 };
     const stats = { summariesLlm: 0, summariesFallback: 0 };
 
-    const mockAnalysis = async (run) => {
-      const value = await run({ generate: async () => 'LLM-generated summary text' });
-      return { mode: 'llm', value };
-    };
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, stats });
+    const mockAnalysis = async () => ({ mode: 'llm', value: { content: 'LLM-generated summary text' } });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, stats });
     assert.equal(stats.summariesLlm, 1);
     assert.equal(stats.summariesFallback, 0);
   });
@@ -155,7 +161,7 @@ describe('generateRelevanceSummary', () => {
     const stats = { summariesLlm: 0, summariesFallback: 0 };
 
     const mockAnalysis = async () => ({ mode: 'fallback', reason: 'ollama-busy' });
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, stats });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, stats });
     assert.equal(stats.summariesLlm, 0);
     assert.equal(stats.summariesFallback, 1);
   });
@@ -166,12 +172,12 @@ describe('generateRelevanceSummary', () => {
     const stats = { summariesLlm: 0, summariesFallback: 0 };
 
     const mockAnalysis = async () => { throw new Error('queue crash'); };
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, stats });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, stats });
     assert.equal(stats.summariesLlm, 0);
     assert.equal(stats.summariesFallback, 1);
   });
 
-  it('F-M6: increments summariesFallback when no requestAnalysis provided', async () => {
+  it('F-M6: increments summariesFallback when no llmClient provided', async () => {
     const broadcast = { themes: ['t'], entities: [] };
     const result = { snippet: 'snip', session_id: 's1', score: 0.5 };
     const stats = { summariesLlm: 0, summariesFallback: 0 };
@@ -188,9 +194,33 @@ describe('generateRelevanceSummary', () => {
     const log = (msg) => logged.push(msg);
 
     const mockAnalysis = async () => ({ mode: 'fallback', reason: 'ollama-busy-extraction' });
-    await generateRelevanceSummary(broadcast, result, { requestAnalysis: mockAnalysis, log });
+    await generateRelevanceSummary(broadcast, result, { llmClient: { generateAnalysis: mockAnalysis }, log });
     assert.ok(logged.some(m => m.includes('ollama-busy-extraction')),
       `expected a log entry mentioning the fallback reason; got: ${JSON.stringify(logged)}`);
+  });
+
+  // Built at runtime so the committed file holds no secret-shaped line.
+  const key = 'sk-' + 'Ab1'.repeat(15);
+  const keyResult = { snippet: `export OPENAI_API_KEY=${key} for staging`, session_id: 's', score: 0.8 };
+
+  it('scrubs a key out of the data-only summary', async () => {
+    const summary = await generateRelevanceSummary({ themes: ['staging'], entities: [] }, keyResult);
+    assert.ok(!summary.includes(key));
+    assert.ok(summary.includes('[REDACTED]'));
+  });
+
+  it('scrubs a key out of the LLM prompt and the LLM summary', async () => {
+    let captured = null;
+    const llmClient = {
+      generateAnalysis: async (messages) => {
+        captured = messages;
+        return { mode: 'llm', value: { content: 'Relevant: ' + key } };
+      },
+    };
+    const summary = await generateRelevanceSummary({ themes: ['staging'], entities: [] }, keyResult, { llmClient });
+    assert.ok(!summary.includes(key));
+    assert.ok(summary.includes('[REDACTED]'));
+    assert.ok(!captured[1].content.includes(key));
   });
 });
 
@@ -457,5 +487,78 @@ describe('createOfferer.start', () => {
     // Should have logged degraded mode
     assert.ok(logs.some(l => l.includes('degraded')));
     offerer.stop();
+  });
+});
+
+describe('createOfferer: a failed broadcast is retried, not dropped as a replay', () => {
+  /** A consumer loop fed these deliveries; each records how it was settled. */
+  function deliveringConnection(deliveries) {
+    const nc = mockNatsConnection();
+    const js = nc.jetstream();
+    // start() reads the node's durable shared consumer (ensureSharedConsumer).
+    nc.jetstreamManager = async () => ({ consumers: { info: async () => ({}) } });
+    nc.jetstream = () => ({
+      ...js,
+      consumers: {
+        get: async () => ({ consume: async () => (async function* () { for (const msg of deliveries) yield msg; })() }),
+      },
+    });
+    return nc;
+  }
+  // Signed: verifyEvent records only signed events in the replay cache.
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const signedBroadcast = async () => (await import('../lib/node-identity.mjs')).signEvent(makeBroadcast(), privateKey);
+  const settledAll = async (deliveries) => {
+    for (let i = 0; i < 200 && deliveries.some((d) => !d.settled); i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  const delivery = (broadcast, deliveryCount) => {
+    const msg = {
+      data: new TextEncoder().encode(JSON.stringify(broadcast)),
+      info: { deliveryCount },
+      settled: null,
+      ack() { msg.settled = ['ack']; },
+      nak(delay) { msg.settled = ['nak', delay]; },
+    };
+    return msg;
+  };
+
+  it('a transient retrieval failure is redelivered and then offered', async () => {
+    const { createSeenEventCache } = await import('../lib/node-identity.mjs');
+    const broadcast = await signedBroadcast();
+    const deliveries = [delivery(broadcast, 1), delivery(broadcast, 2)];
+    let calls = 0;
+    const offerer = createOfferer(deliveringConnection(deliveries), 'my-node', {
+      log: () => {},
+      seenIds: createSeenEventCache(),
+      retrievalPipeline: { retrieve: async () => { if (++calls === 1) throw new Error('db locked'); return [makeResult(0.9)]; } },
+    });
+    await offerer.start();
+    await settledAll(deliveries);
+    await offerer.stop();
+
+    assert.deepEqual(deliveries[0].settled, ['nak', 5000], 'the failure asks for a delayed redelivery');
+    assert.deepEqual(deliveries[1].settled, ['ack']);
+    assert.equal(offerer.stats.replayRejected, 0, 'the redelivery is not a replay');
+    assert.equal(offerer.stats.offersPublished, 1);
+  });
+
+  it('a failure that keeps failing is dropped at the delivery cap', async () => {
+    const { createSeenEventCache } = await import('../lib/node-identity.mjs');
+    const { FEDERATION_MAX_DELIVER } = await import('../lib/federation-resilience.mjs');
+    const broadcast = await signedBroadcast();
+    const deliveries = Array.from({ length: FEDERATION_MAX_DELIVER }, (_, i) => delivery(broadcast, i + 1));
+    const offerer = createOfferer(deliveringConnection(deliveries), 'my-node', {
+      log: () => {},
+      seenIds: createSeenEventCache(),
+      retrievalPipeline: { retrieve: async () => { throw new Error('always'); } },
+    });
+    await offerer.start();
+    await settledAll(deliveries);
+    await offerer.stop();
+
+    assert.deepEqual(deliveries.slice(0, -1).map((d) => d.settled[0]), Array(FEDERATION_MAX_DELIVER - 1).fill('nak'));
+    assert.deepEqual(deliveries.at(-1).settled, ['ack']);
+    assert.equal(offerer.stats.retriesExhausted, 1);
+    assert.equal(offerer.stats.replayRejected, 0);
   });
 });

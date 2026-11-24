@@ -18,6 +18,8 @@ metadata: {"openclaw":{"emoji":"🛡️","homepage":"https://github.com/capsules
 
 ClawGuard is a security plugin that uses an LLM-as-a-Judge to evaluate tool calls before execution, detecting and optionally blocking risky operations.
 
+**Operator step.** The plugin is third-party npm code that runs inside the gateway, and the skill scanner does not check gateway plugins. The agent does not run the Prerequisites, Installation or Docker commands below: show them to the operator and ask them to run them. The install is pinned to the reviewed version 0.1.5; upgrading means reviewing the new version and changing the pin.
+
 ## Prerequisites
 
 Before installing ClawGuard, ensure the gateway's chat completions endpoint is enabled:
@@ -28,10 +30,11 @@ openclaw config set gateway.http.endpoints.chatCompletions.enabled true
 
 ## Installation
 
-Install the plugin from npm:
+Install the plugin from npm and turn off its usage metrics, which are on by default:
 
 ```bash
-openclaw plugins install @capsulesecurity/clawguard
+openclaw plugins install @capsulesecurity/clawguard@0.1.5
+openclaw config set plugins.entries.clawguard.config.metricsEnabled false
 ```
 
 After installation, restart the gateway to load the plugin.
@@ -41,8 +44,9 @@ After installation, restart the gateway to load the plugin.
 If running OpenClaw in Docker:
 
 ```bash
-# Install the plugin
-docker compose run --rm openclaw-cli plugins install @capsulesecurity/clawguard
+# Install the plugin and turn off its usage metrics
+docker compose run --rm openclaw-cli plugins install @capsulesecurity/clawguard@0.1.5
+docker compose run --rm openclaw-cli config set plugins.entries.clawguard.config.metricsEnabled false
 
 # Restart gateway with force-recreate to reload env vars
 docker compose up -d --force-recreate openclaw-gateway
@@ -55,12 +59,12 @@ docker compose up -d --force-recreate openclaw-gateway
 Check the gateway logs for the initialization message:
 
 ```
-[clawguard] Initialized (logging: true, security: true, block: true, metrics: enabled)
+[clawguard] Initialized (logging: true, security: true, block: true, metrics: disabled)
 ```
 
 ## Configuration
 
-Configure ClawGuard via `openclaw config set plugins.clawguard.<option> <value>`:
+Configure ClawGuard via `openclaw config set plugins.entries.clawguard.config.<option> <value>`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -72,32 +76,26 @@ Configure ClawGuard via `openclaw config set plugins.clawguard.<option> <value>`
 | timeoutMs | 15000 | Security check timeout in milliseconds |
 | gatewayHost | 127.0.0.1 | Gateway host for LLM calls |
 | gatewayPort | 18789 | Gateway port for LLM calls |
-| metricsEnabled | true | Enable anonymous usage metrics |
+| metricsEnabled | true | Enable anonymous usage metrics (the install above sets it to false) |
 
 ### Example Configuration
 
 ```bash
 # Disable blocking (log-only mode)
-openclaw config set plugins.clawguard.blockOnRisk false
+openclaw config set plugins.entries.clawguard.config.blockOnRisk false
 
 # Increase timeout for slower models
-openclaw config set plugins.clawguard.timeoutMs 30000
-
-# Disable metrics collection
-openclaw config set plugins.clawguard.metricsEnabled false
+openclaw config set plugins.entries.clawguard.config.timeoutMs 30000
 ```
 
 ## Gateway Authentication
 
 ClawGuard calls the gateway's `/v1/chat/completions` endpoint internally. If you see 401 Unauthorized errors:
 
-1. Check the gateway token in your environment matches the config:
+1. Check the gateway token in your environment matches the config. Never print token values:
+   command output goes into the session transcript.
    ```bash
-   # Check env var
-   printenv OPENCLAW_GATEWAY_TOKEN
-
-   # Check config token
-   cat ~/.openclaw/openclaw.json | grep -A2 '"token"'
+   python3 -c 'import json,os; t=json.load(open(os.path.expanduser("~/.openclaw/openclaw.json"))).get("gateway",{}).get("auth",{}).get("token",""); e=os.environ.get("OPENCLAW_GATEWAY_TOKEN",""); print("env unset" if not e else "config token empty" if not t else "match" if t==e else "mismatch")'
    ```
 
 2. If tokens don't match, update your environment and restart the gateway.
@@ -129,7 +127,7 @@ ClawGuard registers a `before_tool_call` hook that:
 3. Returns a risk assessment (none/low/medium/high/critical)
 4. Blocks execution if risk is high/critical (if `blockOnRisk` is enabled)
 
-The security evaluation uses your configured LLM provider, so it works with any model you have set up in OpenClaw.
+The security evaluation uses your configured LLM provider, so it works with any model you have set up in OpenClaw. Every tool call's context (the tool, its arguments and up to `maxContextWords` of session context) is sent to the configured model through the gateway; with a hosted provider, that context leaves the node.
 
 ## Links
 

@@ -14,8 +14,6 @@ import path from 'node:path';
 import { buildProbes, VERDICT } from '../lib/node-acceptance-probes.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
 
-const IS_DARWIN = process.platform === 'darwin';
-
 // Real `jsz.meta_cluster` captured from the live 3-node cluster (2026-07-16T11:21Z),
 // and the same group with quorum lost (raft can't elect a leader without a majority).
 const META_HEALTHY = Object.freeze({
@@ -46,26 +44,44 @@ describe('node-acceptance federation axis (step 6.4)', () => {
   });
 
   it('FED-L2-COORD: coordinator running → PASS; absent → SKIP; loaded without PID → FAIL', async () => {
-    if (!IS_DARWIN) {
-      const r = await fedProbe('FED-L2-COORD').run();
-      assert.equal(r.status, VERDICT.SKIP);
-      assert.match(r.detail, /darwin-only/);
-      return;
-    }
+    const other = await fedProbe('FED-L2-COORD', { platform: 'win32' }).run();
+    assert.equal(other.status, VERDICT.SKIP);
+    assert.match(other.detail, /no service-manager probe for win32/);
     const running = await fedProbe('FED-L2-COORD', {
+      platform: 'darwin',
       exec: async () => ({ code: 0, stdout: 'state = running\npid = 123\n', stderr: '' }),
     }).run();
     assert.equal(running.status, VERDICT.PASS);
 
     const absent = await fedProbe('FED-L2-COORD', {
+      platform: 'darwin',
       exec: async () => ({ code: 113, stdout: '', stderr: 'Could not find service "ai.openclaw.mesh-task-daemon"' }),
     }).run();
     assert.equal(absent.status, VERDICT.SKIP);
 
     const stopped = await fedProbe('FED-L2-COORD', {
+      platform: 'darwin',
       exec: async () => ({ code: 0, stdout: 'state = not running\nlast exit code = 1\n', stderr: '' }),
     }).run();
     assert.equal(stopped.status, VERDICT.FAIL);
+  });
+
+  it('FED-L2-COORD grades the Linux systemd unit instead of skipping', async () => {
+    const calls = [];
+    const show = (stdout) => ({ platform: 'linux', exec: async (cmd, args) => { calls.push([cmd, ...args]); return { code: 0, stdout, stderr: '' }; } });
+    const running = await fedProbe('FED-L2-COORD', show(
+      'LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nSubState=running\nMainPID=4242\nExecMainCode=0\nExecMainStatus=0\n')).run();
+    assert.equal(running.status, VERDICT.PASS);
+    assert.match(running.detail, /pid=4242/);
+    assert.deepEqual(calls[0].slice(0, 3), ['systemctl', '--user', 'show']);
+    assert.equal(calls[0].at(-1), 'openclaw-mesh-task-daemon.service');
+
+    const absent = await fedProbe('FED-L2-COORD', show('LoadState=not-found\nActiveState=inactive\nMainPID=0\n')).run();
+    assert.equal(absent.status, VERDICT.SKIP);
+
+    const failed = await fedProbe('FED-L2-COORD', show(
+      'LoadState=loaded\nUnitFileState=enabled\nActiveState=failed\nSubState=failed\nMainPID=0\nExecMainCode=1\nExecMainStatus=1\nResult=exit-code\n')).run();
+    assert.equal(failed.status, VERDICT.FAIL);
   });
 
   // These drive the probe's PARSE (jsz.json → meta_cluster) as well as the grade —
@@ -98,6 +114,12 @@ describe('node-acceptance federation axis (step 6.4)', () => {
     }).run();
     assert.equal(r.status, VERDICT.SKIP);
     assert.match(r.detail, /network axis owns/);
+  });
+
+  it('FED-L2-QUORUM: JetStream disabled → SKIP (network axis owns it), never single-node PASS', async () => {
+    const r = await fedProbe('FED-L2-QUORUM', { httpGet: jszOnly({ disabled: true, config: {}, memory: 0, storage: 0, streams: 0 }) }).run();
+    assert.equal(r.status, VERDICT.SKIP);
+    assert.match(r.detail, /network axis/);
   });
 
   it('FED-L2-QUORUM: jsz answers but body unparseable → SKIP (unobservable), never PASS', async () => {

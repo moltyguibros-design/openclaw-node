@@ -26,17 +26,19 @@
       <key>PATH</key>
       <string>${OPENCLAW_WORKSPACE}/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
       <key>TZ</key>
-      <string>America/Montreal</string>
+      <string>${OPENCLAW_TIMEZONE}</string>
       <key>OPENCLAW_WORKSPACE</key>
       <string>${OPENCLAW_WORKSPACE}</string>
       <key>OPENCLAW_NATS</key>
       <string>${OPENCLAW_NATS}</string>
       <key>OPENCLAW_NODE_ID</key>
-      <string>daedalus</string>
+      <string>${OPENCLAW_NODE_ID}</string>
       <key>LLM_MODEL</key>
       <string>${LLM_MODEL}</string>
       <key>LLM_BASE_URL</key>
       <string>${LLM_BASE_URL}</string>
+      <key>OPENCLAW_SKIP_LLM</key>
+      <string>${OPENCLAW_SKIP_LLM}</string>
       <key>HEALTH_WATCH_INTERVAL_SEC</key>
       <string>60</string>
     </dict>

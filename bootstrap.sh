@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # bootstrap.sh — ONE-COMMAND install of an OpenClaw node on a virgin machine.
 #
-#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash -s -- --role=lead
+#
+# --role=lead|worker is required on a node's first install (install.sh never
+# guesses it from the OS); later runs read the saved one.
 #
 # This is the only entrypoint that works on a machine with nothing on it.
 # `npx openclaw-node-harness` cannot be: npx requires npm requires Node, and
@@ -14,14 +17,15 @@
 # back to wget when that is what exists.
 #
 # Everything else -- Homebrew, Xcode CLT, Node 22, Python 3, Git, SQLite3,
-# build tools, jq, nats-server, ollama, Tailscale -- is installed here.
+# build tools, jq, nats-server, ollama -- is installed here. Tailscale too, but only
+# for a multi-machine cluster: --cluster-peers=... or --with-tailscale.
 #
 # You will be asked for your password once. Homebrew and apt install into system
 # locations; that is not automatable away and should not be.
 #
 # Env overrides:
 #   OPENCLAW_REPO      owner/name to fetch      (default moltyguibros-design/openclaw-node)
-#   OPENCLAW_REF       branch/tag              (default main)
+#   OPENCLAW_REF       branch, tag or commit  (default main)
 #   OPENCLAW_SRC       use an existing checkout instead of downloading
 #   OPENCLAW_NO_INSTALL=1   install deps only, do not run install.sh
 #   plus any install.sh flag passed straight through:
@@ -44,6 +48,14 @@ main() {
 
 REPO="${OPENCLAW_REPO:-moltyguibros-design/openclaw-node}"
 REF="${OPENCLAW_REF:-main}"
+USER_SKIP_LLM=false
+WITH_TAILSCALE=false
+for a in "$@"; do
+  case "$a" in
+    --skip-llm) USER_SKIP_LLM=true ;;
+    --with-tailscale|--cluster-peers=*) WITH_TAILSCALE=true ;;
+  esac
+done
 
 G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[1m'; N='\033[0m'
 ok()   { echo -e "${G}[+]${N} $*"; }
@@ -52,6 +64,34 @@ err()  { echo -e "${R}[x]${N} $*"; }
 step() { echo -e "\n${B}━━━ $* ━━━${N}"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 die()  { err "$*"; exit 1; }
+
+# install.sh refuses a custom OPENCLAW_ROOT (its services read ~/.openclaw);
+# say so before the dependency wave, in the words scripts/install/root-guard.sh
+# uses, which this file cannot source: the repo is not on disk yet.
+if [ "${OPENCLAW_NO_INSTALL:-0}" != "1" ] && [ -n "${OPENCLAW_ROOT:-}" ]; then
+  _want="$HOME/.openclaw" _got="$OPENCLAW_ROOT"
+  while [ "${_want#*//}" != "$_want" ]; do _want="${_want%%//*}/${_want#*//}"; done
+  while [ "${_got#*//}" != "$_got" ]; do _got="${_got%%//*}/${_got#*//}"; done
+  [ "$_got" = / ] || _got="${_got%/}"
+  if [ "$_got" != "$_want" ] && ! { [ -d "$_got" ] && [ -d "$_want" ] &&
+       [ "$(CDPATH='' cd -P -- "$_got" && pwd -P)" = "$(CDPATH='' cd -P -- "$_want" && pwd -P)" ]; }; then
+    printf '%s\n' \
+      "OPENCLAW_ROOT=$OPENCLAW_ROOT: a custom install root is not supported. OpenClaw installs only to $_want." \
+      "Its services (the NATS clients, the memory daemon, the mesh agent, the gateway plugin) would still read ~/.openclaw, so a node installed anywhere else would be half-configured." \
+      "Nothing was written. Run \"unset OPENCLAW_ROOT\", then run this again." \
+      "For a second node on one machine, the repo's bin/spawn-node.mjs --id <name> creates ~/.openclaw-<name> and prints the OPENCLAW_HOME=... commands that run its memory daemon and consolidation." >&2
+    exit 1
+  fi
+fi
+
+# install.sh refuses a first install without a role; say so before the
+# dependency wave, not after it.
+ROLE_GIVEN=false
+for a in "$@"; do case "$a" in --role=*) ROLE_GIVEN=true ;; esac; done
+if [ "${OPENCLAW_NO_INSTALL:-0}" != "1" ] && ! $ROLE_GIVEN && [ -z "${OPENCLAW_NODE_ROLE:-}" ] &&
+   ! grep -q '^OPENCLAW_NODE_ROLE=.' "$HOME/.openclaw/openclaw.env" 2>/dev/null; then
+  die "no node role: re-run as  curl ... | bash -s -- --role=lead  (or --role=worker)"
+fi
 
 case "$(uname -s)" in
   Darwin) OS=macos ;;
@@ -105,7 +145,16 @@ if ! have curl && ! have wget; then
 fi
 ok "downloader: $(have curl && echo curl || echo wget)"
 
-node_ok() { have node && [ "$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)" -ge 22 ]; }
+# 22.12 is the first 22.x whose require() loads an ES module unflagged
+# (bin/mesh-join-token.js and openclaw-node-init load lib/node-identity.mjs).
+node_ok() {
+  have node || return 1
+  local v major minor
+  v="$(node -v 2>/dev/null)"; v="${v#v}"
+  major="${v%%.*}"; minor="${v#*.}"; minor="${minor%%.*}"
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; }
+}
 
 # ============================================================
 # macOS
@@ -159,7 +208,7 @@ if [ "$OS" = macos ]; then
     ok "node $(node -v)"
   else
     brew install node@22 </dev/null && brew link --overwrite --force node@22
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   # Report on whether the BINARY landed, never on the package manager's exit
@@ -182,7 +231,7 @@ if [ "$OS" = macos ]; then
   # multi-machine NATS clustering silently degrades to a single node.
   if have tailscale; then
     ok "tailscale present"
-  else
+  elif $WITH_TAILSCALE; then
     brew install --cask tailscale-app </dev/null
     link_tailscale_cli
     have tailscale && ok "tailscale installed" || err "tailscale: CLI still not on PATH"
@@ -195,14 +244,13 @@ else
   have apt-get || die "only Debian/Ubuntu apt is supported on Linux."
 
   step "APT baseline"
-  # Unconditional. install.sh only refreshes lists inside its node-missing
-  # branch, so a box that already ships Node 22 installs against stale lists
-  # and dies mid-run under `set -e`.
+  # Unconditional: refreshing lists only when Node was missing let a box that
+  # already ships Node 22 install against stale lists and die mid-run.
   $SUDO apt-get update -y || die "apt-get update failed."
   $SUDO apt-get install -y \
-    curl git sqlite3 build-essential jq python3 python3-pip ca-certificates gnupg \
+    curl git sqlite3 build-essential jq rsync python3 python3-pip ca-certificates gnupg \
     || die "apt baseline install failed."
-  ok "git, sqlite3, build-essential, jq, python3 installed"
+  ok "git, sqlite3, build-essential, jq, rsync, python3 installed"
 
   step "Node.js 22"
   if node_ok; then
@@ -214,7 +262,7 @@ else
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       | $SUDO tee /etc/apt/sources.list.d/nodesource.list >/dev/null
     $SUDO apt-get update -y && $SUDO apt-get install -y nodejs
-    node_ok && ok "node $(node -v)" || err "node 22+ install failed"
+    node_ok && ok "node $(node -v)" || err "node 22.12+ install failed"
   fi
 
   step "nats-server, ollama, tailscale"
@@ -260,7 +308,7 @@ else
 
   if have tailscale; then
     ok "tailscale present"
-  else
+  elif $WITH_TAILSCALE; then
     curl -fsSL https://tailscale.com/install.sh | sh
     have tailscale && ok "tailscale installed" || err "tailscale not on PATH after install"
   fi
@@ -284,7 +332,7 @@ fi
 step "Verification"
 FAIL=0
 chk() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else err "$1 — MISSING"; FAIL=1; fi; }
-chk "node 22+"      'node_ok'
+chk "node 22.12+"   'node_ok'
 chk "python3 3.8+"  'python3 -c "import sys; sys.exit(0 if sys.version_info>=(3,8) else 1)"'
 chk "PyYAML"        'python3 -c "import yaml"'
 chk "git"           'command -v git'
@@ -292,9 +340,12 @@ chk "sqlite3"       'command -v sqlite3'
 chk "build tools"   '{ [ "$OS" = macos ] && xcode-select -p; } || command -v cc'
 chk "curl"          'command -v curl'
 chk "jq"            'command -v jq'
+chk "rsync"         'command -v rsync'
 chk "nats-server"   'command -v nats-server'
-chk "ollama"        'command -v ollama'
-chk "tailscale"     'command -v tailscale'
+# Still installed under --skip-llm so llm-setup.sh works later, but a box that
+# asked for no LLM is not refused for lacking it (as prereqs.sh does).
+$USER_SKIP_LLM || chk "ollama" 'command -v ollama'
+$WITH_TAILSCALE && chk "tailscale" 'command -v tailscale'
 [ "$OS" = macos ] && chk "homebrew" 'command -v brew'
 
 if [ $FAIL -ne 0 ]; then
@@ -309,6 +360,7 @@ ok "baseline complete"
 # Fetch the repo and hand off
 # ============================================================
 step "Fetching $REPO@$REF"
+SRC_OLD=""
 if [ -n "${OPENCLAW_SRC:-}" ]; then
   SRC="$OPENCLAW_SRC"
   [ -f "$SRC/install.sh" ] || die "OPENCLAW_SRC=$SRC has no install.sh"
@@ -316,12 +368,17 @@ if [ -n "${OPENCLAW_SRC:-}" ]; then
 else
   SRC="$HOME/.openclaw-src/openclaw-node"
   mkdir -p "$(dirname "$SRC")"
-  rm -rf "$SRC"; mkdir -p "$SRC"
+  rm -rf "$SRC.new"; mkdir -p "$SRC.new"
   # Tarball, not `git clone`: on a virgin Mac `git` is a stub that pops the
   # Xcode GUI prompt, which would stall a piped install.
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" \
-    | tar xz -C "$SRC" --strip-components=1 \
-    || die "could not download $REPO@$REF"
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" \
+    | tar xz -C "$SRC.new" --strip-components=1 \
+    || { rm -rf "$SRC.new"; die "could not download $REPO@$REF"; }
+  # On a re-run the units exec from $SRC: swap only once the new tree is whole,
+  # and keep the old one until install.sh succeeds.
+  rm -rf "$SRC.old"
+  if [ -d "$SRC" ]; then SRC_OLD="$SRC.old"; mv "$SRC" "$SRC_OLD"; fi
+  mv "$SRC.new" "$SRC"
   ok "source at $SRC"
 fi
 
@@ -331,8 +388,6 @@ cd "$SRC" || die "cannot enter $SRC"
 # Wave 1 is binaries + a running node. --skip-llm is forced here so the 5-20 GB
 # model pull never starts unannounced; wave 2 below asks first. If the caller
 # already passed --skip-llm they want no models at all, so wave 2 is skipped too.
-USER_SKIP_LLM=false
-for a in "$@"; do [ "$a" = "--skip-llm" ] && USER_SKIP_LLM=true; done
 
 if [ $# -gt 0 ]; then
   bash install.sh --enable-services --skip-llm "$@"
@@ -346,6 +401,7 @@ if [ $RC -ne 0 ]; then
   err "install.sh exited $RC — dependencies were fine, the failure is downstream."
   exit $RC
 fi
+[ -z "$SRC_OLD" ] || rm -rf "$SRC_OLD"
 ok "wave 1 complete — node installed and running (no models yet)"
 
 # ============================================================
@@ -361,7 +417,7 @@ fi
 
 echo ""
 ok "done. Next:"
-echo "    tailscale up                 # authenticate the mesh (opens a browser)"
+$WITH_TAILSCALE && echo "    tailscale up                 # authenticate the mesh (opens a browser)"
 echo "    open http://localhost:3000   # Mission Control"
 exit 0
 

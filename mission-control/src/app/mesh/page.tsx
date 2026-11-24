@@ -10,8 +10,7 @@ import {
 
 import { NetworkTopology, NodeCard, ConnectionMatrix } from "@/components/mesh";
 import type { MeshNode, MeshEvent, MeshStatus } from "@/components/mesh";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/hooks";
 
 function MeshEvents({ events }: { events: MeshEvent[] }) {
   if (events.length === 0) return null;

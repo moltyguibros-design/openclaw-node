@@ -58,7 +58,7 @@ def detect(text: str) -> DetectionResult:
     r.markdown_artifacts = find_matches(text, PATTERNS["markdown_artifacts"])
     r.citation_bugs = find_matches(text, PATTERNS["citation_bugs"])
     r.knowledge_cutoff = find_matches(text, PATTERNS["knowledge_cutoff"])
-    r.curly_quotes = len(re.findall(r'[""'']', text))
+    r.curly_quotes = len(re.findall("[\u201c\u201d\u2018\u2019]", text))
     r.em_dashes = text.count("—") + text.count(" -- ")
     
     r.total_issues = (
@@ -68,6 +68,7 @@ def detect(text: str) -> DetectionResult:
         sum(c for _, c in r.ai_vocabulary) + sum(c for _, c in r.copula_avoidance) +
         sum(c for _, c in r.filler_phrases) + sum(c for _, c in r.chatbot_artifacts) * 3 +
         sum(c for _, c in r.hedging_phrases) + sum(c for _, c in r.negative_parallelisms) +
+        sum(c for _, c in r.rule_of_three) +
         sum(c for _, c in r.markdown_artifacts) * 2 + sum(c for _, c in r.citation_bugs) * 5 +
         sum(c for _, c in r.knowledge_cutoff) * 3 + r.curly_quotes + (r.em_dashes if r.em_dashes > 3 else 0)
     )
@@ -124,6 +125,7 @@ def print_report(r: DetectionResult):
     print_section("CHALLENGES FORMULA", r.challenges_formula)
     print_section("HEDGING", r.hedging_phrases)
     print_section("NEGATIVE PARALLELISMS", r.negative_parallelisms)
+    print_section("RULE OF THREE", r.rule_of_three)
     print_section("NOTABILITY EMPHASIS", r.notability_emphasis)
     
     if r.curly_quotes:
@@ -149,7 +151,8 @@ def main():
             "ai_probability": result.ai_probability, "significance_inflation": result.significance_inflation,
             "promotional_language": result.promotional_language, "ai_vocabulary": result.ai_vocabulary,
             "chatbot_artifacts": result.chatbot_artifacts, "citation_bugs": result.citation_bugs,
-            "filler_phrases": result.filler_phrases, "curly_quotes": result.curly_quotes, "em_dashes": result.em_dashes,
+            "filler_phrases": result.filler_phrases, "rule_of_three": result.rule_of_three,
+            "curly_quotes": result.curly_quotes, "em_dashes": result.em_dashes,
         }, indent=2))
     elif args.score_only:
         print(f"Issues: {result.total_issues} | Words: {result.word_count} | AI: {result.ai_probability}")

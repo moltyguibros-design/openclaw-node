@@ -6,5 +6,6 @@ test('service gate keeps scheduled application work paused until verified recove
   execFileSync('python3', [fileURLToPath(new URL('./service_gate_test.py', import.meta.url)), '-v'], {
     timeout: 30_000,
     stdio: 'pipe',
+    env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
   });
 });

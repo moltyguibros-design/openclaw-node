@@ -1,17 +1,24 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import {
+import { setChannelErrorSink } from '../lib/retrieval-pipeline.mjs';
+
+// injection-logger reads the flag at load, so the injector must load after it.
+process.env.INJECTION_LOG_DISABLED = '1';
+const {
   DEFAULT_TOKEN_BUDGET,
   CHARS_PER_TOKEN,
   estimateTokens,
   queryRelevantConcepts,
   queryRelevantDecisions,
-  trimToBudget,
   createMemoryInjector,
   recallScore,
   writeBackReconsolidation,
-} from '../lib/memory-injector.mjs';
+  curateForRecall,
+  RECALL_CAPS,
+  llmSeedTerms,
+} = await import('../lib/memory-injector.mjs');
+const { formatMemoryBlock } = await import('../lib/memory-formatter.mjs');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -194,69 +201,14 @@ describe('queryRelevantDecisions', () => {
   });
 });
 
-describe('trimToBudget', () => {
-  it('includes all items when within budget', () => {
-    const data = {
-      concepts: [{ name: 'A', type: 'tech' }],
-      decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
-      snippets: [{ snippet: 'short snippet', score: 0.8 }],
-    };
-    const result = trimToBudget(data, 500);
-    assert.equal(result.concepts.length, 1);
-    assert.equal(result.decisions.length, 1);
-    assert.equal(result.snippets.length, 1);
-    assert.ok(result.tokenCount > 0);
-    assert.equal(result.budget, 500);
-  });
-
-  it('trims snippets first when over budget', () => {
-    const longSnippet = 'x'.repeat(2000); // 500 tokens
-    const data = {
-      concepts: [{ name: 'A', type: 'tech' }],
-      decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
-      snippets: [
-        { snippet: longSnippet, score: 0.9 },
-        { snippet: longSnippet, score: 0.8 },
-      ],
-    };
-    // Budget of 100 tokens — concepts + decisions fit, but not both long snippets
-    const result = trimToBudget(data, 100);
-    assert.equal(result.concepts.length, 1);
-    assert.equal(result.decisions.length, 1);
-    assert.equal(result.snippets.length, 0); // snippets too large
-    assert.ok(result.tokenCount <= 100);
-  });
-
-  it('returns empty sections for very small budget', () => {
-    const data = {
-      concepts: [{ name: 'A', type: 'tech' }],
-      decisions: [{ decision: 'Use X', confidence: 0.9, date: '2026-05-23' }],
-      snippets: [{ snippet: 'text', score: 0.8 }],
-    };
-    const result = trimToBudget(data, 10);
-    // Budget too small for overhead (30 tokens) — remaining goes negative
-    assert.equal(result.concepts.length, 0);
-    assert.equal(result.decisions.length, 0);
-    assert.equal(result.snippets.length, 0);
-  });
-
-  it('handles empty input data', () => {
-    const result = trimToBudget({ concepts: [], decisions: [], snippets: [] }, 750);
-    assert.equal(result.concepts.length, 0);
-    assert.equal(result.decisions.length, 0);
-    assert.equal(result.snippets.length, 0);
-    assert.equal(result.budget, 750);
-  });
-});
-
 describe('createMemoryInjector', () => {
   it('returns an object with a retrieve method', () => {
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     assert.equal(typeof injector.retrieve, 'function');
   });
 
   it('retrieve returns empty result for null prompt', async () => {
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     const result = await injector.retrieve(null);
     assert.deepEqual(result.concepts, []);
     assert.deepEqual(result.decisions, []);
@@ -268,7 +220,7 @@ describe('createMemoryInjector', () => {
   it('retrieve returns structured result with mock embedFn', async () => {
     // No DBs — pipeline returns empty, but structure is correct
     const mockEmbedFn = async () => new Float32Array(1024);
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     const result = await injector.retrieve('How does NATS work?', {
       embedFn: mockEmbedFn,
     });
@@ -282,7 +234,7 @@ describe('createMemoryInjector', () => {
 
   it('retrieve respects custom tokenBudget', async () => {
     const mockEmbedFn = async () => new Float32Array(1024);
-    const injector = createMemoryInjector({});
+    const injector = createMemoryInjector({ llmClient: null });
     const result = await injector.retrieve('test query', {
       embedFn: mockEmbedFn,
       tokenBudget: 200,
@@ -397,5 +349,156 @@ describe('writeBackReconsolidation — actually writes (F-C8)', () => {
     const row = db.prepare('SELECT last_recalled FROM entities WHERE name = ?').get('NATS');
     assert.equal(row.last_recalled, null);
     db.close();
+  });
+
+  it('a failing write-back reports channel reconsolidation and never throws', () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE entities (id INTEGER PRIMARY KEY, salience REAL)');
+    try {
+      writeBackReconsolidation(db, { entityIds: [1], decisionIds: [] });
+      assert.deepStrictEqual(reports.map(r => r.channel), ['reconsolidation']);
+      assert.match(reports[0].message, /last_recalled/);
+    } finally {
+      db.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});
+
+describe('@memory only:X filter', () => {
+  it('a failing filter reports channel theme-filter and keeps the results', async () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const knowledgeDb = new Database(':memory:');
+    knowledgeDb.exec(`
+      CREATE TABLE session_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL);
+      CREATE VIRTUAL TABLE session_chunks_fts USING fts5(text, content='session_chunks', content_rowid='id');
+      CREATE TRIGGER session_chunks_fts_ins AFTER INSERT ON session_chunks BEGIN
+        INSERT INTO session_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+    `);
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+      VALUES ('session-1', 0, 'user', 'jetstream consumer setup', 'jetstream consumer setup')`).run();
+    const extractionDb = new Database(':memory:');
+    try {
+      const injector = createMemoryInjector({ knowledgeDb, extractionDb, llmClient: null });
+      const result = await injector.retrieve('jetstream consumer', {
+        embedFn: async () => null,
+        respectPrivacy: false,
+        themeFilter: 'nats',
+      });
+      assert.ok(result.snippets.some(s => s.sessionId === 'session-1'), 'the filter fails open');
+      const filter = reports.find(r => r.channel === 'theme-filter');
+      assert.ok(filter, JSON.stringify(reports.map(r => r.channel)));
+      assert.match(filter.message, /no such table/);
+    } finally {
+      knowledgeDb.close();
+      extractionDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});
+
+describe('curateForRecall — related_sessions caps sessions, not chunks', () => {
+  const snippets = [
+    { sessionId: 'A', snippet: 'a1', score: 0.05 },
+    { sessionId: 'A', snippet: 'a2', score: 0.04 },
+    { sessionId: 'A', snippet: 'a3', score: 0.03 },
+    { sessionId: 'B', snippet: 'b1', score: 0.02 },
+    { sessionId: 'C', snippet: 'c1', score: 0.01 },
+    { sessionId: 'D', snippet: 'd1', score: 0.005 },
+  ];
+
+  it('keeps the best snippet of each of the top sessions', () => {
+    const result = curateForRecall({ concepts: [], decisions: [], snippets });
+    assert.equal(RECALL_CAPS.related_sessions, 3);
+    assert.deepEqual(result.snippets.map(s => s.snippet), ['a1', 'b1', 'c1']);
+  });
+
+  it('the rendered block names every curated session', () => {
+    const block = formatMemoryBlock(curateForRecall({ concepts: [], decisions: [], snippets }));
+    assert.match(block, /\[A\]: a1/);
+    assert.match(block, /\[B\]: b1/);
+    assert.match(block, /\[C\]: c1/);
+  });
+});
+
+describe('curateForRecall — token accounting follows the rendered block', () => {
+  const longDecision = {
+    id: 1, session_id: 's', decision: 'x'.repeat(1000), confidence: 0.9,
+    date: '2026-05-23T12:00:00.000Z',
+  };
+  const snippets = [
+    { sessionId: 'A', snippet: 'y'.repeat(600), score: 0.05 },
+  ];
+
+  it('a long decision is costed at its capped length and does not crowd out a snippet', () => {
+    const result = curateForRecall({ concepts: [], decisions: [longDecision], snippets }, 200);
+    assert.equal(result.decisions.length, 1);
+    assert.deepEqual(result.snippets.map(s => s.sessionId), ['A']);
+  });
+
+  it('tokenCount tracks the rendered block, not the raw fields', () => {
+    const result = curateForRecall({ concepts: [], decisions: [longDecision], snippets }, 1500);
+    const rendered = estimateTokens(formatMemoryBlock(result));
+    assert.ok(result.tokenCount < 250, `tokenCount ${result.tokenCount} counts uncapped text`);
+    assert.ok(Math.abs(result.tokenCount - rendered) <= 40,
+      `tokenCount ${result.tokenCount} vs rendered ${rendered}`);
+  });
+});
+
+// ─── memory-knowledge#5: the LLM analysis steers retrieval ──────────────────
+
+describe('LLM analysis entities/themes seed retrieval', () => {
+  it('llmSeedTerms takes string entities then themes, nothing on fallback', () => {
+    assert.deepEqual(llmSeedTerms(null), []);
+    assert.deepEqual(llmSeedTerms({ intent: 'debug' }), []);
+    assert.deepEqual(
+      llmSeedTerms({ entities: ['NATS', 3], themes: ['messaging', null] }),
+      ['NATS', 'messaging'],
+    );
+  });
+
+  it('an entity the prompt only paraphrases is retrieved via the analysis', async () => {
+    const extractionDb = createTestExtractionDb();
+    seedTestData(extractionDb);
+    const knowledgeDb = new Database(':memory:');
+    knowledgeDb.exec(`CREATE TABLE session_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+      turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL)`);
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+      VALUES ('session-1', 0, 'user', 'jetstream setup', 'jetstream setup')`).run();
+    const llmClient = {
+      async generateAnalysis() {
+        return { mode: 'llm', value: { content: JSON.stringify({ intent: 'debug', entities: ['NATS'], themes: [] }) } };
+      },
+    };
+    setChannelErrorSink(() => {}); // no FTS/vector tables in this knowledge DB
+    try {
+      const injector = createMemoryInjector({ knowledgeDb, extractionDb, llmClient });
+      const result = await injector.retrieve('why is the message bus dropping events', {
+        embedFn: async () => null,
+        respectPrivacy: false,
+      });
+      assert.equal(result.analysis.mode, 'llm');
+      assert.ok(
+        result.snippets.some(s => s.sessionId === 'session-1'),
+        'the session mentioning the analysis entity must be injected',
+      );
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
   });
 });

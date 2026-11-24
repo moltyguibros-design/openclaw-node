@@ -2,12 +2,12 @@
 
 Installable package for deploying an OpenClaw node. Includes the full infrastructure stack:
 
-- **Memory Daemon** — persistent background service managing session lifecycle, memory maintenance, Obsidian sync, and the consolidation cycle (the live unit execs `workspace-bin/memory-daemon.mjs`). The federation wiring (broadcaster/offerer/acceptor + subscriber + in-process consolidation scheduler) lives inside the same daemon behind `OPENCLAW_FEDERATION=1` — default off, dormant until multi-node federation lands
-- **Federation / Grappe** — signed multi-node memory federation: grappes are signed-membership clusters of full OpenClaw nodes (`bin/openclaw-grappe.mjs`, `GRAPPE_REGISTRY` KV, join-token verified). The unit of federation is an OpenClaw, not a model
+- **Memory Daemon** — persistent background service managing session lifecycle, memory maintenance, Obsidian sync, and the consolidation cycle (the live unit execs `workspace-bin/memory-daemon.mjs`). The federation wiring (broadcaster/offerer/acceptor + subscriber + a consolidation broadcast on the timer's cadence) lives inside the same daemon behind `OPENCLAW_FEDERATION=1` — default off, dormant until multi-node federation lands
+- **Federation / Grappe** — signed multi-node memory federation: grappes are operator-managed clusters of full OpenClaw nodes (`bin/openclaw-grappe.mjs`; membership lives unsigned in the `GRAPPE_REGISTRY` KV and `join` checks the token in the CLI). The unit of federation is an OpenClaw, not a model
 - **HyperAgent Protocol** — evidence-driven strategy loop: task telemetry, structured reflection, and human-gated strategy proposals
 - **Mission Control** — Next.js web dashboard (kanban, timeline, graph visualization, memory browser)
 - **Soul System** — multi-soul orchestration with trust registry and evolution
-- **Skill Library** — 100+ skills for AI agent capabilities
+- **Skill Library** — 87 skills for AI agent capabilities
 - **Boot Compiler** — profile-aware boot artifact generation for multiple AI models
 - **ClawVault** — structured knowledge vault with search and handoffs
 - **Mesh Task Engine** — distributed task execution with Karpathy iteration (try → measure → keep/discard → retry)
@@ -20,14 +20,15 @@ Installable package for deploying an OpenClaw node. Includes the full infrastruc
 ### On a new machine — one command
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/main/bootstrap.sh | bash -s -- --role=lead
 ```
 
-This is the **only** entrypoint that works on a machine with nothing on it. It assumes
+(`--role=worker` for a worker; the first install refuses to guess it.) This is the **only** entrypoint that works on a machine with nothing on it. It assumes
 just `bash` + `curl` (stock on macOS and Ubuntu) and a sudo-capable user, then installs
 Homebrew (macOS), the Xcode Command Line Tools, Node 22, Python 3, Git, SQLite3, build
-tools, jq, nats-server, ollama and Tailscale — verifies each one is actually on `PATH` —
-and only then downloads the repo and runs `install.sh --enable-services`.
+tools, jq, nats-server and ollama (plus Tailscale with `--cluster-peers=…` or
+`--with-tailscale`) — verifies each one is actually on `PATH` — and only then downloads
+the repo and runs `install.sh --enable-services`.
 
 You are asked for your password once. Homebrew and apt install into system locations;
 that is not automatable away.
@@ -35,7 +36,7 @@ that is not automatable away.
 #### It runs in two waves
 
 **Wave 1 — binaries and a running node.** Homebrew, Xcode CLT, Node 22, Python 3, Git,
-SQLite3, jq, nats-server, ollama, Tailscale, then `install.sh --enable-services`. A few
+SQLite3, jq, nats-server, ollama (Tailscale only for a cluster), then `install.sh --enable-services`. A few
 hundred MB. No models.
 
 **Wave 2 — the LLM brain, only after you confirm.** The local model is 5–18 GB depending
@@ -55,7 +56,10 @@ on your RAM tier, plus ~2 GB for the `Xenova/bge-m3` embedder. That never starts
 
 Tiers follow `bin/check-llm-baseline.mjs`: ≥48 GB → `qwen3:32b`, ≥32 GB → `qwen3:14b`,
 ≥16 GB → `qwen3:8b`. Below 16 GB there is no viable local tier and wave 2 says so instead
-of downloading something that will thrash.
+of downloading something that will thrash. Each bound allows 1 GB under it, because Linux
+reports a little less than the installed RAM (a 16 GB box shows ~15.7 GB). The installer
+applies the tier to `LLM_MODEL` only on a full install; `--update` keeps the configured
+model, and wave 2 is how you move an existing node to a bigger one.
 
 The prompt reads `/dev/tty`, not stdin — under `curl … | bash` stdin is the script itself.
 **With no terminal (CI, cron, `nohup`) it skips rather than hangs or downloads unattended.**
@@ -78,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/moltyguibros-design/openclaw-node/m
 If any dependency is missing at the end, bootstrap **refuses to start `install.sh`** and
 exits non-zero rather than leaving you a half-installed node.
 
-### If the machine already has Node 22+
+### If the machine already has Node 22.12+
 
 ```bash
 npx openclaw-node-harness            # Full install — identity, skills, MC, services, everything
@@ -86,10 +90,17 @@ npx openclaw-node-harness --update   # Update existing install (skip system deps
 npx openclaw-node-harness --mesh-only # Worker nodes — mesh agent + NATS only, no full stack
 ```
 
+> A full install or update under `npx` first copies the package out of the npx cache to
+> `~/.openclaw/harness/<version>/` and runs `install.sh` from there, so the services never
+> run from a cache npm may clear. After a successful run it keeps that copy and the newest
+> other one (for rollback) and removes the rest, unless a service unit still runs from it.
+> The fleet deploy listener still needs a git clone.
+>
 > `npx` requires npm, which requires Node. It therefore **cannot install Node**, and
 > cannot bootstrap a virgin machine — use the `curl | bash` command above for that.
-> This package also declares `engines: { node: ">=22" }`, so npm refuses to run it on
-> Node 18–21 even though older docs described the baseline as "Node.js 18+".
+> This package also declares `engines: { node: ">=22.12" }`, so npm refuses to run it on
+> anything older: 22.12 is the first 22.x whose `require()` loads an ES module unflagged,
+> which joining a mesh needs.
 
 ### From a clone
 
@@ -97,8 +108,8 @@ npx openclaw-node-harness --mesh-only # Worker nodes — mesh agent + NATS only,
 git clone https://github.com/moltyguibros-design/openclaw-node.git
 cd openclaw-node
 bash scripts/install/prereqs.sh       # Install/verify system deps (--check to verify only)
-bash install.sh --enable-services     # Full install: start everything + acceptance gate
-bash install.sh                       # Files/units only (start later with --update --enable-services)
+bash install.sh --role=lead --enable-services   # Full install: start everything + acceptance gate
+bash install.sh --role=lead           # Files/units only (start later with --update --enable-services)
 bash install.sh --update              # Update existing
 ```
 
@@ -109,7 +120,7 @@ What a node needs and what "running" means is specified in [docs/NODE_SPEC.md](d
 the verification matrix is [docs/INSTALL_TEST_PROTOCOL.md](docs/INSTALL_TEST_PROTOCOL.md).
 
 The installer will:
-1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), **Tailscale** (needed for multi-machine clustering). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
+1. Verify system dependencies via `scripts/install/prereqs.sh` — Node.js 22.12+, Python 3, Git, SQLite3, build tools, `jq`, **nats-server** (the bus), **ollama** (the local LLM; skip with `--skip-llm`), and **Tailscale** only with `--cluster-peers=…` or `--with-tailscale` (a single node does not need it). Each is confirmed on `PATH`; the install **aborts** if any is missing rather than continuing partially installed.
 2. Install the repo's runtime `node_modules` (the mesh daemons exec from the repo tree)
 3. Create the `~/.openclaw/` directory structure and copy scripts, libs (incl. mcp-knowledge), identity files, souls, and skills
 4. Generate configuration from templates — including the **single-node NATS bus** (`nats.conf`, loopback + generated token) and an env file with the **local-first memory-model defaults** (RAM-tiered `LLM_MODEL`); the agent provider (`MESH_LLM_PROVIDER`) is whatever you choose — `--provider=NAME`, the install prompt, or a CLI already on PATH
@@ -127,7 +138,7 @@ The installer will:
    openclaw-node-watch    # live WORKING/BROKEN/OFF/UNKNOWN map (one-shot; add --json for machine-readable)
    ```
 
-2. **Run the node:** `openclaw-stack up` starts every installed service, probes them, and pops a status notification; `openclaw-stack status` prints the probe table without side effects; `openclaw-stack down` stops everything. Units parked as `.disabled` are reported but never restarted.
+2. **Run the node:** `openclaw-stack up` starts the services a fresh install starts (the `autostart: true` units in `services/service-manifest.json` plus the bus layout declared in `~/.openclaw/config/nats-writer-cohort.json`; the gateway, mesh-agent and Discord tool stay operator-started), probes them, and pops a status notification; `openclaw-stack status` prints the probe table without side effects; `openclaw-stack down` stops everything. Units parked as `.disabled` are reported but never restarted.
 
 3. **Optional feature keys** (cloud LLMs, Discord, TTS, Obsidian) in the env file, then re-render:
    ```bash
@@ -140,7 +151,7 @@ The installer will:
 
 ## Updating
 
-Pull latest and re-run with `--update` to refresh scripts and configs without reinstalling system deps:
+Pull latest and re-run with `--update` to refresh scripts and units without reinstalling system deps. Rendered configs you already have (`openclaw.json`, `daemon.json`, `transcript-sources.json`, `obsidian-sync.json`, `nats*.conf`) are never overwritten: when the template renders differently, the render is saved beside the file as `<file>.new` with a warning, for you to merge by hand. `notify.json` (muted sources, icons) is kept as it is; the default is written only when it is missing.
 
 ```bash
 cd openclaw-node
@@ -154,6 +165,10 @@ bash install.sh --update
 bash uninstall.sh          # Remove services and scripts (keep memory data)
 bash uninstall.sh --purge  # Remove everything including all data
 ```
+
+The default mode removes only the skills this repo ships from `~/.openclaw/workspace/skills`; skills you installed yourself (ClawHub, through the scanner gate) stay there and are listed.
+
+`~/.openclaw` is shared with the OpenClaw gateway, which the uninstaller leaves installed. `--purge` removes the toolkit's files there (workspace and memory, config, souls, logs, `state.db`, `openclaw.env`, the node identity), `~/openclaw` and the bootstrap trees, then lists what is left (the gateway's credentials, pairings, agents and sessions, `openclaw.json`) and asks a second time before deleting it. Answering N, or no answer, keeps OpenClaw working.
 
 ## Directory Structure (installed)
 
@@ -170,7 +185,7 @@ bash uninstall.sh --purge  # Remove everything including all data
 ├── workspace/
 │   ├── bin/                  # All scripts (daemon, mesh-agent, etc.)
 │   ├── lib/                  # Shared libraries (rule-loader, harness, roles, plans)
-│   ├── skills/               # 100+ skill definitions
+│   ├── skills/               # 87 skill definitions (_quarantine/ is never installed)
 │   ├── memory/               # Daily logs, active tasks, archive
 │   ├── memory-vault/         # ClawVault structured knowledge
 │   ├── .boot/                # Compiled boot profiles
@@ -195,10 +210,14 @@ bash uninstall.sh --purge  # Remove everything including all data
 
 OpenClaw targets lightweight **consumer hardware** (see [docs/NODE_SPEC.md §1](docs/NODE_SPEC.md)). It runs on:
 
-- **macOS** (primary dev target; nodes default to the `lead` role, services via launchd)
-- **Linux with systemd** (Ubuntu 20.04+; nodes default to `worker`, services via systemd)
+- **macOS** (primary dev target; services via launchd)
+- **Linux with systemd** (Ubuntu 20.04+; services via systemd)
 
-Baseline: **Node.js 22+** (the `engines` floor; Mission Control requires it), Python 3.8+,
+The role is never taken from the OS: a node's first install names it with `--role=lead|worker`,
+which is saved as `OPENCLAW_NODE_ROLE` in `openclaw.env`. The installer and the deploy tools refuse
+to run on a node without one.
+
+Baseline: **Node.js 22.12+** (the `engines` floor; Mission Control requires it), Python 3.8+,
 Git, SQLite 3, plus a working compiler for `better-sqlite3`.
 
 ### System dependencies
@@ -213,7 +232,7 @@ package manager's exit code.
 
 | Package | Purpose |
 |---|---|
-| `nodejs` (22+) | Runtime for daemon, MC, and Node.js scripts |
+| `nodejs` (22.12+) | Runtime for daemon, MC, and Node.js scripts |
 | `nats-server` | The message bus every subsystem talks through (single-node loopback by default; R=3 cluster is opt-in) |
 | `ollama` | Local LLM runtime for memory extraction + local mesh agents (skip with `--skip-llm`) |
 | `python3` + `python3-pip` | Runtime for boot compiler, trust registry, evolution |
@@ -222,29 +241,33 @@ package manager's exit code.
 | `sqlite3` | Database engine |
 | `curl` | HTTP calls from scripts |
 | `jq` | JSON processing in test/workflow scripts |
-| `tailscale` | Mesh VPN. `install.sh` derives `--cluster-bind` from `tailscale ip -4`; without it multi-machine NATS clustering silently degrades to a single node. Installed but **not** authenticated — run `tailscale up` yourself. |
+| `tailscale` | Mesh VPN, multi-machine clusters only: installed with `--cluster-peers=…` or `--with-tailscale`, never on a single-node install. `install.sh` derives `--cluster-bind` from `tailscale ip -4`. Installed but **not** authenticated — run `tailscale up` yourself. |
 | `homebrew` | macOS package manager. Installed by `bootstrap.sh` only; it also pulls in the Xcode Command Line Tools, which is where the compiler comes from. |
 | `pyyaml` (pip) | Required by `bin/compile-boot` for YAML parsing |
-| `scrot` (Linux) | Screenshot capture (fallback: gnome-screenshot, flameshot) |
+
+Optional on Linux: `workspace-bin/screenshot` needs one of scrot, gnome-screenshot, ImageMagick `import` or flameshot; the installer does not install them.
 
 ### Skills with their own dependencies
 
 The installer auto-detects and installs these:
-- ~~memorylayer~~ / ~~moltbook-registry~~ — **quarantined** (`skills/_quarantine/README.md`): external memory exfil and mainnet wallet actions by design; not installed.
+- ~~memorylayer~~ / ~~moltbook-registry~~ / ~~auto-updater~~ — **quarantined** (`skills/_quarantine/README.md`): external memory exfil, mainnet wallet actions and unscanned scheduled skill updates by design; not installed.
 - **prompt-guard** — pip: `pyyaml`
 - **crypto-price** — pip: `matplotlib`
-- **fast-browser-use** — Rust (requires manual `cargo build` if needed)
+- **gemini-deep-research** — pip: `requests`
+- **n8n** — pip: `requests`
+- **web-search** — pip: `duckduckgo-search`
+- **excel** — pip: `openpyxl`
 
 ## Obsidian Setup
 
-The installer deploys the vault scaffold with 22 domain folders (`00-meta` … `21-legal-regulatory`) plus a per-node `nodes/` area, and the **Local REST API** plugin pre-installed. On first Obsidian launch:
+The installer deploys the vault scaffold with 22 domain folders (`00-meta` … `21-legal-regulatory`) plus a per-node `nodes/` area, and installs the **Local REST API** plugin by downloading a pinned upstream release and verifying its sha256 (`scripts/install/obsidian-rest-api.sh`; the plugin is not vendored in the repo). If that download fails, install the plugin from Obsidian's community plugins. On first Obsidian launch:
 
-1. Obsidian will auto-download 5 missing community plugins (dataview, templater, kanban, git, graph-analysis) — requires internet
+1. Enable community plugins if Obsidian asks; Local REST API is the only plugin the scaffold enables
 2. Generate an API key in the Local REST API plugin settings
 3. Save the key to `~/.openclaw/workspace/projects/arcane-vault/.obsidian-api-key`
 4. The memory daemon will sync workspace files to the vault every 30 minutes
 
-If not using Obsidian, the sync is disabled by default in `config/obsidian-sync.json.template` (`"enabled": false`), which the installer renders to `~/.openclaw/workspace/config/obsidian-sync.json`.
+If not using Obsidian, the sync is disabled by default in `config/obsidian-sync.json.template` (`"enabled": false`), which the installer renders to `~/.openclaw/config/obsidian-sync.json`.
 
 ## HyperAgent Protocol
 
@@ -321,8 +344,8 @@ hyperagent reflect [--force]               # trigger reflection
 hyperagent reflect --pending               # get pending synthesis (JSON)
 hyperagent reflect --write-synthesis --stdin   # atomically write synthesis + proposals
 hyperagent proposals                       # list proposals
-hyperagent approve <id>                    # approve (human gate)
-hyperagent reject <id> [reason]            # reject
+hyperagent approve <id> --reviewer <name>  # approve (human gate; records the named reviewer)
+hyperagent reject <id> --reviewer <name> [reason]  # reject
 hyperagent observe <id> [--window 60]      # start non-causal observation window
 hyperagent seed-strategy --stdin            # import strategy JSON safely via stdin
 ```
@@ -417,8 +440,10 @@ The knowledge server scans markdown files in your workspace, splits them into ch
 | `knowledge_tree(path_prefix?, depth?)` | The directory tree with a one-line **L0 abstract** per directory — call first to pick a `path_prefix` |
 | `directory_overview(path)` | One directory's **L1 overview**: subdirectories with abstracts, documents with titles |
 | `search_directories(query, limit)` | Rank directories by abstract similarity — find the folder before the file |
-| `reindex(force)` | Re-scan and re-embed changed files |
+| `reindex(force)` | Re-scan and re-embed changed files (HTTP transport: hidden unless `KNOWLEDGE_ALLOW_REINDEX=1`) |
 | `knowledge_stats()` | Index statistics (doc count, chunk count, directories, model info) |
+| `sql_query(db, sql, params?)` | One read-only SELECT/WITH/VALUES/EXPLAIN against a local DB (`state`, `knowledge`, `mission_control`); writes, PRAGMA and ATTACH rejected; at most 200 rows (HTTP transport: hidden unless `KNOWLEDGE_ALLOW_SQL=1`) |
+| `sql_schema(db)` | Tables, indexes and views of one of those DBs, with their CREATE statements (HTTP transport: hidden unless `KNOWLEDGE_ALLOW_SQL=1`) |
 
 **Directory summaries (L0/L1).** After every index pass the server rebuilds a per-directory abstract
 and overview, bottom-up and hash-gated (an unchanged subtree costs one SELECT). They are
@@ -437,7 +462,7 @@ Any MCP-compatible client can use these tools. The server supports three transpo
 | **HTTP MCP** | `KNOWLEDGE_PORT=3100 node lib/mcp-knowledge/server.mjs` | Remote MCP clients, web UIs |
 | **NATS mesh** *(planned)* | `mesh.tool.{nodeId}.knowledge.*` request/reply — not yet wired (the only mesh tool responder today is `discord-history`) | Mesh workers (use HTTP for now) |
 
-Mesh worker nodes reach the lead's index over HTTP — point them at the lead's `KNOWLEDGE_PORT` — so one index on the lead node can be queried from anywhere without shipping the embedding model, database, or knowledge files to every node. (A native NATS `mesh.tool.*.knowledge.*` responder is planned but not yet wired.)
+Mesh worker nodes can reach the lead's index over HTTP, so one index on the lead can be queried without shipping the embedding model, database, or knowledge files to every node. This works only once the lead binds a reachable address: `KNOWLEDGE_HOST` defaults to `127.0.0.1`, and the server returns 403 for any `Host` header other than `KNOWLEDGE_HOST:KNOWLEDGE_PORT` or loopback, so set `KNOWLEDGE_HOST` to the exact address or name the workers dial (e.g. the lead's tailnet IP or DNS name, lowercase; not `0.0.0.0`, which binds every interface but makes every remote `Host` a 403), then point the workers at that address and `KNOWLEDGE_PORT`. The HTTP transport has no authentication: everyone who can reach the port gets every listed tool. `sql_query` and `sql_schema` read the private state and Mission Control databases, so HTTP lists them only with `KNOWLEDGE_ALLOW_SQL=1` (stdio always has them). (A native NATS `mesh.tool.*.knowledge.*` responder is planned but not yet wired.)
 
 ### Configuration
 
@@ -445,11 +470,16 @@ Environment variables (set in `.mcp.json` env block or shell):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KNOWLEDGE_ROOT` | `~/.openclaw/workspace` | Directory to scan for markdown files |
+| `KNOWLEDGE_ROOT` | current working directory (`.mcp.json` sets `~/.openclaw/workspace`) | Directory to scan for markdown files |
 | `KNOWLEDGE_DB` | `{KNOWLEDGE_ROOT}/.knowledge.db` | SQLite database path |
 | `KNOWLEDGE_POLL_MS` | `300000` (5 min) | Background re-index interval |
 | `KNOWLEDGE_PORT` | *(unset)* | Set to enable HTTP transport (e.g. `3100`) |
-| `KNOWLEDGE_HOST` | `127.0.0.1` | HTTP bind address |
+| `KNOWLEDGE_HOST` | `127.0.0.1` | HTTP bind address, and the only non-loopback `Host` the server accepts (use the address clients dial, not `0.0.0.0`) |
+| `KNOWLEDGE_ALLOW_REINDEX` | *(unset)* | `1` lists and allows `reindex` on the HTTP transport |
+| `KNOWLEDGE_ALLOW_SQL` | *(unset)* | `1` lists and allows `sql_query` and `sql_schema` on the HTTP transport |
+| `KNOWLEDGE_MAX_BODY_BYTES` | `1048576` | HTTP request body cap (413 above it) |
+| `KNOWLEDGE_MODEL` | `Xenova/bge-m3` | Embedding model id; must emit 1024-dim vectors (`EMBEDDING_DIM`) |
+| `KNOWLEDGE_SUMMARY_LLM` | *(unset)* | `0` keeps directory summaries deterministic (no model calls) |
 | `KNOWLEDGE_INCLUDE` | `memory/, projects/arcane/*, .learnings/, SOUL.md, …` | Comma-separated files/dirs to scan, relative to `KNOWLEDGE_ROOT` (env var is `KNOWLEDGE_INCLUDE`, not `INCLUDE_DIRS`) |
 
 ### Performance
@@ -463,15 +493,23 @@ Benchmarked on a ~250-file workspace:
 
 ### Running tests
 
+CI and the root `npm test` run `test/mcp-knowledge-*.test.mjs` without the embedding model:
+`test/mcp-knowledge-core.test.mjs` covers the scanner, the markdown and session chunkers, hashing,
+the schema and sqlite-vec; the other files seed chunks with synthetic vectors, and their cases
+that need the model skip (with a counted reason) unless it is available.
+
+`lib/mcp-knowledge/test.mjs` is a manual local suite (7 groups: embedding, indexing, semantic
+search, findRelated, stats, the engine factory and the HTTP transport) that embeds with the real
+bge-m3 model, so it needs the ~2 GB model download on first run. CI does not run it:
+
 ```bash
 cd lib/mcp-knowledge
 node test.mjs
-# 98 assertions across 12 test groups
 ```
 
 ## Mesh Network (Multi-Node)
 
-By default every node runs a single-node loopback NATS bus (`nats://127.0.0.1:4222`) and operates standalone. The multi-node mesh — a Tailscale-linked, R=3-replicated, route-authenticated NATS cluster — is an opt-in upgrade: `install.sh --cluster-peers=… --cluster-bind=…` builds it explicitly (recommended, below). When enabled, nodes execute remote commands (`mesh exec`), dispatch and run tasks across the fleet via the NATS task-daemon, and exchange ad-hoc broadcast messages (`mesh broadcast`).
+By default every node runs a single-node loopback NATS bus (`nats://127.0.0.1:4222`) and operates standalone. The multi-node mesh — a Tailscale-linked, R=3-replicated, route-authenticated NATS cluster — is an opt-in upgrade: `install.sh --cluster-peers=… --cluster-bind=…` builds it explicitly (recommended, below). When enabled, nodes dispatch and run tasks across the fleet via the NATS task-daemon (`mesh submit`), take signed fleet deploys (`mesh deploy`), and publish their health to the `MESH_NODE_HEALTH` KV (`mesh status`, `mesh health`).
 
 ### Setup — multi-machine NATS council (recommended)
 
@@ -499,12 +537,14 @@ every machine:
 1. **Lead:** trust every worker's identity pubkey (each worker prints it at the end of
    `openclaw-node-init`; the join token carries the lead's key the other way):
    `node bin/openclaw-trust-peer.mjs <worker-id> <pubkey> --role worker --sync-nats`
-   Set `OPENCLAW_NATS_AUTH=nkey` in `openclaw.env`, run `node bin/openclaw-trust-peer.mjs
+   Set `OPENCLAW_NATS_AUTH=nkey` and `OPENCLAW_NODE_ROLE=lead` in the lead's `openclaw.env` (nkey
+   mode refuses to render while the role is unset), run `node bin/openclaw-trust-peer.mjs
    --sync-nats` (renders `~/.openclaw/config/nats-auth.conf` with a users list plus a legacy
    password user, and reloads nats-server), then restart the daemons.
 2. **Workers:** set `OPENCLAW_NATS_AUTH=nkey` in `openclaw.env`, restart the daemons. Workers
    authenticate with their own key and can no longer publish `mesh.deploy.trigger`.
-3. **Mission Control:** set `OPENCLAW_NATS_AUTH=nkey` in `mission-control/.env.local`, restart.
+3. **Mission Control:** reads the mode from the same `openclaw.env` (steps 1 and 2 cover it);
+   restart it.
 4. **Lead:** set `OPENCLAW_NATS_LEGACY_USER=0`, run `--sync-nats` again (drops the password
    user), and set `OPENCLAW_NATS_AUTH=nkey-strict` everywhere. Anything still sending the old
    token now fails with `Authorization Violation` in `~/.openclaw/logs/nats.err`.
@@ -518,38 +558,45 @@ Full walkthrough: [docs/MULTI_NODE_DEPLOY.md](docs/MULTI_NODE_DEPLOY.md). *Hones
 config/auth mechanism is built and drill-verified; real machine-loss failover awaits a
 multi-machine T7 run.*
 
-> The older Tailscale auto-mesh (installer Step 17, `npx openclaw-mesh`) still exists but is the
-> legacy path, slated for retirement (D4).
+> The old standalone `npx openclaw-mesh` fleet layer is retired (federation D4) and must not be
+> run: that npm name now belongs to an unrelated third party. Installer Step 17 only installs the
+> mesh skill; the mesh itself is this repo's `bin/mesh*.js` and the rendered service units.
 
 ### Mesh commands
 
 ```
-mesh status          # see online nodes
-mesh health --all    # check all nodes
-mesh repair --all    # fix broken services
-mesh exec "cmd"      # run command on remote node
+node ~/openclaw/bin/mesh.js status           # every node in MESH_NODE_HEALTH
+node ~/openclaw/bin/mesh.js health --all     # ok / degraded / down per node (--json for scripts)
+node ~/openclaw/bin/mesh.js submit task.yaml   # hand a task to the mesh workers
+node ~/openclaw/bin/mesh.js tasks              # list mesh tasks (review / approve / reject)
+node ~/openclaw/bin/mesh.js plan list          # multi-step plans
+node ~/openclaw/bin/mesh.js collab gate approve <session-id>  # resume a circling session at its gate (signed)
+node ~/openclaw/bin/mesh.js deploy             # signed fleet deploy of origin's tip of $OPENCLAW_DEPLOY_BRANCH (default main)
+openclaw-node-check --axis network --no-mutate # read-only bus probes (also --axis federation)
 ```
 
 ### Architecture
 
 - **NATS** — message bus for commands, task dispatch, and heartbeats (single-node loopback by default; the R=3 cluster runs across the mesh)
-- **Mesh worker** (`bin/mesh-agent.js`) — LLM-agnostic task executor: connects to NATS, claims tasks from the mesh task-daemon, runs the configured LLM CLI, and reports results. For grappe/collab work the D11 guard applies (local models declined; `shell` mocks gated behind `MESH_ALLOW_MOCK_WORKERS=1`). (`mesh put`/`mesh ls` operate on a local `~/openclaw/shared/` directory — there is no cross-node shared-folder syncer)
+- **Mesh worker** (`bin/mesh-agent.js`) — LLM-agnostic task executor: connects to NATS, claims tasks from the mesh task-daemon, runs the configured LLM CLI, and reports results. For grappe/collab work the D11 guard applies (local models declined; `shell` mocks gated behind `MESH_ALLOW_MOCK_WORKERS=1`).
 - **Task Bridge** (`bin/mesh-bridge.js`) — dispatches kanban tasks marked `execution=mesh` to the mesh task-daemon over NATS and writes results/logs back to `active-tasks.md` on completion (subscribes to `mesh.events.>`)
 - **Knowledge over NATS** *(planned)* — the `mesh.tool.{nodeId}.<tool>.*` request/reply pattern exists but is wired only for `discord-history` today; there is no knowledge-over-NATS responder yet (mesh workers query the lead's index over HTTP)
 - **Tailscale** — encrypted WireGuard tunnel between nodes
 - **Agent Activity Monitor** (`lib/agent-activity.js`) — zero-cost agent state detection via Claude Code JSONL session files (active, ready, idle, blocked)
-- **Memory Budget** (`lib/memory-budget.mjs`) — character budget enforcement for MEMORY.md with freeze/thaw semantics per session
-- **Mesh Registry** (`lib/mesh-registry.js`) — NATS KV-backed tool registry for registering and calling remote tools over request/reply; the only registered tool today is `discord-history` (`bin/mesh-tool-discord.js`)
+- **Memory Budget** (`lib/memory-budget.mjs`) — the MEMORY.md character budget the flush writes under, its usage meter, and the node memory session events (`memory.session_started` / `memory.session_ended`)
+- **Mesh Registry** (`lib/mesh-registry.js`) — NATS KV-backed tool registry: tools register here and are called over request/reply on `mesh.tool.<node>.<tool>.<method>`; the only registered tool today is `discord-history` (`bin/mesh-tool-discord.js`)
 
 The mesh is optional. Without Tailscale, everything runs as a standalone single node.
 
 ## Federation (Grappes)
 
+> **Status: BLOCKED (D15).** The federation plan's premise benchmark failed on reliability (solo 3 · grappe 2), so the plan is blocked: step 3.5, the management grappe and the savant grappe do not proceed. **D16** (operator ruling) retired consensus gating from the forward design: no votes, sign-offs or convergence bars; a federation work unit is a fixed-pass pipeline (draft → reviews ingested → revision) that ships unconditionally. The circling vote and finalization machinery described below remains as built history, and the three-tier design must be re-derived under D16. The block stands until pipeline mode passes a new preregistered benchmark. See [memory-plan/plans/federation/BLOCKED.md](memory-plan/plans/federation/BLOCKED.md) and [DECISIONS D15/D16](memory-plan/plans/federation/DECISIONS.md).
+
 A **grappe** is a set of full OpenClaw nodes joined by signed membership that execute tasks through a shared worker protocol. The unit of federation is a full OpenClaw node — the frontend-agnostic agent plus its local harness, one per machine — not a model or a bare process. Nodes outside any grappe keep full standalone single-node function; federation is an opt-in layer on top.
 
 > **Requirement (D11):** a grappe/cluster member's mind is an **advanced LLM** (Claude / GPT / Kimi / DeepSeek-class), never a raw local model. The local qwen model is the harness's extraction/embedding/probe organ only. **This project is not to be used for anything less than a local OpenClaw driven by an advanced LLM** — the single-box qwen mesh-agent scaffold that proved the choreography is retired as a worker.
 
-The full contract lives in [docs/FEDERATION_SPEC.md](docs/FEDERATION_SPEC.md) (v0.2). The design layers grappes into three tiers — worker grappes (3 nodes, one mode each), a management grappe (5 nodes: intake → decompose → dispatch → assemble → verify → deliver), and a savant grappe (3 nodes, adversarial; observes the whole system and emits operator-gated change-sets). Today the shipped surface is the **substrate**: the grappe registry, the CLI, and the adversarial worker mode.
+The full v0.2 design (pre-D16) lives in [docs/FEDERATION_SPEC.md](docs/FEDERATION_SPEC.md). The design layers grappes into three tiers — worker grappes (3 nodes, one mode each), a management grappe (5 nodes: intake → decompose → dispatch → assemble → verify → deliver), and a savant grappe (3 nodes, adversarial; observes the whole system and emits operator-gated change-sets). Today the shipped surface is the **substrate**: the grappe registry, the CLI, and the adversarial worker mode.
 
 ### The `openclaw-grappe` CLI
 
@@ -580,13 +627,13 @@ Worker grappes run one of three collaboration architectures:
 
 | Mode | Shape | Best for | Status |
 |---|---|---|---|
-| **adversarial** (circling) | 1 Worker + 2 Reviewers, asymmetric directed sub-rounds (see [Circling Strategy](#circling-strategy-asymmetric-multi-agent-review)) | High-stakes single artifact | **Built** — `COLLAB_MODE.CIRCLING_STRATEGY` in `lib/mesh-collab.js`, 112 tests; mesh agents run on-demand (service units ship autostart-off per the deployability overhaul) |
+| **adversarial** (circling) | 1 Worker + 2 Reviewers, asymmetric directed sub-rounds (see [Circling Strategy](#circling-strategy-asymmetric-multi-agent-review)) | High-stakes single artifact | **Built** — `COLLAB_MODE.CIRCLING_STRATEGY` in `lib/mesh-collab.js`; mesh agents run on-demand (service units ship autostart-off per the deployability overhaul) |
 | **cooperative** | propose-all / integrate-one / rotate-integrator rounds | Exploratory, no natural owner | **Built** — rotating integrator fixed at recruiting close; rotation skips dead members (aborts if none remain); a missing integration is recorded `degraded` and loud, never a silent placeholder |
 | **collaborative** | decompose → per-node subtasks → parallel work → merge + merge-review | Decomposable work (N independent pieces) | **Built** — merge-review votes are **binding**: completion requires a real merge artifact and approvals strictly above rejections, else the session aborts and the parent task fails |
 
 All three share one state layer (`lib/mesh-collab.js`), one subject namespace (`mesh.collab.*`), and one daemon (`bin/mesh-task-daemon.js`) — there is no second daemon. A grappe's `--mode` maps to its session protocol automatically (`preferred_mode` resolution: adversarial→circling, cooperative→cooperative, collaborative→collaborative).
 
-**Shared hardening (all modes):** rounds time out (`MESH_COLLAB_ROUND_TIMEOUT_MS`, default 15 min — non-reflected members are marked dead and the session aborts below `min_nodes` or evaluates with the quorum, never hangs forever); round evaluation is claim-once (concurrent triggers cannot double-integrate); reflections are membership-checked (a removed node cannot trip a barrier); and task failure over the bus requires ownership (`node_id === task.owner`) — one misconfigured node can no longer abort tasks mesh-wide. Provider policy is enforced mechanically: local-model providers are refused as workers, and the `shell` mock runs only with an explicit `MESH_ALLOW_MOCK_WORKERS=1` (choreography testing). See [docs/FEDERATION_SPEC.md](docs/FEDERATION_SPEC.md) for the message flows, envelope schemas, and the management/savant tiers (not yet built).
+**Shared hardening (all modes):** rounds time out (`MESH_COLLAB_ROUND_TIMEOUT_MS`, default 15 min, per round in the barrier modes and per turn in sequential — a non-reflected member whose agent no longer answers the alive check for the task is marked dead and the session aborts below `min_nodes` or moves on with the quorum, never hangs forever; a member still working keeps its round, bounded by the task budget); round evaluation is claim-once (concurrent triggers cannot double-integrate); reflections are membership-checked (a removed node cannot trip a barrier); and task failure over the bus requires ownership (`node_id === task.owner`) — one misconfigured node can no longer abort tasks mesh-wide. Recruits join without claiming the parent task, so at recruiting close the session owns it (`owner: collab:<session_id>`, running, its budget deadline set) unless a member claimed it: the claim never offers a parent whose session is full or past recruiting, a node whose join is refused declines instead of failing the task, and the budget, stall and lease sweeps cover recruited sessions. Provider policy is enforced mechanically: local-model providers are refused as workers, and the `shell` mock runs only with an explicit `MESH_ALLOW_MOCK_WORKERS=1` (choreography testing). See [docs/FEDERATION_SPEC.md](docs/FEDERATION_SPEC.md) for the message flows, envelope schemas, and the management/savant tiers (not yet built).
 
 ## Mechanical Enforcement
 
@@ -656,7 +703,7 @@ The rule loader is a zero-dependency engine that:
 | Framework | `typescript.md` | `tsconfig.json` |
 | Framework | `unity.md` | `ProjectSettings/ProjectVersion.txt` (+ `ProjectSettings/`, `Assets/`) |
 
-> Universal rules ship into `~/.openclaw/rules/`; framework rules (solidity/typescript/unity) live in `config/rules/framework/` and are copied into `~/.openclaw/rules/` by the installer only when the matching framework is detected.
+> Universal rules ship into `~/.openclaw/rules/`; framework rules (solidity/typescript/unity) live in `config/rules/framework/` and are copied into `~/.openclaw/rules/` by the installer only when the matching framework is detected in the project named with `--project=PATH` (which also receives the OpenClaw git hooks). Without `--project`, neither happens.
 
 ### Rule Injection into Agents
 
@@ -700,6 +747,8 @@ framework:
 
 Roles auto-assign from task scope: a task with `scope: ["contracts/Token.sol"]` gets `role: solidity-dev` because the glob matches.
 
+`required_outputs` are checked by the worker, in its worktree, against the files the attempt created or modified (a `content_check` reads them there). The worker sends the files as `result.artifacts` and the verdict as `result.role_validation`; a failing verdict, or a worker completion without one, sends the task to human review.
+
 ## Plan Pipelines
 
 Multi-phase workflows defined as YAML templates. Plans decompose into subtasks dispatched across mesh agents in dependency waves.
@@ -710,14 +759,14 @@ Multi-phase workflows defined as YAML templates. Plans decompose into subtasks d
 # List available templates
 mesh plan templates
 
-# Create a plan from template
-mesh plan create --template team-feature --context "Add token expiry logic"
+# Create a plan from template, under an existing task (submit one first with mesh submit)
+mesh plan create --template team-feature --parent-task T-123 --context "Add token expiry logic"
 
 # Inspect the full subtask tree before approving
 mesh plan show PLAN-xxx
 
 # Override template defaults
-mesh plan create --template team-feature --context "..." \
+mesh plan create --template team-feature --parent-task T-123 --context "..." \
   --set implement.delegation.mode=collab_mesh \
   --set test.budget_minutes=30
 
@@ -779,7 +828,7 @@ Subtasks can be marked `critical: true` to indicate their failure should trigger
 When a subtask fails:
 1. **Cascade**: BFS blocks all transitive dependents (follows `depends_on` graph)
 2. **Blocked-critical check**: if any blocked subtask is `critical: true`, abort the plan
-3. **Escalation**: if the role defines an escalation target, create a recovery task
+3. **Escalation**: if the role defines a target for the failure, create a recovery task with 1.5x the budget: `on_metric_failure` when the worker released the task after its metric failed on every attempt, `on_budget_exceeded` when the daemon failed it for running over budget. A worker's setup failure (worktree isolation, collab discovery) and a Foreman-escalated release do not escalate; `on_scope_violation` is not raised yet (scope reverts are a harness warning, not a failure)
 4. **Recovery**: if the escalation task succeeds, override FAILED → COMPLETED and unblock dependents
 
 ### Plan-Task Back-References
@@ -896,7 +945,7 @@ delegation:
 **Tests:**
 
 ```bash
-# All circling tests (112 tests, no external deps)
+# All circling tests (no external deps)
 node --test test/collab-circling.test.js test/daemon-circling-handlers.test.js test/circling-comprehensive.test.js test/circling-parse-retry.test.mjs test/circling-adaptive-convergence.test.mjs test/circling-thinking-strip.test.mjs
 ```
 
@@ -908,11 +957,11 @@ Full implementation reference: `docs/circling-strategy-implementationV3.md` (its
 
 | Hook | Trigger | What it does |
 |---|---|---|
-| `session-start.sh` | SessionStart | Loads git state, active tasks, companion state, last session recap |
+| `session-start.sh` | SessionStart | Loads git state, active tasks, the per-node daemon state (`.daemon-state-<node>.md`), last session recap |
 | `validate-commit.sh` | PreToolUse (Bash) | Blocks secrets, validates JSON, warns on bare TODOs, checks commit format |
-| `validate-push.sh` | PreToolUse (Bash) | Warns on force-push and protected branch pushes |
-| `pre-compact.sh` | PreCompact | No-op stub (PreCompact wiring retained; the state-preservation write was removed in redesign Step 0.6, pending Block 4 rewiring) |
-| `session-stop.sh` | Stop | Logs session end to daily memory file |
+| `validate-push.sh` | PreToolUse (Bash) | Refuses force-push (exit 2); warns on protected-branch pushes |
+| `pre-compact.sh` | PreCompact | Publishes `mesh.memory.extract_request` (via `bin/openclaw-extract-now.mjs`, detached) so the memory daemon extracts before compaction |
+| `session-stop.sh` | SessionEnd | Logs session end to daily memory file |
 | `log-agent.sh` | SubagentStart | Audit trail of every subagent spawn |
 
 Git hooks (`pre-commit`, `pre-push`) delegate to the same scripts — enforcement works regardless of IDE or AI tool.
@@ -929,7 +978,7 @@ The system has two layers:
 
 **Layer 1 — KV Mirror (read visibility):** Every MC instance watches NATS KV bucket `MESH_TASKS` in real-time. When the lead creates, updates, or completes a task, all connected MC instances see the change within milliseconds. Worker nodes display these tasks as read-only cards in the Kanban.
 
-**Layer 2 — Sync Engine (write participation):** Worker nodes can *propose* new tasks to the mesh. Proposals land in the KV bucket with `status: proposed`. The lead's task daemon validates proposals within its 30-second enforcement loop and transitions them to `queued` (accepted) or `rejected`. Once queued, any node with the `claim` capability can execute the task.
+**Layer 2 — Sync Engine (write participation):** Any node submits a task through `POST /api/mesh/tasks`; MC sends it to the task daemon as `mesh.tasks.submit`, and the daemon validates it and creates it `queued` (see Data Flow below). Once queued, any node with the `claim` capability can execute the task.
 
 ```
                      NATS KV: MESH_TASKS
@@ -960,11 +1009,10 @@ The system has two layers:
    - SSE event broadcast to UI
    - All other MC instances receive the KV watch event and update their local mirrors
 
-2. **Worker proposes a task** via `POST /api/mesh/tasks` (on the lead, POST writes the task directly as `queued`; only worker POSTs land as `proposed` for daemon validation)
-   - Task written to KV with `status: proposed`, `origin: <worker-node-id>`
-   - Lead's `mesh-task-daemon` picks it up in the next enforcement loop (< 30s)
-   - Daemon validates and transitions: `proposed` → `queued` (or `rejected`)
-   - Worker's MC sees the status change via KV watch
+2. **Any node submits a task** via `POST /api/mesh/tasks`
+   - MC sends it to the task daemon as `mesh.tasks.submit`; it never writes KV itself
+   - The daemon validates it (safe `task_id`, no daemon-owned fields, metric gate) and creates it `queued`
+   - An existing `task_id` is refused with HTTP 409, never overwritten
 
 3. **Worker reads mesh state** via `GET /api/mesh/tasks`
    - Returns all tasks from NATS KV (not local SQLite)
@@ -972,11 +1020,10 @@ The system has two layers:
    - On workers: KV version preferred (more current for mesh tasks)
    - On lead: SQLite version preferred (has richer fields like `kanbanColumn`, `sortOrder`)
 
-4. **Anyone updates a task** via `PATCH /api/mesh/tasks/:id`
-   - Authority check: only `lead` can transition most states
-   - Workers can update tasks they own (`origin` matches)
-   - Uses CAS (Compare-And-Swap) to prevent stale writes — the `revision` field must match
-   - On revision mismatch: HTTP 409 with the current state, so the client can retry
+4. **The operator edits a live task** via `PATCH /api/mesh/tasks/:id`
+   - MC signs the edit with the node identity and sends it as `mesh.tasks.update`
+   - The daemon accepts only the fields in `lib/mesh-tasks.js` `EDITABLE_TASK_FIELDS` (title, description, priority, budget_minutes, success_criteria, scope, tags, preferred_nodes, exclude_nodes), on a task that has not ended, and writes them with its own CAS; a body naming any other field is refused whole with 400
+   - Status, owner, lease, result, plan linkage and `requires_review` change only through the daemon's lifecycle RPCs
 
 ### Authority Model
 
@@ -985,8 +1032,8 @@ The system enforces explicit authority boundaries:
 | Action | Who Can Do It | Mechanism |
 |--------|--------------|-----------|
 | Create local task | Lead only | Direct SQLite + KV write |
-| Propose mesh task | Any node | KV write with `status: proposed` |
-| Accept/reject proposal | Lead only | Daemon enforcement loop |
+| Submit mesh task | Any node | daemon `mesh.tasks.submit` (MC `POST /api/mesh/tasks`) |
+| Edit a live mesh task | Signed operator | daemon `mesh.tasks.update` (MC `PATCH /api/mesh/tasks/:id`) |
 | Claim a queued task | Any node | CAS on KV (daemon RPC; Phase 3 for MC) |
 | Complete a task | Task owner only | CAS with `origin` check (daemon-side; Phase 3) |
 | Approve (mark done) | Human's node only | daemon `mesh.tasks.approve` (not an MC route) |
@@ -999,40 +1046,30 @@ mission-control/
 ├── src/
 │   ├── app/api/mesh/
 │   │   ├── tasks/
-│   │   │   ├── route.ts          # GET (list from KV) + POST (propose)
-│   │   │   └── [id]/route.ts     # GET (single) + PATCH (CAS update)
+│   │   │   ├── route.ts          # GET (list from KV) + POST (daemon submit)
+│   │   │   └── [id]/route.ts     # GET (single) + PATCH (signed daemon update)
 │   │   ├── identity/route.ts     # Node role/ID for sidebar badge
 │   │   └── events/route.ts       # SSE: dual-iterator (NATS sub + KV watch)
 │   ├── lib/
 │   │   └── sync/
-│   │       └── mesh-kv.ts        # Sync engine (KV watch → SQLite, CAS push)
+│   │       └── mesh-kv.ts        # MESH_TASKS reads for /api/mesh/tasks (list/get)
 │   └── components/layout/
 │       └── sidebar.tsx            # Node badge (⬢ Lead / ◇ Worker)
 ├── src/lib/__tests__/
-│   ├── mesh-kv-sync.test.ts      # 17 unit tests (CAS, authority, merge, proposals)
+│   ├── mesh-kv-sync.test.ts      # get/list, watcher, merge
 │   └── mocks/mock-kv.ts          # Shared MockKV for all KV tests
 bin/
-└── mesh-task-daemon.js            # Proposal processing (30s enforcement loop)
+└── mesh-task-daemon.js            # mesh.tasks.* RPCs, the only MESH_TASKS writer
 lib/
-└── mesh-tasks.js                  # PROPOSED + REJECTED task statuses
+└── mesh-tasks.js                  # task schema, statuses, CAS store
 test/
-├── mesh-tasks-status.test.js      # 7 unit tests (status enum, defaults)
-└── distributed-mc.test.js         # 9 integration tests (needs NATS + daemon)
+├── mesh-tasks-status.test.js      # unit tests (status enum, defaults)
+└── distributed-mc.test.js         # RPC, lifecycle, IDs, events (needs NATS + daemon)
 ```
 
 ### CAS (Compare-And-Swap) Explained
 
-Every task in the KV bucket has a `revision` number that increments on each write. To update a task, you must provide the current revision. If another node wrote between your read and your write, the revision won't match and the update fails with a 409.
-
-This eliminates race conditions without locks or a central coordinator:
-
-```
-Node A reads T-001 (revision 5)
-Node B reads T-001 (revision 5)
-Node A writes T-001 with revision 5 → succeeds (now revision 6)
-Node B writes T-001 with revision 5 → FAILS (expected 5, got 6)
-Node B re-reads T-001 (revision 6), retries → succeeds
-```
+The task daemon writes `MESH_TASKS` with revision CAS (`lib/mesh-tasks.js` `_updateWithCAS`): it updates a task only at the revision it read and re-reads and retries on a conflict. Mission Control never writes KV (submit and update go through daemon RPCs), so clients do not handle revisions.
 
 ### SSE Dual-Iterator
 
@@ -1053,12 +1090,13 @@ The sidebar shows the node's identity:
 
 ### Configuration
 
-Two environment variables control behavior:
+Two settings control behavior. Mission Control reads each from its environment, else from
+`openclaw.env` (its service unit passes neither):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENCLAW_NODE_ROLE` | `lead` | `lead` or `worker`. Defaults to `lead` when unset (no auto-detection) |
-| `OPENCLAW_NODE_ID` | `os.hostname()` | Unique identifier for this node in the mesh |
+| `OPENCLAW_NODE_ROLE` | `lead` | `lead` or `worker`; the installer records it in `openclaw.env`. Any other value, or none, means `lead` |
+| `OPENCLAW_NODE_ID` | short hostname | Unique identifier for this node in the mesh (`MESH_NODE_ID`, then the lowercased short hostname, when neither sets it) |
 
 No configuration needed on the lead — it works exactly as before. Workers just need `OPENCLAW_NATS` pointed at the lead's NATS server.
 
@@ -1066,15 +1104,15 @@ No configuration needed on the lead — it works exactly as before. Workers just
 
 ```bash
 # MC KV-sync unit tests (no dependencies — run anywhere)
-cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # 17 tests: CAS, authority, merge, proposals
-# (cd mission-control && npm run test:unit runs the full MC unit suite — 82 tests)
+cd mission-control && npx vitest run src/lib/__tests__/mesh-kv-sync.test.ts   # get/list, watcher, merge
+# (cd mission-control && npm run test:unit runs the full MC unit suite)
 
 # Mesh task-status unit tests
-node --test test/mesh-tasks-status.test.js   # 7 tests: status enum, task creation
+node --test test/mesh-tasks-status.test.js   # status enum, task creation
 # (npm run test:unit at the repo root runs the whole suite — 1700+ tests)
 
 # Integration tests (needs live NATS + mesh-task-daemon)
-node --test test/distributed-mc.test.js      # 9 tests: proposal lifecycle, RPC, events
+node --test test/distributed-mc.test.js      # RPC, lifecycle, IDs, events
                                              # Skips gracefully if daemon not running
 
 # Everything
@@ -1088,7 +1126,7 @@ This is Phase 1+2 of a 4-phase rollout:
 | Phase | What Changes | Status |
 |-------|-------------|--------|
 | **1: KV Mirror** | Workers get read-only MC dashboards via KV watch | Done |
-| **2: Sync Engine** | Workers can propose tasks, lead validates | Done |
+| **2: Sync Engine** | Any node submits tasks through the task daemon | Done |
 | 3: Distributed Claiming | Any node can claim and execute queued tasks via CAS | Planned |
 | 4: Full Sovereignty | No central daemon, each node schedules independently | Planned |
 
@@ -1101,7 +1139,7 @@ The package installs these commands (npm `bin`); after a global install they're 
 | Command | What it does |
 |---|---|
 | `openclaw-node` | The installer / CLI entrypoint (`cli.js`) — full install, `--update`, `--mesh-only`. |
-| `openclaw-stack up\|status\|down` | Whole-node control: `up` starts every installed launchd/systemd unit + probes + a status popup; `status` prints the probe table (no side effects); `down` stops every openclaw unit. `.disabled` units are reported but never resurrected. |
+| `openclaw-stack up\|status\|down` | Whole-node control: `up` starts the installed launchd/systemd units a fresh install starts (manifest `autostart: true` + the declared NATS cohort) + probes + a status popup; `status` prints the probe table (no side effects); `down` stops every openclaw unit. `.disabled` units are reported but never resurrected. |
 | `openclaw-node-check` | Deployment acceptance gate (`bin/node-acceptance.mjs`). Hard-tests memory/LLM/network/**federation** on the running runtime (the federation axis grades coordinator presence + raft quorum from `jsz.meta_cluster` — verified against an induced quorum loss). `--axis <name>` one axis, `--deep` invasive probes, `--no-mutate` skip synthetic writes, `--json --report <path>`. Exit 0 ACCEPTED / 1 REJECTED / 2 INCOMPLETE / 3 error. |
 | `openclaw-node-watch` | Node observer (`bin/node-watch.mjs`). One-shot by default (all probes); `--watch` runs continuous (default 60s, `--interval`, `--deep`); `--json` / `--html` / `--report`. Families include memory (ingest/extraction graded on FRESHNESS, not existence) and federation (`fed.*` — quorum, grappe heartbeats, session liveness; federation transitions notify under the `grappe` source). It reads observed services and writes only its own reports and private ingest-lag ledger; `bindOnly` KV reads cannot create what it observes. Exit 0 = none BROKEN / 1 = ≥1 BROKEN / 3 = error. |
 | `openclaw-notify` | Fire a ledgered, click-through desktop notification. `--kind <info\|success\|warn\|error\|block>` (default info) `--title T [--message M] [--url U] [--source NAME] [--strict] [--json]`; `--list [N]` recent ledger; `--test` fires one per kind. Every event lands in `~/.openclaw/notifications/ledger.jsonl` regardless of popup delivery. |
@@ -1109,12 +1147,12 @@ The package installs these commands (npm `bin`); after a global install they're 
 
 ## Environment Variables
 
-See `openclaw.env.example` for all available configuration. Key variables:
+`openclaw.env.example` seeds `~/.openclaw/openclaw.env` (install.sh appends the generated values); the canonical set is [docs/NODE_SPEC.md](docs/NODE_SPEC.md) §3. Key variables:
 
 | Variable | Required | Description |
 |---|---|---|
 | `OPENCLAW_NODE_ID` | Optional | Unique name for this node (auto-detected from hostname if unset) |
-| `OPENCLAW_TIMEZONE` | Yes | Timezone (e.g. `America/Montreal`) |
+| `OPENCLAW_TIMEZONE` | Optional | Timezone (default `America/Montreal`) |
 | `ANTHROPIC_API_KEY` | Optional | For Claude-powered features |
 | `OPENAI_API_KEY` | Optional | For OpenAI-powered features |
 | `GOOGLE_API_KEY` | Optional | For Mission Control TTS voice |
@@ -1129,8 +1167,10 @@ See `openclaw.env.example` for all available configuration. Key variables:
 | `OPENCLAW_NATS_CLUSTER_PASS` | Auto (councils) | Cluster-route password (user `openclaw-route`) shared by every machine in a multi-machine council; generated by `install.sh --cluster-peers`. A wrong password is rejected at the route |
 | `OPENCLAW_KV_REPLICAS` | Auto (councils) | How many machines keep a copy of the mesh KV data (1 solo, 3 for a council); set by `install.sh --cluster-peers` from the council size |
 | `OPENCLAW_NODE_ROLE` | Optional | Node role: `lead` or `worker` (default: macOS→lead, Linux→worker) |
-| `MESH_LLM_PROVIDER` | Chosen at install | The node's mind: `claude`, `openai` (codex), `gemini`, `deepseek`, `kimi`, `minimax`, `aider`, `ollama`, `shell` — set with `install.sh --provider=NAME` or the install prompt; the installer never installs a vendor CLI unasked. For grappe/collab work the D11 guard applies mechanically: local-model providers (`ollama`, `llamacpp`, `lmstudio`, `vllm`, `mlx`) are **declined**, and `shell` runs only with `MESH_ALLOW_MOCK_WORKERS=1`; use `claude` (or another advanced-LLM frontend) for real workers |
+| `MESH_LLM_PROVIDER` | Chosen at install | The node's mind: `claude`, `openai` (Codex CLI, `codex exec`), `gemini`, `deepseek` (DeepSeek's `dsh`, `dsh --profile headless`; needs Node >=24.9.0), `kimi` (Kimi Code CLI, `kimi -p`; needs Node >=22.19.0; the legacy PyPI kimi-cli only prints a deprecation notice, which counts as a failed run), `minimax` (Rust crate minimax-cli >=0.7.0, `cargo install minimax-cli --locked`; `minimax exec --auto`; not the npm packages minimax-cli or @hmbown/minimax-cli, whose `minimax` has no `exec`), `aider`, `ollama`, `shell` — set with `install.sh --provider=NAME` or the install prompt; the installer never installs a vendor CLI unasked, and installs neither dsh nor Kimi Code on a Node below its floor (it ships Node 22): it says so and names the remedy, a newer Node or `DEEPSEEK_PATH`/`KIMI_PATH` pointing at one that runs. No model is forced on openai, gemini, deepseek, kimi, minimax or aider: unless a task's `llm_model` or `--model` names one, the CLI's own configured default applies. deepseek always runs its dsh profile's model: dsh has no model flag, so a named model is ignored with a warning and recorded as no model. Binaries can be overridden with `<PROVIDER>_PATH` (e.g. `DEEPSEEK_PATH`). For grappe/collab work the D11 guard applies mechanically: local-model providers (`ollama`, `llamacpp`, `lmstudio`, `vllm`, `mlx`) are **declined**, and `shell` runs only with `MESH_ALLOW_MOCK_WORKERS=1`; use an advanced-LLM CLI provider for real workers |
 | `MESH_ALLOW_MOCK_WORKERS` | Optional | `1` lets the `shell` mock provider act as a collab worker — choreography testing only (the chaos harness sets it); never for real work |
+| `MESH_ALLOW_LOCAL_WORKERS` | Optional | Comma-separated local-model providers (e.g. `ollama`) the operator has vetted as collab workers; read from the environment or `~/.openclaw/openclaw.env`. Unset keeps the D11 decline. A declining node logs each session once and asks the daemon to skip collab tasks when it claims |
+| `MESH_KEPT_BRANCH_MAX_DAYS` | `30` | Age (days, from the branch tip) after which startup reconcile drops the `mesh/<task>` partial-work branch of a released or budget/stall-failed task; `0` keeps them until an operator deletes them. Cancelled and review-rejected branches are dropped at once |
 | `MESH_COLLAB_ROUND_TIMEOUT_MS` | Optional | Cooperative/collaborative round timeout (default 15 min): non-reflected members are marked dead and the session aborts or proceeds with the quorum — sessions cannot hang forever |
 | `LLM_MODEL` | Optional | Local model tag for the **extraction/embedding/probe organ** (default `qwen3:8b`; RAM tiers: 16GB→qwen3:8b, 32GB→qwen3:14b, 48GB→qwen3:32b). **Not the grappe worker's mind** — grappe/cluster workers require the node's OpenClaw agent on an advanced LLM (D11) |
 | `LLM_BASE_URL` | Optional | Ollama endpoint for extraction, agents, and probes (default `http://localhost:11434`) |

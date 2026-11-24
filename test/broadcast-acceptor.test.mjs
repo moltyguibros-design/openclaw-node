@@ -77,9 +77,17 @@ function mockNatsConnection() {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 describe('broadcast-acceptor constants', () => {
-  it('TOKEN_OVERLAP_THRESHOLD defaults to 0.3', () => {
-    assert.equal(typeof TOKEN_OVERLAP_THRESHOLD, 'number');
-    assert.ok(TOKEN_OVERLAP_THRESHOLD >= 0 && TOKEN_OVERLAP_THRESHOLD <= 1);
+  it('TOKEN_OVERLAP_THRESHOLD defaults to 0.3 and ACCEPTOR_TOKEN_OVERLAP overrides it', async () => {
+    const saved = process.env.ACCEPTOR_TOKEN_OVERLAP;
+    try {
+      delete process.env.ACCEPTOR_TOKEN_OVERLAP;
+      assert.equal((await import('../lib/broadcast-acceptor.mjs?default')).TOKEN_OVERLAP_THRESHOLD, 0.3);
+      process.env.ACCEPTOR_TOKEN_OVERLAP = '0.7';
+      assert.equal((await import('../lib/broadcast-acceptor.mjs?env')).TOKEN_OVERLAP_THRESHOLD, 0.7);
+    } finally {
+      if (saved === undefined) delete process.env.ACCEPTOR_TOKEN_OVERLAP;
+      else process.env.ACCEPTOR_TOKEN_OVERLAP = saved;
+    }
   });
 
   it('MAX_PENDING_OFFERS defaults to 10', () => {
@@ -234,12 +242,8 @@ describe('createAcceptor._processOffer', () => {
     offer.data.responding_to = undefined;
     const result = await acceptor._processOffer(offer);
     assert.equal(result.action, 'skip');
-    // After F-H2 fix, schema validation catches missing responding_to at the
-    // boundary (returns 'bad_schema') rather than later in flow ('no_responding_to').
-    assert.ok(
-      result.reason === 'no_responding_to' || result.reason === 'bad_schema',
-      `expected no_responding_to or bad_schema, got ${result.reason}`
-    );
+    assert.equal(result.reason, 'bad_schema');
+    assert.equal(acceptor.stats.schemaRejected, 1);
   });
 
   it('evicts oldest when maxPending exceeded', async () => {
@@ -415,5 +419,22 @@ describe('createAcceptor.stats', () => {
     assert.equal(acceptor.stats.offersReceived, 2);
     assert.equal(acceptor.stats.nonMatchingSkipped, 1);
     assert.equal(acceptor.stats.offersPending, 1);
+  });
+});
+
+describe('createAcceptor publishes its counters (dogfood signature_failures)', () => {
+  it('publishes signature_rejected on context.acceptor.stats.<node> when it rejects an offer', async () => {
+    const nc = mockNatsConnection();
+    nc.publish = (subject, data) => nc.published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) });
+    const acceptor = createAcceptor(nc, 'my-node', { ownBroadcastIds: new Set() });
+
+    const r = await acceptor._processOffer(makeOffer({ node_id: 'peer-x', offerer_node_id: 'peer-y' }));
+    assert.equal(r.reason, 'offerer_node_id_mismatch');
+
+    const stats = nc.published.filter(p => p.subject === 'context.acceptor.stats.my-node');
+    assert.equal(stats.length, 1);
+    assert.equal(stats[0].data.node_id, 'my-node');
+    assert.equal(stats[0].data.signature_rejected, 1);
+    assert.ok(stats[0].data.started_at);
   });
 });

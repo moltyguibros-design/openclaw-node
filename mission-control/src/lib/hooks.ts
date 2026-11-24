@@ -1,7 +1,34 @@
 import useSWR, { mutate } from "swr";
 import { useEffect, useRef } from "react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+// The session list and the activity feed are keyed with query strings, and a bare
+// key passed to mutate matches none of them.
+const revalidatePrefix = (prefix: string) =>
+  mutate((key) => typeof key === "string" && key.startsWith(prefix));
+
+// SWR sets `error` only when the fetcher throws; API routes answer failures with a JSON {error} body.
+export async function fetcher(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// A refused write still revalidates, so a view that moved the item locally snaps back to the server's state.
+async function send(url: string, init: RequestInit, revalidate: string[], prefixes: string[] = []) {
+  const res = await fetch(url, init);
+  const body = await res.json().catch(() => null);
+  for (const key of revalidate) await mutate(key);
+  for (const prefix of prefixes) await revalidatePrefix(prefix);
+  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+  return body;
+}
+
+function json(method: string, payload: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
+}
 
 export interface Task {
   id: string;
@@ -89,38 +116,23 @@ export async function createTask(task: {
   title: string;
   status?: string;
   owner?: string;
-  nextAction?: string;
+  next_action?: string;
   scheduled_date?: string;
   project?: string;
   [key: string]: unknown;
 }) {
-  const res = await fetch("/api/tasks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(task),
-  });
-  const data = await res.json();
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/tasks", json("POST", task), ["/api/tasks"]);
 }
 
 export async function updateTask(
   id: string,
   updates: Partial<Omit<Task, "id" | "createdAt">>
 ) {
-  const res = await fetch(`/api/tasks/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  const data = await res.json();
-  await mutate("/api/tasks");
-  return data;
+  return send(`/api/tasks/${id}`, json("PATCH", updates), ["/api/tasks"]);
 }
 
 export async function deleteTask(id: string) {
-  await fetch(`/api/tasks/${id}`, { method: "DELETE" });
-  await mutate("/api/tasks");
+  await send(`/api/tasks/${id}`, { method: "DELETE" }, ["/api/tasks"]);
 }
 
 export function useMemorySearch(query: string, limit = 20, source?: string) {
@@ -173,12 +185,11 @@ export function useActivity(limit = 50) {
 
 export interface LiveEvent {
   timestamp: string;
-  type: "file_write" | "file_edit" | "file_read" | "bash_command" | "message";
+  type: "file_write" | "file_edit" | "file_read" | "bash_command";
   tool: string;
   detail: string;
   filePath?: string;
   command?: string;
-  success?: boolean;
 }
 
 export function useLiveActivity(limit = 30) {
@@ -252,15 +263,7 @@ export async function createProject(project: {
   owner?: string;
   status?: string;
 }) {
-  const res = await fetch("/api/projects", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(project),
-  });
-  const data = await res.json();
-  await mutate("/api/projects");
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/projects", json("POST", project), ["/api/projects", "/api/tasks"]);
 }
 
 export async function createDependency(dep: {
@@ -268,88 +271,7 @@ export async function createDependency(dep: {
   targetId: string;
   type?: string;
 }) {
-  const res = await fetch("/api/dependencies", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(dep),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to create dependency");
-  return data;
-}
-
-export async function deleteDependency(id: number) {
-  await fetch(`/api/dependencies?id=${id}`, { method: "DELETE" });
-}
-
-// --- Memory Items ---
-
-export interface MemoryItemEntry {
-  id: number;
-  fact_text: string;
-  confidence: number;
-  source_doc_id: number | null;
-  category: string | null;
-  status: string;
-  gate_decision: string | null;
-  gate_reason: string | null;
-  extraction_source: string | null;
-  last_accessed: string | null;
-  created_at: string;
-  source_file?: string;
-  source_title?: string;
-  source_date?: string;
-}
-
-export interface CategoryOverview {
-  category: string;
-  itemCount: number;
-  hasSummary: boolean;
-  summaryAge: number | null;
-}
-
-export function useMemoryItems(category?: string, limit = 50) {
-  const params = new URLSearchParams();
-  if (category) params.set("category", category);
-  params.set("limit", String(limit));
-
-  const { data, error, isLoading } = useSWR<{
-    items: MemoryItemEntry[];
-    limit: number;
-    offset: number;
-  }>(`/api/memory/items?${params.toString()}`, fetcher, {
-    refreshInterval: 10000,
-  });
-  return { items: data?.items ?? [], error, isLoading };
-}
-
-export function useMemoryItemStats() {
-  const { data, error, isLoading } = useSWR<{
-    active: number;
-    archived: number;
-    byCategory: Array<{ category: string; count: number }>;
-    recentAudit: Array<Record<string, unknown>>;
-  }>("/api/memory/items?stats=true", fetcher, {
-    refreshInterval: 30000,
-  });
-  return {
-    stats: data ?? null,
-    error,
-    isLoading,
-  };
-}
-
-export function useMemoryCategories() {
-  const { data, error, isLoading } = useSWR<{
-    categories: CategoryOverview[];
-  }>("/api/memory/categories", fetcher, {
-    refreshInterval: 30000,
-  });
-  return {
-    categories: data?.categories ?? [],
-    error,
-    isLoading,
-  };
+  return send("/api/dependencies", json("POST", dep), []);
 }
 
 // --- Wikilink Graph ---
@@ -576,8 +498,9 @@ export function useClusters() {
   return { clusters: data?.clusters ?? [], error, isLoading };
 }
 
-export function useCollabSessions(status?: string, refreshInterval = 5000) {
-  const params = status ? `?status=${status}` : "";
+export function useCollabSessions(status?: string, refreshInterval = 5000, limit?: number) {
+  const query = [status && `status=${status}`, limit && `limit=${limit}`].filter(Boolean).join("&");
+  const params = query ? `?${query}` : "";
   const { data, error, isLoading } = useSWR<{
     sessions: CollabSession[];
     natsAvailable: boolean;
@@ -598,69 +521,34 @@ export async function createCluster(params: {
   defaultConvergence?: string;
   convergenceThreshold?: number;
   maxRounds?: number;
-  members?: Array<{ nodeId: string; role: string }>;
+  members?: Array<{ nodeId: string }>;
 }) {
-  const res = await fetch("/api/cowork/clusters", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
-}
-
-export async function updateCluster(id: string, updates: Record<string, unknown>) {
-  const res = await fetch(`/api/cowork/clusters/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
+  return send("/api/cowork/clusters", json("POST", params), ["/api/cowork/clusters"]);
 }
 
 export async function deleteCluster(id: string) {
-  await fetch(`/api/cowork/clusters/${id}`, { method: "DELETE" });
-  await mutate("/api/cowork/clusters");
+  await send(`/api/cowork/clusters/${id}`, { method: "DELETE" }, ["/api/cowork/clusters"]);
 }
 
-export async function addClusterMember(clusterId: string, nodeId: string, role: string) {
-  const res = await fetch(`/api/cowork/clusters/${clusterId}/members`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId, role }),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
-}
-
-export async function updateClusterMember(clusterId: string, nodeId: string, role: string) {
-  const res = await fetch(`/api/cowork/clusters/${clusterId}/members`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodeId, role }),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/clusters");
-  return data;
+export async function addClusterMember(clusterId: string, nodeId: string) {
+  return send(`/api/cowork/clusters/${clusterId}/members`, json("POST", { nodeId }), [
+    "/api/cowork/clusters",
+  ]);
 }
 
 export async function removeClusterMember(clusterId: string, nodeId: string) {
-  await fetch(
+  await send(
     `/api/cowork/clusters/${clusterId}/members?nodeId=${encodeURIComponent(nodeId)}`,
-    { method: "DELETE" }
+    { method: "DELETE" },
+    ["/api/cowork/clusters"],
   );
-  await mutate("/api/cowork/clusters");
 }
 
 export async function dispatchCollabTask(params: {
   title: string;
   description?: string;
   clusterId?: string;
-  nodes?: Array<{ nodeId: string; role: string }>;
+  nodes?: Array<{ nodeId: string }>;
   mode?: string;
   convergence?: { type: string; threshold?: number; metric?: string };
   scopeStrategy?: string;
@@ -669,16 +557,7 @@ export async function dispatchCollabTask(params: {
   metric?: string;
   scope?: string[];
 }) {
-  const res = await fetch("/api/cowork/dispatch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/sessions");
-  await mutate("/api/cowork/clusters");
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/cowork/dispatch", json("POST", params), ["/api/cowork/clusters", "/api/tasks"], ["/api/cowork/sessions"]);
 }
 
 export async function interveneSession(params: {
@@ -686,15 +565,7 @@ export async function interveneSession(params: {
   sessionId: string;
   nodeId?: string;
 }) {
-  const res = await fetch("/api/cowork/intervene", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  await mutate("/api/cowork/sessions");
-  await mutate("/api/tasks");
-  return data;
+  return send("/api/cowork/intervene", json("POST", params), ["/api/tasks"], ["/api/cowork/sessions"]);
 }
 
 // --- Mesh SSE integration ---
@@ -713,14 +584,14 @@ export function useMeshSSE() {
     const invalidate = () => {
       mutate("/api/tasks");
       mutate("/api/mesh/nodes");
-      mutate("/api/activity");
+      revalidatePrefix("/api/activity");
     };
 
     const invalidateCollab = () => {
-      mutate("/api/cowork/sessions");
+      revalidatePrefix("/api/cowork/sessions");
       mutate("/api/cowork/clusters");
       mutate("/api/tasks");
-      mutate("/api/activity");
+      revalidatePrefix("/api/activity");
     };
 
     // Task events
@@ -757,38 +628,6 @@ export function useMeshSSE() {
       esRef.current = null;
     };
   }, []);
-}
-
-// --- Token usage ---
-
-export interface TokenUsageEntry {
-  id: number;
-  task_id: string | null;
-  node_id: string | null;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cost_usd: number;
-  timestamp: string;
-}
-
-export interface TokenSummary {
-  totalCost: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  taskCount: number;
-  byModel: Array<{ model: string; cost: number; count: number }>;
-  byNode: Array<{ node_id: string; cost: number; count: number }>;
-  recent: TokenUsageEntry[];
-}
-
-export function useTokenUsage(period: "today" | "week" | "month" = "today") {
-  const { data, error, isLoading } = useSWR<TokenSummary>(
-    `/api/mesh/tokens?period=${period}`,
-    fetcher,
-    { refreshInterval: 30000 }
-  );
-  return { tokenData: data ?? null, error, isLoading };
 }
 
 // --- Mesh Tasks (Distributed MC) ---
@@ -839,29 +678,24 @@ export async function createMeshTask(task: {
   metric?: string;
   [key: string]: unknown;
 }) {
-  const res = await fetch("/api/mesh/tasks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(task),
-  });
-  const data = await res.json();
-  await mutate("/api/mesh/tasks");
-  return data;
+  return send("/api/mesh/tasks", json("POST", task), ["/api/mesh/tasks"]);
 }
 
 export async function updateMeshTask(
   id: string,
-  updates: Record<string, unknown>,
-  revision: number
+  updates: {
+    title?: string;
+    description?: string;
+    priority?: number;
+    budget_minutes?: number;
+    success_criteria?: string[];
+    scope?: string[];
+    tags?: string[];
+    preferred_nodes?: string[];
+    exclude_nodes?: string[];
+  }
 ) {
-  const res = await fetch(`/api/mesh/tasks/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...updates, revision }),
-  });
-  const data = await res.json();
-  await mutate("/api/mesh/tasks");
-  return data;
+  return send(`/api/mesh/tasks/${id}`, json("PATCH", updates), ["/api/mesh/tasks"]);
 }
 
 // --- Watcher ---
@@ -946,13 +780,18 @@ export interface MemoryEntity { name: string; type: string; mention_count: numbe
 export interface MemoryDecision { decision: string; rationale: string; confidence: number; session_id: string; created_at: string; }
 export interface MemoryTheme { label: string; hierarchy: string[]; mention_count: number; last_seen: string; }
 
-export function useMemoryContent(q?: string, session?: string) {
+export function memoryContentKey(q?: string, session?: string): string | null {
+  // repair 6.4: a session-less watcher panel (q undefined) fetches nothing;
+  // the /memory-content page's q="" is the unscoped top-N view and must fetch.
+  if (q === undefined && !session) return null;
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (session) params.set("session", session);
-  // repair 6.4: no scope -> no fetch. Session-less detail panels were
-  // pulling the full top-50 content every 10s and never rendering it.
-  const key = q || session ? `/api/memory-content?${params.toString()}` : null;
+  return `/api/memory-content?${params.toString()}`;
+}
+
+export function useMemoryContent(q?: string, session?: string) {
+  const key = memoryContentKey(q, session);
   const { data, error, isLoading } = useSWR<{
     entities: MemoryEntity[];
     decisions: MemoryDecision[];

@@ -11,23 +11,25 @@ export async function GET(req: NextRequest) {
   const period = req.nextUrl.searchParams.get("period") || "today";
   const raw = getRawDb();
 
+  // Bounds in datetime('now')'s own 'YYYY-MM-DD HH:MM:SS' (UTC): timestamps compare as text,
+  // and an ISO 'T' sorts after the space, so a 'T' bound dropped the boundary day's rows.
   const now = new Date();
   let since: string;
   switch (period) {
     case "week": {
       const d = new Date(now);
       d.setDate(d.getDate() - 7);
-      since = d.toISOString();
+      since = d.toISOString().slice(0, 19).replace("T", " ");
       break;
     }
     case "month": {
       const d = new Date(now);
       d.setMonth(d.getMonth() - 1);
-      since = d.toISOString();
+      since = d.toISOString().slice(0, 19).replace("T", " ");
       break;
     }
     default: // today
-      since = `${now.toISOString().slice(0, 10)}T00:00:00`;
+      since = `${now.toISOString().slice(0, 10)} 00:00:00`;
       break;
   }
 

@@ -5,7 +5,7 @@
     <key>Label</key>
     <string>ai.openclaw.node-watch</string>
     <key>Comment</key>
-    <string>OpenClaw Node Watch — continuously monitors every node component (light every 60s, full incl. heavy every 15min); writes ~/.openclaw/.node-watch.json</string>
+    <string>OpenClaw Node Watch — continuously monitors every node component (light every 60s, full incl. heavy every 15min); writes .node-watch.json under the install root (~/.openclaw by default)</string>
     <key>ProgramArguments</key>
     <array>
       <string>${NODE_BIN}</string>
@@ -32,7 +32,7 @@
       <key>PATH</key>
       <string>${OPENCLAW_WORKSPACE}/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
       <key>TZ</key>
-      <string>America/Montreal</string>
+      <string>${OPENCLAW_TIMEZONE}</string>
       <key>OPENCLAW_WORKSPACE</key>
       <string>${OPENCLAW_WORKSPACE}</string>
       <key>OPENCLAW_NATS</key>

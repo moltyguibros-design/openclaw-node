@@ -4,16 +4,16 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${NPM_BIN} start
+ExecStart="${NPM_BIN}" start
 Restart=always
 RestartSec=5
-Environment=HOME=${HOME}
-Environment=PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-Environment=NODE_PATH=${HOME}/openclaw/node_modules:${HOME}/openclaw/lib
-Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
-Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
-Environment=NODE_ENV=production
-Environment=TZ=America/Montreal
+Environment="HOME=${HOME}"
+Environment="PATH=${NODE_BIN_DIR}:${OPENCLAW_ROOT}/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
+Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
+Environment="OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}"
+Environment="NODE_ENV=production"
+Environment="TZ=${OPENCLAW_TIMEZONE}"
 WorkingDirectory=${OPENCLAW_WORKSPACE}/projects/mission-control
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mission-control.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mission-control.err

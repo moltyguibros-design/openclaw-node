@@ -28,15 +28,12 @@ export function logActivity(
 export function getRecentActivity(limit = 50) {
   const _start = Date.now();
   try {
-    const db = getDb();
-    const result = db
+    return getDb()
       .select()
       .from(activityLog)
       .orderBy(desc(activityLog.timestamp))
       .limit(limit)
       .all();
-    traceCall("activity", "getRecentActivity", _start, `${result.length} items`);
-    return result;
   } catch (err) {
     console.error(`[activity] getRecentActivity failed: ${(err as Error).message}`);
     traceCall("activity", "getRecentActivity", _start, "0 items (error)");

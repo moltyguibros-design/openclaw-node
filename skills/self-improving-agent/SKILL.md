@@ -1,5 +1,5 @@
 ---
-name: self-improvement
+name: self-improving-agent
 description: "Captures learnings, errors, and corrections to enable continuous improvement. Use when a command fails, user corrects the agent, a capability is missing, or a better approach is discovered. Also reviews learnings before major tasks."
 triggers:
   - "log this as a learning"
@@ -19,19 +19,30 @@ Log learnings and errors to markdown files for continuous improvement. Coding ag
 
 ## Quick Reference
 
+Every lesson is one line appended to `.learnings/lessons.md` in the workspace, the file boot reads
+(identity/MEMORY_SPEC.md §2.5):
+
+```markdown
+[tag] Lesson text (YYYY-MM-DD)
+```
+
 | Situation | Action |
 |-----------|--------|
-| Command/operation fails | Log to `.learnings/ERRORS.md` |
-| User corrects you | Log to `.learnings/LEARNINGS.md` with category `correction` |
-| User wants missing feature | Log to `.learnings/FEATURE_REQUESTS.md` |
-| API/external tool fails | Log to `.learnings/ERRORS.md` with integration details |
-| Knowledge was outdated | Log to `.learnings/LEARNINGS.md` with category `knowledge_gap` |
-| Found better approach | Log to `.learnings/LEARNINGS.md` with category `best_practice` |
-| Similar to existing entry | Link with `**See Also**`, consider priority bump |
+| Command/operation fails | `[error]` line |
+| API/external tool fails | `[error]` line naming the integration |
+| User corrects you | `[correction]` line |
+| Knowledge was outdated | `[correction]` line |
+| Found better approach | `[pattern]` line |
+| User states how they want things done | `[preference]` line |
+| User wants missing feature or a process change | `[workflow]` line |
+| Similar to existing entry | Don't duplicate; sharpen the existing line |
 | Broadly applicable learning | Promote to `CLAUDE.md`, `AGENTS.md`, and/or `.github/copilot-instructions.md` |
 | Workflow improvements | Promote to `AGENTS.md` (OpenClaw workspace) |
 | Tool gotchas | Promote to `TOOLS.md` (OpenClaw workspace) |
 | Behavioral patterns | Promote to `SOUL.md` (OpenClaw workspace) |
+
+Valid tags: `correction`, `pattern`, `error`, `preference`, `workflow`. `error`, `pattern` and
+`correction` lines are shared with the other nodes by obsidian-sync.
 
 ## OpenClaw Setup (Recommended)
 
@@ -39,15 +50,9 @@ OpenClaw is the primary platform for this skill. It uses workspace-based prompt 
 
 ### Installation
 
-**Via ClawdHub (recommended):**
-```bash
-clawdhub install self-improving-agent
-```
-
-**Manual:**
-```bash
-git clone https://github.com/peterskoett/self-improving-agent.git ~/.openclaw/skills/self-improving-agent
-```
+The OpenClaw installer ships this skill to `~/.openclaw/workspace/skills/self-improving-agent/`.
+This copy is patched locally for that layout; a ClawHub update would bring back the upstream
+`.learnings/LEARNINGS.md` / `ERRORS.md` / `FEATURE_REQUESTS.md` logs, which boot does not read.
 
 ### Workspace Structure
 
@@ -61,22 +66,14 @@ OpenClaw injects these files into every session:
 ├── MEMORY.md          # Long-term memory (main session only)
 ├── memory/            # Daily memory files
 │   └── YYYY-MM-DD.md
-└── .learnings/        # This skill's log files
-    ├── LEARNINGS.md
-    ├── ERRORS.md
-    └── FEATURE_REQUESTS.md
+└── .learnings/
+    └── lessons.md     # This skill's log, read at boot
 ```
 
-### Create Learning Files
+### Learning File
 
-```bash
-mkdir -p ~/.openclaw/workspace/.learnings
-```
-
-Then create the log files (or copy from `assets/`):
-- `LEARNINGS.md` — corrections, knowledge gaps, best practices
-- `ERRORS.md` — command failures, exceptions
-- `FEATURE_REQUESTS.md` — user-requested capabilities
+The installer creates `~/.openclaw/workspace/.learnings/lessons.md`. Append to it; never start a
+second log next to it.
 
 ### Promotion Targets
 
@@ -115,16 +112,17 @@ See `references/openclaw-integration.md` for complete details.
 
 ## Generic Setup (Other Agents)
 
-For Claude Code, Codex, Copilot, or other agents, create `.learnings/` in your project:
+For Claude Code, Codex, Copilot, or other agents, use `.learnings/lessons.md` in your project
+with the same one-line format:
 
 ```bash
-mkdir -p .learnings
+mkdir -p .learnings && touch .learnings/lessons.md
 ```
 
-Copy templates from `assets/` or create files with headers.
+Hook recipes for Claude Code are in [references/hooks-setup.md](references/hooks-setup.md).
 
 ## Templates, Formats & Extended Reference
 
 See [references/templates.md](references/templates.md) for templates and detailed examples.
 
-Covers: logging format (learning/error/feature entries), ID generation, resolving entries, promoting to project memory, recurring pattern detection, periodic review, detection triggers, priority guidelines, area tags, best practices, gitignore options, hook integration, automatic skill extraction, and multi-agent support.
+Covers: the lessons.md line format and tag set, promoting to project memory, recurring pattern detection, periodic review, detection triggers, best practices, hook integration, automatic skill extraction, and multi-agent support.

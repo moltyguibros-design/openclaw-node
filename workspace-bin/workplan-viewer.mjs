@@ -9,11 +9,9 @@
 //
 // Independent from mission-control (which runs on :3000).
 //
-// Discovery roots (in priority order):
-//   1. $WORKPLAN_ROOTS — colon-separated list of dirs to scan
-//   2. The current working directory (process.cwd())
-// Within each root, every immediate subdirectory that contains BOTH
-// INVENTORY.md and VERSION is registered as a plan.
+// Discovery roots: $WORKPLAN_ROOTS (colon-separated) if set, else
+// <cwd>/memory-plan/plans. Within each root, every immediate subdirectory
+// that contains BOTH INVENTORY.md and VERSION is registered as a plan.
 //
 // Usage:
 //   ./workspace-bin/workplan-viewer.mjs                       # bind :7892
@@ -28,6 +26,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
 import { execFile, spawnSync } from 'node:child_process';
 import { createViewerAuth, checkViewerRequest, viewerTokenPath } from '../lib/workplan-viewer-auth.mjs';
 
@@ -83,7 +82,7 @@ function findPlan(id) {
 }
 
 // ── State-transition notifications (server-side banner + sound) ────────────────
-// Fires the shared memory-plan-notify.sh on plan transitions, so the operator
+// Fires bin/openclaw-notify.mjs on plan transitions, so the operator
 // hears/sees them whether or not a browser tab is open:
 //   forward (step closed / version advanced) → 'closed' → Glass chime
 //   plan became BLOCKED                       → 'blocked' → Sosumi alert
@@ -163,7 +162,7 @@ const notifyState = new Map();
 function pollNotifications() {
   for (const plan of PLANS) {
     let s;
-    try { s = planSummary(plan); } catch { continue; }
+    try { s = planSummary(plan, { dirty: false }); } catch { continue; }
     const cur = { version: s.version, blocked: !!s.blocked, closed: s.closed_steps };
     const prev = notifyState.get(plan.id);
     notifyState.set(plan.id, cur);
@@ -192,7 +191,19 @@ function readVersion(plan) {
 }
 
 const isBlocked = (p) => fs.existsSync(path.join(p.dir, 'BLOCKED.md'));
-const isLocked  = (p) => fs.existsSync(path.join(p.dir, '.tick.lock'));
+// plan-tick.sh holds one lock for the whole repo at memory-plan/.tick.lock (plan.root
+// is <repo>/memory-plan/plans); its `plan` file names the plan that holds it.
+const tickLockDir = (p) => path.join(p.root, '..', '.tick.lock');
+// plan-tick.sh reaps a lock this old as stale; keep the two equal.
+const TICK_LOCK_STALE_MS = 3600 * 1000;
+const tickLockHolder = (p) => {
+  let st;
+  try { st = fs.statSync(tickLockDir(p)); } catch { return null; }
+  if (Date.now() - st.mtimeMs >= TICK_LOCK_STALE_MS) return null;
+  try { return fs.readFileSync(path.join(tickLockDir(p), 'plan'), 'utf8').trim(); }
+  catch { return '?'; }
+};
+const isLocked  = (p) => tickLockHolder(p) === p.id;
 // Newest-content signal for the plan: max mtime across its top-level *.md +
 // VERSION, plus the tick-logs/audits dir mtimes (file add/remove). The client
 // re-renders the active panel only when this changes — live updates, no flicker.
@@ -284,9 +295,36 @@ function tickLogs(plan, limit = 100) {
     });
 }
 
+// The step an audit dir belongs to. An explicit `<!-- step-id: B.S -->` line in
+// its AUDIT_PRE.md or AUDIT_POST.md wins; then the step id in the audit's title
+// line ("# AUDIT_POST — Step 9.1: ..."); otherwise the canonical name
+// step<B><S>_<slug> (one block digit, then the step digits: step31 = 3.1,
+// step310 = 3.10). Pre-protocol silos (legacy, repair, protocol's step01..07)
+// number audit dirs sequentially, so their dir digits decode to the wrong step.
+const AUDIT_STEP_MARKER = /^<!--\s*step-id:\s*(\d+\.\d+)\s*-->\s*$/m;
+const AUDIT_TITLE_STEP = /\bstep\s*(\d+\.\d+)/i;
+function auditStepId(auditsDir, dirName) {
+  let titled = null;
+  for (const f of ['AUDIT_POST.md', 'AUDIT_PRE.md']) {
+    let text;
+    try { text = fs.readFileSync(path.join(auditsDir, dirName, f), 'utf8'); } catch { continue; }
+    const marker = text.match(AUDIT_STEP_MARKER);
+    if (marker) return marker[1];
+    titled ??= text.split('\n', 1)[0].match(AUDIT_TITLE_STEP)?.[1] ?? null;
+  }
+  if (titled) return titled;
+  const m = dirName.match(/^step(\d)(\d+)_/);
+  return m ? `${m[1]}.${m[2]}` : null;
+}
+
+function auditDirForStep(plan, stepId) {
+  const dir = planAuditsDir(plan);
+  return Object.keys(planAudits(plan)).sort().find(d => auditStepId(dir, d) === stepId) ?? null;
+}
+
 // Interactive step closures: one entry per audits/*/AUDIT_POST.md (a step that
 // reached done), so the History tab reflects work done by hand — not only
-// autonomous tick runs. Dir names are stepNN_slug (NN = block+step digits).
+// autonomous tick runs.
 function auditClosures(plan, limit = 100) {
   const dir = planAuditsDir(plan);
   if (!fs.existsSync(dir)) return [];
@@ -294,8 +332,8 @@ function auditClosures(plan, limit = 100) {
   for (const d of fs.readdirSync(dir)) {
     let stat;
     try { stat = fs.statSync(path.join(dir, d, 'AUDIT_POST.md')); } catch { continue; } // PRE-only / not closed
-    const m = d.match(/^step(\d)(\d+)_(.+)$/);
-    const label = m ? `${m[1]}.${m[2]} ${m[3].replace(/_/g, ' ')}` : d;
+    const stepId = auditStepId(dir, d);
+    const label = stepId ? `${stepId} ${d.replace(/^step\d+_/, '').replace(/_/g, ' ')}` : d;
     out.push({ kind: 'step', name: label, mtime: stat.mtimeMs, size: stat.size });
   }
   return out.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
@@ -307,8 +345,7 @@ function latestLog(plan) {
   const dir = planTickLogDir(plan);
   const current = path.join(dir, 'current.log');
   if (fs.existsSync(current)) return current;
-  // Fallback: highest-mtime real tick log (NOT lexicographic — handles
-  // edge cases where filenames don't sort chronologically).
+  // Fallback: the newest tick log by its timestamped name.
   const logs = tickLogs(plan, 1);
   return logs.length ? path.join(dir, logs[0].name) : null;
 }
@@ -405,7 +442,7 @@ function planAudits(plan) {
   return out;
 }
 
-function planSummary(plan) {
+function planSummary(plan, { dirty = true } = {}) {
   const rows = inventoryRows(plan);
   const closed = rows.filter(r => r.state === 'x').length;
   const active = rows.filter(r => r.state === 'A').length;
@@ -426,7 +463,7 @@ function planSummary(plan) {
     current_step: (rows.find(r => r.state === 'A') || rows.find(r => r.state === ' ') || null),
     latest_log: latestLog(plan)?.split('/').pop() || null,
     docs_mtime: planDocsMtime(plan),
-    tree_dirty: treeDirty(plan),
+    tree_dirty: dirty ? treeDirty(plan) : null,
     external_action: blockExternalAction(plan),
   };
 }
@@ -436,20 +473,27 @@ function planSummary(plan) {
 // root. If missing, defaults are derived from the plan id and the repo layout.
 // Schema:
 // {
-//   "plist_label":      "com.openclaw.memory-plan-tick",
+//   "plist_label":      "ai.openclaw.<id>-tick",
 //   "plist_path":       "~/Library/LaunchAgents/<label>.plist",
 //   "tick_command":     "/path/to/workspace-bin/<id>-tick.sh",
 //   "working_dir":      "/path/to/repo",
 //   "interval_seconds": 1800,
 //   "stdout_path":      "...",
 //   "stderr_path":      "...",
+//   "close_check":      "node --test test/foo.test.mjs",   // optional; "none" disables
+//   "agent_provider":   "codex",                           // optional; claude | codex | gemini, default claude
 //   "env": { "PATH": "...", "HOME": "..." }
 // }
 
 const LAUNCH_AGENTS = path.join(os.homedir(), 'Library/LaunchAgents');
+// launchd is the only scheduler backend; elsewhere "Run one tick" is how a plan ticks.
+// WORKPLAN_VIEWER_PLATFORM stands in for process.platform in tests.
+const SCHEDULER_SUPPORTED = (process.env.WORKPLAN_VIEWER_PLATFORM || process.platform) === 'darwin';
+const SCHEDULER_UNSUPPORTED = 'launchd scheduling is macOS-only; use Run one tick';
 
 function deriveAutomationDefaults(plan) {
-  const repo = plan.root;
+  // plan.root is <repo>/memory-plan/plans, the layout plan-tick.sh assumes.
+  const repo = path.resolve(plan.root, '..', '..');
   const id = plan.id;
   const label = `ai.openclaw.${id}-tick`;
   const cmd = path.join(repo, 'workspace-bin', `${id}-tick.sh`);
@@ -498,6 +542,8 @@ function writeAutomationConfig(plan, cfg) {
     throttle_seconds: Number(cfg.throttle_seconds) || 30,
     stdout_path: cfg.stdout_path,
     stderr_path: cfg.stderr_path,
+    ...(cfg.close_check ? { close_check: String(cfg.close_check) } : {}),
+    ...(cfg.agent_provider ? { agent_provider: String(cfg.agent_provider) } : {}),
     env: cfg.env || {},
   };
   fs.writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
@@ -509,12 +555,24 @@ function plistEscape(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// plan-tick.sh reads the close gate's test command from WORKPLAN_CLOSE_CHECK and
+// the plan's agent CLI from WORKPLAN_AGENT_PROVIDER; without them every plan gates
+// its closes on the root `npm test` and ticks with claude.
+const AGENT_PROVIDERS = ['claude', 'codex', 'gemini'];
+function tickEnv(cfg) {
+  return {
+    ...(cfg.close_check ? { WORKPLAN_CLOSE_CHECK: String(cfg.close_check) } : {}),
+    ...(cfg.agent_provider ? { WORKPLAN_AGENT_PROVIDER: String(cfg.agent_provider) } : {}),
+  };
+}
+
 function generatePlistXml(cfg) {
   // Inject auto-pause env vars so the wrapper can unload this job on fast-exit
   // paths (BLOCKED.md, dirty tree on clean VERSION, plan complete). Otherwise
   // chain mode polls the wall forever and interval mode wastes a slot per tick.
   const env = {
     ...(cfg.env || {}),
+    ...tickEnv(cfg),
     WORKPLAN_AUTOPAUSE: '1',
     WORKPLAN_PLIST_LABEL: cfg.plist_label,
   };
@@ -644,6 +702,7 @@ async function getAutomationState(plan) {
   const lastTickName = logs.length ? logs[0].name : null;
   return {
     config: cfg,
+    scheduler_supported: SCHEDULER_SUPPORTED,
     plist_exists: plistExists,
     plist_interval_seconds: plistInterval,
     plist_mode: plistMode,
@@ -683,6 +742,8 @@ async function launchctlBootout(uid, label, plistPath) {
   }
   return { ok: true };
 }
+
+const TICK_RUNNING = 'a tick is running, retry after it exits';
 
 async function launchctlKickstart(uid, label) {
   const r = await exec('launchctl', ['kickstart', '-k', `gui/${uid}/${label}`]);
@@ -1181,7 +1242,7 @@ function generatedBlockDoc({ trigger, detail, version }) {
 // converts each event into ONE concise activity line. Powers the "Progress"
 // tab — different rendering of the same source data the Live tab uses.
 
-const ACTIVITY_REPO_PREFIX = '/Users/moltymac/openclaw-nodedev/';
+const ACTIVITY_REPO_PREFIX = process.cwd() + path.sep;
 const ACTIVITY_HOME = os.homedir();
 
 function relPath(p) {
@@ -1362,7 +1423,7 @@ function describeToolCall(name, input) {
 function jsonlPathFor(logPath) {
   if (!logPath) return null;
   // current.log symlinks to <timestamp>.log; we need <timestamp>.jsonl.
-  const resolved = fs.realpathSync.native ? fs.realpathSync(logPath) : logPath;
+  const resolved = fs.realpathSync(logPath);
   if (resolved.endsWith('.log')) return resolved.slice(0, -4) + '.jsonl';
   return resolved + '.jsonl';
 }
@@ -1375,14 +1436,23 @@ function jsonlPathFor(logPath) {
 const SESSION_DIR = path.join(os.homedir(), '.claude', 'projects',
   process.cwd().replace(/[/.]/g, '-'));
 
+// Every open stream polls this several times a second and it stats every
+// transcript the repo ever had, so one pick is shared for a short window.
+const SESSION_PICK_TTL_MS = 2000;
+let sessionPick = { at: 0, fp: null };
 function newestSessionJsonl() {
+  const now = Date.now();
+  if (now - sessionPick.at < SESSION_PICK_TTL_MS) return sessionPick.fp;
+  let fp = null;
   try {
     const picks = fs.readdirSync(SESSION_DIR)
       .filter(f => f.endsWith('.jsonl'))
-      .map(f => { const fp = path.join(SESSION_DIR, f); return { fp, m: fs.statSync(fp).mtimeMs }; })
+      .map(f => { const p = path.join(SESSION_DIR, f); return { fp: p, m: fs.statSync(p).mtimeMs }; })
       .sort((a, b) => b.m - a.m);
-    return picks.length ? picks[0].fp : null;
-  } catch { return null; }
+    if (picks.length) fp = picks[0].fp;
+  } catch {}
+  sessionPick = { at: now, fp };
+  return fp;
 }
 
 // A tick log only counts as the *live* source while it's actively being
@@ -1488,7 +1558,7 @@ function sseActivity(req, res, resolve) {
   let currentJsonl = src.path;
   let sourceKind = src.kind;
   let sourcePlan = src.plan || null;
-  let position = 0, closed = false, buffer = '';
+  let position = 0, closed = false, buffer = '', decoder;
 
   const send = (event, data) => {
     if (closed) return;
@@ -1506,6 +1576,7 @@ function sseActivity(req, res, resolve) {
     }
   };
   const emitFull = () => {
+    decoder = new StringDecoder('utf8');
     if (!currentJsonl || !fs.existsSync(currentJsonl)) {
       send('info', { msg: 'No activity yet — no tick is running, and no interactive session was found for this repo.' });
       return;
@@ -1520,14 +1591,14 @@ function sseActivity(req, res, resolve) {
       fs.readSync(fd, buf, 0, SESSION_TAIL_BYTES, start);
       fs.closeSync(fd);
       position = stat.size;
-      let s = buf.toString('utf8');
+      let s = decoder.write(buf);
       const i = s.indexOf('\n'); if (i !== -1) s = s.slice(i + 1);
       processChunk(s);
       return;
     }
-    const data = fs.readFileSync(currentJsonl, 'utf8');
-    position = Buffer.byteLength(data, 'utf8');
-    processChunk(data);
+    const data = fs.readFileSync(currentJsonl);
+    position = data.length;
+    processChunk(decoder.write(data));
   };
   emitFull();
 
@@ -1547,7 +1618,7 @@ function sseActivity(req, res, resolve) {
         fs.readSync(fd, buf, 0, buf.length, position);
         fs.closeSync(fd);
         position = stat.size;
-        processChunk(buf.toString('utf8'));
+        processChunk(decoder.write(buf));
       } else if (stat.size < position) {
         position = 0; buffer = ''; emitFull();
       }
@@ -1566,7 +1637,7 @@ function sseLive(req, res, resolve, allowSwitch) {
   const pinnedFd = cur.fd;
   let currentPath = cur.path;
   let mode = cur.mode;
-  let position = 0, closed = false, buffer = '';
+  let position = 0, closed = false, buffer = '', decoder;
 
   const send = (event, data) => {
     if (closed) return;
@@ -1585,6 +1656,7 @@ function sseLive(req, res, resolve, allowSwitch) {
     if (lines) send('append', JSON.stringify(lines));
   };
   const emitFull = () => {
+    decoder = new StringDecoder('utf8');
     if (!currentPath || (pinnedFd === undefined && !fs.existsSync(currentPath))) {
       send('file', '— no activity yet');
       send('append', JSON.stringify('No tick is running, and no interactive session was found for this repo.\n'));
@@ -1600,21 +1672,20 @@ function sseLive(req, res, resolve, allowSwitch) {
       fs.readSync(fd, buf, 0, len, start);
       if (pinnedFd === undefined) fs.closeSync(fd);
       position = stat.size;
-      let s = buf.toString('utf8');
+      let s = decoder.write(buf);
       if (start > 0) { const i = s.indexOf('\n'); if (i !== -1) s = s.slice(i + 1); }
       send('file', path.basename(currentPath) + ' · interactive session');
       renderJsonl(s);
       return;
     }
-    let buf;
+    let bytes;
     if (pinnedFd !== undefined) {
       const data = Buffer.alloc(fs.fstatSync(pinnedFd).size);
-      const count = fs.readSync(pinnedFd, data, 0, data.length, 0);
-      buf = data.subarray(0, count).toString('utf8');
-    } else buf = fs.readFileSync(currentPath, 'utf8');
-    position = Buffer.byteLength(buf, 'utf8');
+      bytes = data.subarray(0, fs.readSync(pinnedFd, data, 0, data.length, 0));
+    } else bytes = fs.readFileSync(currentPath);
+    position = bytes.length;
     send('file', path.basename(currentPath));
-    send('append', JSON.stringify(buf));
+    send('append', JSON.stringify(decoder.write(bytes)));
   };
   emitFull();
 
@@ -1637,8 +1708,9 @@ function sseLive(req, res, resolve, allowSwitch) {
         fs.readSync(fd, buf, 0, buf.length, position);
         if (pinnedFd === undefined) fs.closeSync(fd);
         position = stat.size;
-        if (mode === 'pretty') renderJsonl(buf.toString('utf8'));
-        else send('append', JSON.stringify(buf.toString('utf8')));
+        const text = decoder.write(buf);
+        if (mode === 'pretty') renderJsonl(text);
+        else if (text) send('append', JSON.stringify(text));
       } else if (stat.size < position) {
         send('switch', path.basename(currentPath));
         position = 0; buffer = ''; emitFull();
@@ -1656,7 +1728,7 @@ function sseLive(req, res, resolve, allowSwitch) {
 
 const PLAN_PATH_RE = /^\/api\/plans\/([^/]+)(\/.*)?$/;
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -1720,7 +1792,7 @@ const server = http.createServer(async (req, res) => {
     const loadedLabels = await getAllLoadedLabels();
     const plans = PLANS.map(p => {
       const cfg = readAutomationConfig(p);
-      const summary = planSummary(p);
+      const summary = planSummary(p, { dirty: false });
       return { ...summary, scheduler_loaded: loadedLabels.has(cfg.plist_label) };
     });
     return json(res, { roots: ROOTS, plans });
@@ -1795,15 +1867,17 @@ const server = http.createServer(async (req, res) => {
       }
       // If the scheduler had auto-paused itself (plist exists but launchd no
       // longer has the job), bring it back up so the chain/interval resumes.
-      const cfg = readAutomationConfig(plan);
-      const plistExists = fs.existsSync(cfg.plist_path);
-      const status = await launchdStatus(cfg.plist_label);
+      // Stop scheduler removes the plist, so a deliberate stop stays stopped.
       let scheduler_reloaded = false;
       let scheduler_error = null;
-      if (plistExists && !status.loaded) {
-        const r = await launchctlBoot(process.getuid(), cfg.plist_path, cfg.plist_label);
-        if (r.ok) scheduler_reloaded = true;
-        else scheduler_error = r.error;
+      if (SCHEDULER_SUPPORTED) {
+        const cfg = readAutomationConfig(plan);
+        const status = await launchdStatus(cfg.plist_label);
+        if (fs.existsSync(cfg.plist_path) && !status.loaded) {
+          const r = await launchctlBoot(process.getuid(), cfg.plist_path, cfg.plist_label);
+          if (r.ok) scheduler_reloaded = true;
+          else scheduler_error = r.error;
+        }
       }
       return json(res, {
         ok: true,
@@ -1833,10 +1907,15 @@ const server = http.createServer(async (req, res) => {
           throttle_seconds: body.throttle_seconds != null ? Number(body.throttle_seconds) : current.throttle_seconds,
           stdout_path:      body.stdout_path      ?? current.stdout_path,
           stderr_path:      body.stderr_path      ?? current.stderr_path,
+          close_check:      body.close_check      ?? current.close_check,
+          agent_provider:   body.agent_provider   ?? current.agent_provider,
           env:              body.env              ?? current.env,
         };
         if (next.mode !== 'interval' && next.mode !== 'chain') {
           return json(res, { error: 'mode must be "interval" or "chain"' }, 400);
+        }
+        if (next.agent_provider && !AGENT_PROVIDERS.includes(next.agent_provider)) {
+          return json(res, { error: `agent_provider must be one of ${AGENT_PROVIDERS.join(', ')}` }, 400);
         }
         if (next.mode === 'interval' && (!Number.isFinite(next.interval_seconds) || next.interval_seconds < 60)) {
           return json(res, { error: 'interval_seconds must be ≥ 60' }, 400);
@@ -1844,10 +1923,14 @@ const server = http.createServer(async (req, res) => {
         if (next.mode === 'chain' && (!Number.isFinite(next.throttle_seconds) || next.throttle_seconds < 10)) {
           return json(res, { error: 'throttle_seconds must be ≥ 10 (launchd minimum)' }, 400);
         }
+        // The reload below boots the job out, which kills a running tick mid-step.
+        const status = SCHEDULER_SUPPORTED ? await launchdStatus(next.plist_label) : { loaded: false, pid: null };
+        if (status.pid) return json(res, { error: TICK_RUNNING }, 409);
         try {
           const saved = writeAutomationConfig(plan, next);
+          // close_check and agent_provider still reach "Run one tick" through automation.json.
+          if (!SCHEDULER_SUPPORTED) return json(res, { ok: true, config: saved, applied_to_plist: false, reloaded: false });
           // If plist exists OR launchd loaded, rewrite plist; reload if loaded.
-          const status = await launchdStatus(saved.plist_label);
           if (fs.existsSync(saved.plist_path) || status.loaded) {
             fs.mkdirSync(path.dirname(saved.plist_path), { recursive: true });
             fs.writeFileSync(saved.plist_path, generatePlistXml(saved));
@@ -1861,6 +1944,11 @@ const server = http.createServer(async (req, res) => {
           return json(res, { error: e.message }, 500);
         }
       }).catch((e) => json(res, { error: e.message }, 400));
+    }
+
+    if (!SCHEDULER_SUPPORTED && req.method === 'POST'
+        && ['/automation/load', '/automation/unload', '/automation/kickstart'].includes(sub)) {
+      return json(res, { error: SCHEDULER_UNSUPPORTED }, 501);
     }
 
     if (sub === '/automation/load' && req.method === 'POST') {
@@ -1885,6 +1973,9 @@ const server = http.createServer(async (req, res) => {
       const cfg = readAutomationConfig(plan);
       const r = await launchctlBootout(process.getuid(), cfg.plist_label, cfg.plist_path);
       if (!r.ok) return json(res, { error: r.error }, 500);
+      // /unblock reloads a plist that is on disk but not loaded, which must mean the
+      // tick paused itself (plan-tick keeps the plist); Start regenerates it from automation.json.
+      fs.rmSync(cfg.plist_path, { force: true });
       const state = await getAutomationState(plan);
       return json(res, { ok: true, msg: r.msg || 'unloaded', state });
     }
@@ -1895,6 +1986,8 @@ const server = http.createServer(async (req, res) => {
       if (!status.loaded) {
         return json(res, { error: 'launchd job not loaded — Load it first, or use the manual tick command' }, 400);
       }
+      // kickstart -k would kill the running tick mid-step.
+      if (status.pid) return json(res, { error: TICK_RUNNING }, 409);
       const r = await launchctlKickstart(process.getuid(), cfg.plist_label);
       if (!r.ok) return json(res, { error: r.error }, 500);
       return json(res, { ok: true, msg: 'kickstart fired — a new tick should start within a second' });
@@ -1909,8 +2002,9 @@ const server = http.createServer(async (req, res) => {
         return json(res, { error: 'tick command not found: ' + cfg.tick_command }, 400);
       }
       // Reject if the lock is already held — would just skip-fast.
-      if (fs.existsSync(path.join(plan.dir, '.tick.lock'))) {
-        return json(res, { error: 'a tick is already running (lock held)' }, 409);
+      const holder = tickLockHolder(plan);
+      if (holder) {
+        return json(res, { error: `a tick is already running (lock held by ${holder})` }, 409);
       }
       // Reject if blocked — clearer than running and immediately exiting.
       if (fs.existsSync(path.join(plan.dir, 'BLOCKED.md'))) {
@@ -1924,6 +2018,7 @@ const server = http.createServer(async (req, res) => {
           stdio: 'ignore',
           env: {
             ...process.env,
+            ...tickEnv(cfg),
             // Don't auto-pause launchd for manual runs (in case it IS loaded).
             WORKPLAN_AUTOPAUSE: '0',
             // Clear nested-claude guard so the manual fire works from inside
@@ -1945,9 +2040,11 @@ const server = http.createServer(async (req, res) => {
       if (!rel) return json(res, { error: 'missing ?path=' }, 400);
       // Fully siloed: resolve ONLY within the plan's own dir (no path traversal).
       const full = safeJoin(plan.dir, rel);
-      if (!full || !fs.existsSync(full)) return json(res, { error: 'not found' }, 404);
+      let isFile = false;
+      try { isFile = !!full && fs.statSync(full).isFile(); } catch { /* missing → 404 */ }
+      if (!isFile) return json(res, { error: 'not found' }, 404);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      fs.createReadStream(full).pipe(res);
+      fs.createReadStream(full).on('error', () => res.destroy()).pipe(res);
       return;
     }
 
@@ -1955,10 +2052,8 @@ const server = http.createServer(async (req, res) => {
     if (auditMatch) {
       const idx = Number(auditMatch[1]);
       const rows = inventoryRows(plan);
-      const audits = planAudits(plan);
-      const folderNames = Object.keys(audits).sort();
-      const dirName = folderNames[idx];
       if (!rows[idx]) return json(res, { error: 'step out of range' }, 404);
+      const dirName = auditDirForStep(plan, rows[idx].step);
       if (!dirName)  return json(res, { dirName: null, step: rows[idx], pre: null, post: null });
       const full = path.join(planAuditsDir(plan), dirName);
       const readMaybe = (rel) => {
@@ -1989,6 +2084,18 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('not found');
+}
+
+// A sync fs call that throws inside an async handler is an unhandled rejection, which
+// would exit the viewer; a plan dir can vanish or hold a broken symlink mid-request.
+const server = http.createServer(async (req, res) => {
+  try {
+    await handleRequest(req, res);
+  } catch (e) {
+    console.error(`[viewer] ${req.method} ${req.url} failed: ${e.stack || e}`);
+    if (!res.headersSent) json(res, { error: e.message }, 500);
+    else res.destroy();
+  }
 });
 
 server.listen(PORT, '127.0.0.1', () => {

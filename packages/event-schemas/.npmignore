@@ -1,7 +1,7 @@
-# npm pack honors .gitignore inside included dirs unless an .npmignore overrides
-# it — and dist/ is gitignored, so the published tarball shipped WITHOUT the
-# compiled schemas that lib/event-schemas.mjs imports at runtime (security
-# review 2, F6). This file overrides: exclude only what must never ship.
+# Read only by a standalone pack of this workspace (`npm pack -w event-schemas`), where it
+# replaces the root .gitignore that lists packages/*/dist/, so dist/ ships. The root
+# tarball never reads it: with root "workspaces", npm-packlist reads no ignore file
+# below the root, so the root "files" list (packages/ plus its negations) decides.
 node_modules/
 src/
 tsconfig.json

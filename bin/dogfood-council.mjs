@@ -19,7 +19,9 @@
  *
  * Environment:
  *   DOGFOOD_METRICS_PATH — override metrics output path
- *   DOGFOOD_NATS_URL     — NATS server URL (default: nats://localhost:4222)
+ *   DOGFOOD_NATS_URL     — NATS URL for the harness connection (default: OPENCLAW_NATS /
+ *                          openclaw.env via lib/nats-resolve; spawned node configs
+ *                          default to nats://localhost:4222)
  *
  * @module bin/dogfood-council
  */
@@ -30,6 +32,7 @@ import { createWriteStream, readFileSync, existsSync } from 'node:fs';
 import { appendFile, readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { spawnNode, readNodeConfig } from './spawn-node.mjs';
+import { ACCEPTOR_STATS_SUBJECT_PREFIX } from '../lib/broadcast-acceptor.mjs';
 import { createRequire } from 'node:module';
 
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
@@ -39,9 +42,6 @@ const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.
 /** Default metrics output path. */
 export const DEFAULT_METRICS_PATH = join(homedir(), '.openclaw', 'dogfood-metrics.jsonl');
 
-/** Default NATS URL for the dogfood harness. */
-export const DEFAULT_NATS_URL = 'nats://localhost:4222';
-
 /** Default council size. */
 export const COUNCIL_SIZE = 3;
 
@@ -50,6 +50,7 @@ export const MONITORED_SUBJECTS = Object.freeze([
   'context.broadcast.>',
   'context.offer.>',
   'context.accepted.>',
+  `${ACCEPTOR_STATS_SUBJECT_PREFIX}.>`,
   'mesh.health.alerts',
 ]);
 
@@ -149,6 +150,8 @@ export function aggregateFromLines(lines) {
 
   /** @type {Map<string, string>} broadcastEventId → broadcastTs */
   const broadcastTimestamps = new Map();
+  /** @type {Map<string, string>} offerEventId → broadcastEventId */
+  const offerToBroadcast = new Map();
 
   for (const line of lines) {
     let entry;
@@ -175,14 +178,19 @@ export function aggregateFromLines(lines) {
       case METRIC_TYPES.OFFER:
         offerCount++;
         perNode[nodeId].offers++;
+        if (entry.data?.event_id && entry.data?.responding_to) {
+          offerToBroadcast.set(entry.data.event_id, entry.data.responding_to);
+        }
         break;
 
       case METRIC_TYPES.ACCEPTED:
         acceptedCount++;
         perNode[nodeId].accepted++;
         // Calculate round-trip if we have the original broadcast timestamp
+        // context.accepted answers an offer (its responding_to is the offer's event_id): resolve offer → broadcast.
         if (entry.data?.responding_to_broadcast) {
-          const bcastTs = broadcastTimestamps.get(entry.data.responding_to_broadcast);
+          const ref = entry.data.responding_to_broadcast;
+          const bcastTs = broadcastTimestamps.get(ref) ?? broadcastTimestamps.get(offerToBroadcast.get(ref));
           if (bcastTs) {
             const rt = calculateRoundTripMs(bcastTs, entry.ts);
             if (rt >= 0) roundTrips.push(rt);
@@ -190,10 +198,12 @@ export function aggregateFromLines(lines) {
         }
         break;
 
-      case METRIC_TYPES.SIGNATURE_FAILURE:
-        signatureFailures++;
-        perNode[nodeId].sig_failures++;
+      case METRIC_TYPES.SIGNATURE_FAILURE: {
+        const n = Number(entry.data?.count) || 1;
+        signatureFailures += n;
+        perNode[nodeId].sig_failures += n;
         break;
+      }
 
       case METRIC_TYPES.DEAD_PEER:
         deadPeerEvents++;
@@ -275,6 +285,9 @@ export function createMetricCollector(nc, opts = {}) {
   const subscriptions = [];
   const lines = [];
   let stopped = false;
+  const collectorStartedMs = Date.now();
+  /** @type {Map<string, { started_at: string, count: number }>} node → last acceptor counter seen */
+  const sigCounters = new Map();
 
   /**
    * Record a metric entry — append to JSONL and track in-memory.
@@ -285,6 +298,10 @@ export function createMetricCollector(nc, opts = {}) {
    */
   async function recordMetric(type, data, nodeId) {
     if (stopped) return;
+    return writeMetric(type, data, nodeId);
+  }
+
+  async function writeMetric(type, data, nodeId) {
     const entry = createMetricEntry(type, data, nodeId);
     const line = formatMetricLine(entry) + '\n';
     lines.push(line.trim());
@@ -315,19 +332,13 @@ export function createMetricCollector(nc, opts = {}) {
         dedup_key: data.data?.dedup_key,
       }, sourceNode);
     } else if (subject.startsWith('context.offer.')) {
-      // Check for signature failure indicator
-      if (data._signature_rejected) {
-        await recordMetric(METRIC_TYPES.SIGNATURE_FAILURE, {
-          event_id: data.event_id,
-          reason: 'bad_signature',
-        }, sourceNode);
-      } else {
-        await recordMetric(METRIC_TYPES.OFFER, {
-          event_id: data.event_id,
-          responding_to: data.data?.responding_to,
-          artifact_count: data.data?.artifacts?.length || 0,
-        }, sourceNode);
-      }
+      await recordMetric(METRIC_TYPES.OFFER, {
+        event_id: data.event_id,
+        responding_to: data.data?.responding_to,
+        artifact_count: data.data?.artifacts?.length || 0,
+      }, sourceNode);
+    } else if (subject.startsWith(`${ACCEPTOR_STATS_SUBJECT_PREFIX}.`)) {
+      await recordSignatureRejections(subject.slice(ACCEPTOR_STATS_SUBJECT_PREFIX.length + 1), data);
     } else if (subject.startsWith('context.accepted.')) {
       await recordMetric(METRIC_TYPES.ACCEPTED, {
         event_id: data.event_id,
@@ -342,6 +353,29 @@ export function createMetricCollector(nc, opts = {}) {
           alert: data.data || {},
         }, sourceNode);
       }
+    }
+  }
+
+  /**
+   * Acceptors publish a running signature_rejected counter; record the increase
+   * since the last report from the same acceptor instance. An acceptor already
+   * running when the collector started is baselined at its first report, since
+   * its earlier rejections predate this run.
+   */
+  async function recordSignatureRejections(nodeId, data) {
+    const count = Number(data.signature_rejected);
+    if (!Number.isInteger(count) || count < 0 || typeof data.started_at !== 'string') return;
+    const prev = sigCounters.get(nodeId);
+    let base;
+    if (prev && prev.started_at === data.started_at) base = prev.count;
+    else base = Date.parse(data.started_at) >= collectorStartedMs ? 0 : count;
+    sigCounters.set(nodeId, { started_at: data.started_at, count: Math.max(count, base) });
+    if (count > base) {
+      await recordMetric(METRIC_TYPES.SIGNATURE_FAILURE, {
+        count: count - base,
+        reason: 'acceptor_rejected',
+        acceptor_started_at: data.started_at,
+      }, nodeId);
     }
   }
 
@@ -390,7 +424,7 @@ export function createMetricCollector(nc, opts = {}) {
       } catch { /* ignore */ }
     }
 
-    await recordMetric(METRIC_TYPES.HARNESS_STOP, {
+    await writeMetric(METRIC_TYPES.HARNESS_STOP, {
       total_lines: lines.length,
     });
 
@@ -455,7 +489,7 @@ export async function createDogfoodHarness(opts = {}) {
     try {
       const { connect } = await import('nats');
       nc = await connect(natsConnectOpts({ servers: natsUrl }));
-      log(`[dogfood] connected to NATS at ${natsUrl}`);
+      log(`[dogfood] connected to NATS at ${nc.getServer()}`);
     } catch (err) {
       log(`[dogfood] NATS connection failed: ${err.message} — running in offline mode`);
       nc = null;
@@ -571,7 +605,7 @@ async function main() {
 
 Options:
   --node-ids <a,b,c>     Comma-separated node identifiers (default: alpha,bravo,charlie)
-  --nats-url <url>       NATS server URL (default: nats://localhost:4222)
+  --nats-url <url>       Harness NATS URL (default: lib/nats-resolve; spawned nodes get nats://localhost:4222)
   --metrics-path <path>  Metrics JSONL output path (default: ~/.openclaw/dogfood-metrics.jsonl)
   --base-dir <dir>       Base directory for spawned nodes
   --duration <sec>       Auto-stop after N seconds (default: run until SIGINT)

@@ -23,6 +23,8 @@
     <dict>
       <key>PATH</key>
       <string>/usr/bin:/bin</string>
+      <key>OPENCLAW_WORKSPACE</key>
+      <string>${OPENCLAW_WORKSPACE}</string>
     </dict>
   </dict>
 </plist>

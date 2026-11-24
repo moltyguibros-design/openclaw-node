@@ -12,11 +12,13 @@
  *       arm = solo | grappe. Task file: first line = title, rest = description.
  *   node bin/fed-benchmark.mjs status <task-id>
  *   node bin/fed-benchmark.mjs collect <name> <solo-task-id> <grappe-task-id>
- *       Pulls both final artifacts, blinds to A/B (coin flip), writes
- *       benchmark/pairs/<name>/{A.md,B.md,key.json,meta.json}.
+ *       Pulls both final artifacts, blinds to A/B (coin flip), writes the
+ *       scorer package benchmark/pairs-d14/<name>/{A.md,B.md} and seals
+ *       key.json, meta.json and hashes under benchmark/sealed-d14/<name>/.
  *   node bin/fed-benchmark.mjs tally
- *       Reads benchmark/pairs/<name>/score.json ({winner:"A"|"B"|"tie", notes})
- *       + key.json, prints unblinded per-task verdicts + overall result.
+ *       Reads benchmark/pairs-d14/<name>/score.json (winner, notes and the
+ *       five-dimension scores per arm) + the sealed key.json, prints
+ *       unblinded per-task verdicts + overall result.
  *
  * Requires the mesh stack up (launchd daemon + 3 claude agents for grappe,
  * ≥1 agent for solo). OPENCLAW_NATS resolves loopback-first here.

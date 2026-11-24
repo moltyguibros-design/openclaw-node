@@ -18,6 +18,7 @@ const { connect, StringCodec } = require('nats');
 const sc = StringCodec();
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
+const { openMeshKv } = require('../lib/mesh-kv');
 const tracer = createTracer('discord-read');
 
 async function natsConnect() {
@@ -36,9 +37,15 @@ async function natsConnect() {
  */
 async function findDiscordToolNode(nc) {
   const js = nc.jetstream();
-  const kv = await js.views.kv('MESH_TOOLS');
+  let kv, keys;
+  try {
+    kv = await openMeshKv(js, 'MESH_TOOLS', { bindOnly: true }, { waitMs: 0 });
+    // A bind does not check the stream: a bucket nobody created yet fails here.
+    keys = await kv.keys();
+  } catch {
+    return null;
+  }
 
-  const keys = await kv.keys();
   for await (const key of keys) {
     if (key.endsWith('.discord-history')) {
       const entry = await kv.get(key);
@@ -80,7 +87,11 @@ function parseArgs(args) {
   const positional = [];
   let i = 0;
   while (i < args.length) {
-    if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
+    // --json takes no value: it used to need one, so `history <id> --json` left it a positional.
+    if (args[i] === '--json') {
+      flags.json = true;
+      i++;
+    } else if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
       flags[args[i].slice(2)] = args[i + 1];
       i += 2;
     } else {
@@ -94,7 +105,7 @@ function parseArgs(args) {
 function formatMessages(messages) {
   for (const m of messages) {
     const time = new Date(m.timestamp).toLocaleString('en-US', {
-      timeZone: 'America/Montreal', hour12: false,
+      timeZone: process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal', hour12: false,
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit',
     });
@@ -135,8 +146,15 @@ ENVIRONMENT:
   if (cmd === 'tools') {
     // List all mesh tools
     const js = nc.jetstream();
-    const kv = await js.views.kv('MESH_TOOLS');
-    const keys = await kv.keys();
+    let kv, keys;
+    try {
+      kv = await openMeshKv(js, 'MESH_TOOLS', { bindOnly: true }, { waitMs: 0 });
+      keys = await kv.keys();
+    } catch {
+      console.log('No tools registered.');
+      await nc.close();
+      return;
+    }
     let found = false;
     for await (const key of keys) {
       const entry = await kv.get(key);

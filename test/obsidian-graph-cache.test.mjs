@@ -85,17 +85,29 @@ describe('obsidian-graph-cache', () => {
     const cache = createGraphCache({ db, vaultPath: tmpDir });
     await cache.refreshCache();
 
-    const result = cache.queryNeighbors('alpha');
+    // Spreading activation calls queryNeighbors per frontier node per step, so it
+    // must reuse statements prepared once at construction.
+    const realPrepare = db.prepare.bind(db);
+    let prepares = 0;
+    db.prepare = (...a) => { prepares++; return realPrepare(...a); };
+
+    const result = cache.queryNeighbors('concepts/alpha');
     // alpha→beta, alpha→gamma (outgoing) + beta→alpha (incoming)
     assert.equal(result.edges.length, 3);
     assert.equal(result.neighbors.length, 2); // beta and gamma
 
-    const outgoing = cache.queryNeighbors('alpha', { direction: 'outgoing' });
+    const outgoing = cache.queryNeighbors('concepts/alpha', { direction: 'outgoing' });
     assert.equal(outgoing.edges.length, 2);
 
-    const incoming = cache.queryNeighbors('alpha', { direction: 'incoming' });
+    const incoming = cache.queryNeighbors('concepts/alpha', { direction: 'incoming' });
     assert.equal(incoming.edges.length, 1);
-    assert.equal(incoming.edges[0].source_id, 'beta');
+    assert.equal(incoming.edges[0].source_id, 'concepts/beta');
+
+    // Spreading activation reads only the edges: no per-neighbour node lookup.
+    const edgesOnly = cache.queryNeighbors('concepts/alpha', { edgesOnly: true });
+    assert.deepEqual(edgesOnly.edges, result.edges);
+    assert.deepEqual(edgesOnly.neighbors, []);
+    assert.equal(prepares, 0, 'queryNeighbors prepared SQL per call');
     cache.close();
   });
 
@@ -137,9 +149,9 @@ describe('obsidian-graph-cache', () => {
     assert.equal(stats.nodeCount, 2); // old-node gone, new-node-a + new-node-b
     const nodes = cache.getNodes();
     const nodeIds = nodes.map(n => n.id);
-    assert.ok(!nodeIds.includes('old-node'));
-    assert.ok(nodeIds.includes('new-node-a'));
-    assert.ok(nodeIds.includes('new-node-b'));
+    assert.ok(!nodeIds.includes('concepts/old-node'));
+    assert.ok(nodeIds.includes('concepts/new-node-a'));
+    assert.ok(nodeIds.includes('concepts/new-node-b'));
     cache.close();
   });
 
@@ -154,7 +166,7 @@ describe('obsidian-graph-cache', () => {
     await cache.refreshCache();
 
     const edges = cache.getEdges();
-    const derivedEdge = edges.find(e => e.source_id === 'derived-concept' && e.target_id === 'base-concept');
+    const derivedEdge = edges.find(e => e.source_id === 'concepts/derived-concept' && e.target_id === 'concepts/base-concept');
     assert.ok(derivedEdge);
     assert.equal(derivedEdge.edge_type, 'derived_from');
     cache.close();

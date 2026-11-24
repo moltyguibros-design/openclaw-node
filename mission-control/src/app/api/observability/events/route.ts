@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRawDb } from "@/lib/db";
-import { withTrace } from "@/lib/tracer";
+import { MAX_EVENTS } from "@/lib/observability-query";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +13,15 @@ export const dynamic = "force-dynamic";
  * - node: filter by node_id
  * - category: filter by category
  * - tier: filter by tier (1, 2, 3)
- * - error: if "true", only events with errors
+ * - error: if "true", only events with an error or in the error category
  * - limit: default 200, max 1000
  *
- * Returns JSON array ordered by timestamp DESC.
+ * Returns { events: [...] } ordered by timestamp DESC.
+ *
+ * Not wrapped in withTrace: the Observability page polls this every 3 s, and a
+ * trace per poll would fill the table it serves with its own reads.
  */
-export const GET = withTrace("observability", "GET /api/observability/events", async (request: NextRequest) => {
+export async function GET(request: NextRequest) {
   try {
     const url = request.nextUrl;
     // Support both ?since=<ms timestamp> and ?hours=<N> for convenience
@@ -34,7 +37,7 @@ export const GET = withTrace("observability", "GET /api/observability/events", a
     const tier = url.searchParams.get("tier");
     const errorOnly = url.searchParams.get("error") === "true";
     const limitParam = parseInt(url.searchParams.get("limit") || "200", 10);
-    const limit = Math.min(Math.max(1, limitParam), 1000);
+    const limit = Math.min(Math.max(1, limitParam), MAX_EVENTS);
 
     const db = getRawDb();
 
@@ -73,7 +76,7 @@ export const GET = withTrace("observability", "GET /api/observability/events", a
     }
 
     if (errorOnly) {
-      conditions.push("error IS NOT NULL");
+      conditions.push("(error IS NOT NULL OR category = 'error')");
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -90,4 +93,4 @@ export const GET = withTrace("observability", "GET /api/observability/events", a
       { status: 500 }
     );
   }
-});
+}

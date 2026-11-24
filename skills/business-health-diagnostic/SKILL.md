@@ -675,7 +675,7 @@ Your business is in survival mode. Immediate drastic action required.
 
 ## Examples
 
-See `examples/` folder. Mini examples below:
+Mini examples:
 
 ### Example 1: Healthy Growth-Stage SaaS
 

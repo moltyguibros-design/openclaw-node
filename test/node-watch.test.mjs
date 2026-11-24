@@ -4,11 +4,18 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
-  WATCH_TARGETS, runWatch, formatHtml, STATUS,
+  WATCH_TARGETS, runWatch, formatHtml, STATUS, watchTransitions, buildSourceMap,
   parseLaunchdPrint, gradeMeshServices, gradeRequiredServices, gradeGateway, probeCoreLaunchdServices, probeMeshServices,
+  probeGateway, probeCoordinator, defaultWatchPaths,
 } from '../lib/node-watch.mjs';
+import { parseSystemdShow } from '../lib/fed-probes.mjs';
 import { resolveNodeConfig } from '../lib/node-acceptance.mjs';
+import { createRuntimeContext } from '../lib/node-acceptance-probes.mjs';
+
+const BIN = fileURLToPath(new URL('../bin/node-watch.mjs', import.meta.url));
 
 const config = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', OPENCLAW_NODE_ID: 'tn' });
 
@@ -45,7 +52,8 @@ function makeCtx(over = {}) {
 }
 
 const target = (id) => WATCH_TARGETS.find((t) => t.id === id);
-const envFor = (ctx, extra = {}) => ({ ctx, config: ctx.config, hc: {}, probes: {}, includeHeavy: true, ...extra });
+const W_OK = { status: STATUS.WORKING, detail: 'opens; integrity ok', evidence: '' };
+const envFor = (ctx, extra = {}) => ({ ctx, config: ctx.config, probes: {}, includeHeavy: true, ...extra });
 
 describe('node-watch honesty invariants', () => {
   it('launchd parsing distinguishes a running PID from a loaded stopped job', () => {
@@ -216,6 +224,99 @@ describe('node-watch honesty invariants', () => {
     assert.match(verdict.detail, /EACCES/);
   });
 
+  describe('Linux systemd units', () => {
+    const unit = (over = {}) => Object.entries({
+      LoadState: 'loaded', UnitFileState: 'enabled', ActiveState: 'active', SubState: 'running',
+      MainPID: '4242', ExecMainCode: '0', ExecMainStatus: '0', Result: 'success',
+      Environment: 'HOME=/home/op PATH=/usr/bin', ...over,
+    }).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+    const RUNNING = unit();
+    const DEAD_OK = unit({ ActiveState: 'inactive', SubState: 'dead', MainPID: '0', ExecMainCode: '1' });
+    const FAILED = unit({ ActiveState: 'failed', SubState: 'failed', MainPID: '0', ExecMainCode: '1', ExecMainStatus: '1', Result: 'exit-code' });
+    const DISABLED = unit({ UnitFileState: 'disabled', ActiveState: 'inactive', SubState: 'dead', MainPID: '0' });
+    const NOT_FOUND = 'LoadState=not-found\nActiveState=inactive\nMainPID=0\n';
+    const systemdCtx = (units, over = {}) => {
+      const calls = [];
+      return { calls, ctx: makeCtx({
+        exec: async (bin, args) => {
+          assert.equal(bin, 'systemctl');
+          const name = args.at(-1);
+          calls.push(name);
+          return { code: 0, stdout: units[name] ?? NOT_FOUND, stderr: '' };
+        },
+        ...over,
+      }) };
+    };
+
+    it('maps systemctl show onto the launchd-shaped record', () => {
+      assert.deepEqual(parseSystemdShow({ code: 0, stdout: RUNNING }), {
+        observable: true, loaded: true, running: true, pid: 4242, state: 'running',
+        lastExitCode: null, exitKnown: true, terminatingSignal: false, home: '/home/op' });
+      const dead = parseSystemdShow({ code: 0, stdout: DEAD_OK });
+      assert.equal(dead.running, false);
+      assert.equal(dead.state, 'not running');
+      assert.equal(dead.lastExitCode, 0);
+      assert.equal(parseSystemdShow({ code: 0, stdout: FAILED }).state, 'failed/failed');
+      assert.equal(parseSystemdShow({ code: 0, stdout: unit({ ExecMainCode: '2', ActiveState: 'inactive', MainPID: '0' }) }).terminatingSignal, true);
+      assert.equal(parseSystemdShow({ code: 0, stdout: DISABLED }).loaded, false);
+      assert.equal(parseSystemdShow({ code: 0, stdout: NOT_FOUND }).loaded, false);
+      assert.equal(parseSystemdShow({ code: 1, stdout: '', stderr: 'Failed to connect to bus' }).observable, false);
+    });
+
+    it('mesh services grade openclaw-mesh-*.service units', async () => {
+      const units = Object.fromEntries(['agent', 'bridge', 'deploy-listener', 'health-publisher', 'task-daemon', 'tool-discord']
+        .map((name) => [`openclaw-mesh-${name}.service`, RUNNING]));
+      const { ctx, calls } = systemdCtx(units, { fsp: { readFile: async () => JSON.stringify({ channels: { discord: { enabled: true } } }) } });
+      const working = await probeMeshServices(ctx, { platform: 'linux' });
+      assert.equal(working.status, STATUS.WORKING);
+      assert.ok(calls.includes('openclaw-mesh-task-daemon.service'));
+      units['openclaw-mesh-bridge.service'] = FAILED;
+      const broken = await probeMeshServices(ctx, { platform: 'linux' });
+      assert.equal(broken.status, STATUS.BROKEN);
+      assert.match(broken.detail, /mesh-bridge/);
+      assert.equal((await probeMeshServices(ctx, { platform: 'freebsd' })).status, STATUS.UNKNOWN);
+    });
+
+    it('core services read the cohort and refuse a stray NATS unit', async () => {
+      const units = {
+        'openclaw-memory-daemon.service': RUNNING,
+        'openclaw-nats.service': RUNNING,
+        'openclaw-mission-control.service': RUNNING,
+      };
+      const { ctx } = systemdCtx(units, { fsp: {
+        lstat: async () => { throw new Error('the launchd handoff marker must not be read on Linux'); },
+        readFile: async () => JSON.stringify({ schema: 1, activeLabels: ['ai.openclaw.nats'] }),
+      } });
+      assert.equal((await probeCoreLaunchdServices(ctx, { platform: 'linux' })).status, STATUS.WORKING);
+      units['openclaw-nats-2.service'] = RUNNING;
+      const stray = await probeCoreLaunchdServices(ctx, { platform: 'linux' });
+      assert.equal(stray.status, STATUS.BROKEN);
+      assert.match(stray.detail, /nats-2/);
+      delete units['openclaw-nats-2.service'];
+      units['openclaw-mission-control.service'] = FAILED;
+      assert.equal((await probeCoreLaunchdServices(ctx, { platform: 'linux' })).status, STATUS.BROKEN);
+      units['openclaw-mission-control.service'] = DISABLED;
+      assert.match((await probeCoreLaunchdServices(ctx, { platform: 'linux' })).detail, /not loaded/);
+    });
+
+    it('gateway and coordinator grade their units instead of staying UNKNOWN', async () => {
+      const units = { 'openclaw-gateway.service': RUNNING, 'openclaw-mesh-task-daemon.service': RUNNING };
+      const { ctx } = systemdCtx(units, { fsp: {
+        readdir: async () => ['s.jsonl'], stat: async () => ({ mtimeMs: Date.now() }),
+      } });
+      assert.equal((await probeGateway(ctx, config, { platform: 'linux' })).status, STATUS.WORKING);
+      assert.equal((await probeCoordinator(ctx, { platform: 'linux' })).status, STATUS.WORKING);
+      units['openclaw-gateway.service'] = FAILED;
+      units['openclaw-mesh-task-daemon.service'] = FAILED;
+      assert.equal((await probeGateway(ctx, config, { platform: 'linux' })).status, STATUS.BROKEN);
+      assert.equal((await probeCoordinator(ctx, { platform: 'linux' })).status, STATUS.BROKEN);
+      delete units['openclaw-gateway.service'];
+      delete units['openclaw-mesh-task-daemon.service'];
+      assert.equal((await probeGateway(ctx, config, { platform: 'linux' })).status, STATUS.OFF);
+      assert.equal((await probeCoordinator(ctx, { platform: 'linux' })).status, STATUS.OFF);
+    });
+  });
+
   it('an old gateway JSONL cannot earn WORKING even when the service has a PID', () => {
     const service = { observable: true, loaded: true, running: true, pid: 77, state: 'running' };
     const verdict = gradeGateway({ service, newestSessionMs: Date.now() - 18 * 24 * 3600_000 });
@@ -227,7 +328,6 @@ describe('node-watch honesty invariants', () => {
   it('a slow target is UNKNOWN (never WORKING) when not probed this cycle', async () => {
     const report = await runWatch({
       ctx: makeCtx(), config,
-      healthCheckFn: async () => ({}),
       probes: {},
       includeHeavy: false,
       targets: [target('obs.links')], // slow: true
@@ -240,8 +340,33 @@ describe('node-watch honesty invariants', () => {
     const probes = { 'LLM-L2-GEN': { slow: true, run: async () => ({ status: 'PASS', detail: 'ran' }) } };
     const skipped = await target('llm.local_gen').run(envFor(makeCtx(), { probes, includeHeavy: false }));
     assert.equal(skipped.status, STATUS.UNKNOWN);
+    assert.equal(skipped.notProbed, true);
     const probed = await target('llm.local_gen').run(envFor(makeCtx(), { probes, includeHeavy: true }));
     assert.equal(probed.status, STATUS.WORKING);
+    assert.equal(probed.notProbed, undefined);
+  });
+
+  it('light/deep alternation neither fabricates a BROKEN nor hides a recovery', async () => {
+    const light = await runWatch({
+      ctx: makeCtx(), config,
+      probes: {},
+      includeHeavy: false,
+      targets: [target('obs.links')],
+    });
+    assert.equal(light.results[0].notProbed, true);
+    const broken = { results: [{ id: 'obs.links', status: STATUS.BROKEN }] };
+    const working = { results: [{ id: 'obs.links', status: STATUS.WORKING }] };
+    let s = watchTransitions(null, broken);
+    assert.deepEqual([s.broke, s.recovered], [[], []]);
+    s = watchTransitions(s.next, light);
+    assert.equal(s.next.get('obs.links'), STATUS.BROKEN);
+    s = watchTransitions(s.next, broken);
+    assert.deepEqual(s.broke, []);
+    s = watchTransitions(s.next, light);
+    s = watchTransitions(s.next, working);
+    assert.deepEqual(s.recovered, ['obs.links']);
+    s = watchTransitions(s.next, broken);
+    assert.deepEqual(s.broke, ['obs.links']);
   });
 
   it('reused acceptance verdicts map PASS→WORKING, FAIL→BROKEN', async () => {
@@ -249,6 +374,27 @@ describe('node-watch honesty invariants', () => {
     const bad = { 'MEM-L2-INJECT': { run: async () => ({ status: 'FAIL', detail: '401' }) } };
     assert.equal((await target('mem.inject').run(envFor(makeCtx(), { probes: ok }))).status, STATUS.WORKING);
     assert.equal((await target('mem.inject').run(envFor(makeCtx(), { probes: bad }))).status, STATUS.BROKEN);
+  });
+
+  it('a light tick checks inject liveness via /health and never runs the inject pipeline', async () => {
+    let pipelineRuns = 0;
+    const probes = { 'MEM-L2-INJECT': { run: async () => { pipelineRuns++; return { status: 'PASS', detail: 'ok' }; } } };
+    const seen = [];
+    const ctxFor = (reply) => makeCtx({
+      fsp: { ...makeCtx().fsp, readFile: async () => 'tok\n' },
+      httpGet: async (url, opts) => { seen.push({ url, auth: opts?.headers?.Authorization }); return reply(); },
+      httpPost: async () => { throw new Error('light tick must not POST'); },
+    });
+    const light = (ctx) => target('mem.inject').run(envFor(ctx, { probes, includeHeavy: false }));
+
+    assert.equal((await light(ctxFor(() => ({ status: 200, json: { ok: true } })))).status, STATUS.WORKING);
+    assert.deepEqual(seen.at(-1), { url: `http://${config.injectHost}:${config.injectPort}/health`, auth: 'Bearer tok' });
+    assert.equal((await light(ctxFor(() => ({ status: 401, json: { error: 'unauthorized' } })))).status, STATUS.BROKEN);
+    assert.equal((await light(ctxFor(() => { throw new Error('ECONNREFUSED'); }))).status, STATUS.BROKEN);
+    assert.equal(pipelineRuns, 0);
+
+    assert.equal((await target('mem.inject').run(envFor(ctxFor(() => ({ status: 200 })), { probes, includeHeavy: true }))).status, STATUS.WORKING);
+    assert.equal(pipelineRuns, 1, 'the deep sweep runs the full pipeline');
   });
 
   it('a missing reused probe is UNKNOWN, never WORKING', async () => {
@@ -270,7 +416,6 @@ describe('node-watch honesty invariants', () => {
     };
     const report = await runWatch({
       ctx: makeCtx(), config,
-      healthCheckFn: async () => ({}),
       probes, includeHeavy: true,
       targets: [t],
     });
@@ -288,6 +433,11 @@ describe('node-watch OFF semantics (intentionally not active ≠ broken)', () =>
   it('companion-bridge is OFF when not listening (on-demand), not BROKEN', async () => {
     const ctx = makeCtx({ httpGet: async () => { throw new Error('ECONNREFUSED'); } });
     assert.equal((await target('runtime.bridge').run(envFor(ctx))).status, STATUS.OFF);
+  });
+
+  it('companion-bridge: a 5xx is BROKEN, the unrouted-root 404 is WORKING', async () => {
+    assert.equal((await target('runtime.bridge').run(envFor(makeCtx({ httpGet: async () => ({ status: 503 }) })))).status, STATUS.BROKEN);
+    assert.equal((await target('runtime.bridge').run(envFor(makeCtx({ httpGet: async () => ({ status: 404 }) })))).status, STATUS.WORKING);
   });
 
   it('federation is OFF when no identity-registry (not deployed)', async () => {
@@ -360,7 +510,7 @@ describe('node-watch disabled Discord lifecycle', () => {
     assert.equal(gradeMeshServices([{ ...discord, loaded: false }], { discordEnabled: false }).status, STATUS.OFF);
   });
 
-  it('Darwin target reads the loaded Discord HOME and preserves failure priority', { skip: process.platform !== 'darwin' }, async () => {
+  it('Darwin mesh probe reads the loaded Discord HOME and preserves failure priority', async () => {
     const observedHome = '/tmp/discord-loaded-home';
     const samples = [
       { name: 'false', body: '{"channels":{"discord":{"enabled":false}}}', status: STATUS.WORKING },
@@ -392,7 +542,7 @@ describe('node-watch disabled Discord lifecycle', () => {
           return { code: 0, stderr: '', stdout: `state = ${stopped ? 'not running' : 'running'}\n${stopped ? '' : 'pid = 42\n'}last exit code = ${isDiscord ? s.exit ?? 0 : 1}\n${isDiscord && s.noHome ? '' : `HOME => ${observedHome}\n`}` };
         },
       });
-      const r = await target('net.mesh').run(envFor(ctx));
+      const r = await probeMeshServices(ctx, { platform: 'darwin' });
       assert.equal(r.status, s.status, s.name);
       assert.equal(reads.length, s.noHome ? 0 : 1, s.name);
     }
@@ -442,15 +592,102 @@ describe('node-watch observed verdicts', () => {
     assert.equal((await target('ops.hyperagent').run(envFor(stale, { probes }))).status, STATUS.BROKEN);
   });
 
-  it('daemon WORKING/BROKEN from health-check', async () => {
-    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { hc: { daemon: { ok: true, detail: 'pid=1' } } }))).status, STATUS.WORKING);
-    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { hc: { daemon: { ok: false, detail: 'down' } } }))).status, STATUS.BROKEN);
+  it('HyperAgent reuses a proven CLI import on light ticks until a dependency changes', async () => {
+    let spawns = 0;
+    let status = 'PASS';
+    const probes = { 'L0-HYPERAGENT': { run: async () => { spawns++; return { status, detail: 'imports' }; } } };
+    const mtimes = new Map();
+    const ctx = makeCtx({
+      config: { ...config, workspace: '/tmp/acc/ha-cache-ws' },
+      fsp: { ...makeCtx().fsp,
+        stat: async (p) => ({ ino: 1, size: 10, mtimeMs: mtimes.get(p) ?? 1000 }),
+        readFile: async () => JSON.stringify({ lastHyperagentReflect: Date.now() - 60_000 }) },
+      queryDb: makeQueryDb({ count: 2 }),
+    });
+    const tick = async (includeHeavy) => (await target('ops.hyperagent').run(envFor(ctx, { probes, includeHeavy }))).status;
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(spawns, 1, 'unchanged dependencies are not re-proven every minute');
+
+    mtimes.set('/tmp/acc/ha-cache-ws/lib/hyperagent-store.mjs', 2000);
+    assert.equal(await tick(false), STATUS.WORKING);
+    assert.equal(spawns, 2, 'a redeployed store is re-proven');
+
+    assert.equal(await tick(true), STATUS.WORKING);
+    assert.equal(spawns, 3, 'a deep sweep always re-proves');
+
+    status = 'FAIL';
+    mtimes.set('/tmp/acc/ha-cache-ws/bin/hyperagent.mjs', 3000);
+    assert.equal(await tick(false), STATUS.BROKEN);
+    assert.equal(await tick(false), STATUS.BROKEN);
+    assert.equal(spawns, 5, 'a failed import is never cached');
+  });
+
+  it('daemon WORKING/BROKEN from the daemon process check', async () => {
+    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { checkDaemon: async () => ({ ok: true, detail: 'pid=1' }) }))).status, STATUS.WORKING);
+    assert.equal((await target('mem.daemon').run(envFor(makeCtx(), { checkDaemon: async () => ({ ok: false, detail: 'down' }) }))).status, STATUS.BROKEN);
   });
 
   it('state.db integrity ok → WORKING; absent → BROKEN', async () => {
     assert.equal((await target('store.state_db').run(envFor(makeCtx({ queryDb: makeQueryDb({ integrity: 'ok' }) })))).status, STATUS.WORKING);
     const absent = makeCtx({ queryDb: () => { throw new Error('unable to open database file'); } });
     assert.equal((await target('store.state_db').run(envFor(absent))).status, STATUS.BROKEN);
+  });
+
+  it('a light tick never runs integrity_check: it proves the DB answers and carries the last deep verdict', async () => {
+    const sql = [];
+    let integrity = 'ok';
+    const cfg = { ...config, stateDb: '/tmp/acc/light-tick-state.db' };
+    const ctx = makeCtx({ config: cfg, queryDb: (_p, fn) => fn({ prepare: (q) => { sql.push(q); return {
+      get: () => (/integrity_check/i.test(q) ? { integrity_check: integrity } : { 1: 1 }) }; } }) });
+    const light = async () => target('store.state_db').run(envFor(ctx, { includeHeavy: false }));
+    const deep = async () => target('store.state_db').run(envFor(ctx, { includeHeavy: true }));
+
+    const first = await light();
+    assert.equal(first.status, STATUS.WORKING);
+    assert.equal(first.lightTick, true);
+    assert.deepEqual(sql, ['SELECT 1']);
+
+    integrity = '*** in database main ***\nPage 7: btreeInitPage() returns error code 11';
+    sql.length = 0;
+    const corrupt = await deep();
+    assert.equal(corrupt.status, STATUS.BROKEN);
+    assert.equal(corrupt.lightTick, undefined);
+    assert.match(sql[0], /integrity_check/);
+
+    sql.length = 0;
+    const carried = await light();
+    assert.deepEqual(sql, ['SELECT 1']);
+    assert.equal(carried.status, STATUS.BROKEN, 'a light tick must not turn a corrupt DB green');
+    assert.match(carried.detail, /last integrity_check \d+min ago/);
+
+    // Deep BROKEN, light carries it, deep BROKEN again: one alert, no flapping.
+    const asResult = (v) => ({ results: [{ id: 'store.state_db', ...v }] });
+    let state = watchTransitions(null, asResult(W_OK));
+    state = watchTransitions(state.next, asResult(corrupt));
+    assert.deepEqual(state.broke, ['store.state_db']);
+    state = watchTransitions(state.next, asResult({ ...carried, status: STATUS.WORKING }));
+    assert.deepEqual(state.recovered, [], 'a light-tick result never registers a recovery');
+    state = watchTransitions(state.next, asResult(corrupt));
+    assert.deepEqual(state.broke, [], 'and the next deep BROKEN is not a new alert');
+
+    const unopenable = await target('store.state_db').run(envFor(
+      makeCtx({ config: cfg, queryDb: () => { throw new Error('unable to open database file'); } }), { includeHeavy: false }));
+    assert.equal(unopenable.status, STATUS.BROKEN);
+    assert.equal(unopenable.lightTick, undefined, 'an observed open failure still alerts on a light tick');
+  });
+
+  it('knowledge index grades the daemon job stamp, not the MCP-client-only workspace stamp', async () => {
+    const meta = (values) => makeCtx({ queryDb: (_p, fn) => fn({ prepare: () => ({ get: (key) => (key in values ? { value: values[key] } : undefined) }) }) });
+    const hoursAgo = (h) => String(Date.now() - h * 3600_000);
+    // No MCP client for a day, daemon job ran 5 min ago: indexing works.
+    const daemonFresh = meta({ last_index_time: hoursAgo(24), last_session_index_time: hoursAgo(5 / 60) });
+    assert.equal((await target('mem.knowledge_index').run(envFor(daemonFresh))).status, STATUS.WORKING);
+    const daemonStale = meta({ last_index_time: hoursAgo(0.1), last_session_index_time: hoursAgo(3) });
+    assert.equal((await target('mem.knowledge_index').run(envFor(daemonStale))).status, STATUS.BROKEN);
+    const never = meta({ last_index_time: hoursAgo(0.1) });
+    assert.equal((await target('mem.knowledge_index').run(envFor(never))).status, STATUS.UNKNOWN);
   });
 
   it('graph cache fresh → WORKING; stale → BROKEN (channel 5 degraded)', async () => {
@@ -472,6 +709,46 @@ describe('node-watch observed verdicts', () => {
       return { status: 200, json: { plans: [] } };
     } });
     assert.equal((await target('ops.roadmap').run(envFor(up))).status, STATUS.WORKING);
+  });
+
+  it('fed.cluster.quorum grades a JetStream-disabled server BROKEN, not single-node WORKING', async () => {
+    const off = makeCtx({ httpGet: async () => ({ status: 200, json: { disabled: true, config: {}, memory: 0, storage: 0, streams: 0 } }) });
+    const r = await target('fed.cluster.quorum').run(envFor(off));
+    assert.equal(r.status, STATUS.BROKEN);
+    assert.match(r.detail, /JetStream disabled/);
+  });
+
+  it('quorum, bridge and viewer targets probe the endpoints the node env configures', async () => {
+    const seen = [];
+    const recording = (cfg) => makeCtx({ config: cfg, httpGet: async (u) => { seen.push(u); throw new Error('ECONNREFUSED'); } });
+    const cfg = resolveNodeConfig({ OPENCLAW_HOME: '/tmp/acc', NATS_MONITOR_URL: 'http://127.0.0.1:18222' });
+    await target('fed.cluster.quorum').run(envFor(recording(cfg)));
+    assert.deepEqual(seen, ['http://127.0.0.1:18222/jsz']);
+    const saved = { ADAPTER_PORT: process.env.ADAPTER_PORT, WORKPLAN_VIEWER_PORT: process.env.WORKPLAN_VIEWER_PORT };
+    try {
+      process.env.ADAPTER_PORT = '18787';
+      process.env.WORKPLAN_VIEWER_PORT = '17892';
+      seen.length = 0;
+      await target('runtime.bridge').run(envFor(recording(config)));
+      await target('ops.roadmap').run(envFor(recording(config)));
+      assert.deepEqual(seen, ['http://127.0.0.1:18787/', 'http://127.0.0.1:17892/api/plans']);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
+  });
+
+  it('deploy-drift diff skips node_modules, which the deploy never syncs', async () => {
+    const saved = process.env.OPENCLAW_REPO_DIR;
+    delete process.env.OPENCLAW_REPO_DIR;
+    try {
+      let argv;
+      const ctx = makeCtx({ exec: async (cmd, a) => { argv = [cmd, ...a]; return { code: 0, stdout: '', stderr: '' }; } });
+      assert.equal((await target('fabric.deploy_drift').run(envFor(ctx))).status, STATUS.WORKING);
+      assert.deepEqual(argv.slice(0, 4), ['diff', '-rq', '-x', 'node_modules']);
+      assert.deepEqual(argv.slice(5), [config.workspaceLib]);
+    } finally {
+      if (saved !== undefined) process.env.OPENCLAW_REPO_DIR = saved;
+    }
   });
 
   it('cloud LLM via bridge: WORKING when /health reports a served session', async () => {
@@ -508,6 +785,19 @@ describe('node-watch observed verdicts', () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { scheduled: { at: 2, cron: 1 }, ready: 0, overdue: 0, graceMinutes: 30 } }) });
     assert.equal((await target('ops.calendar').run(envFor(ctx))).status, STATUS.WORKING);
   });
+  it('both Mission Control probes follow OPENCLAW_MC_API_URL, not a hardcoded :3000', async () => {
+    const seen = [];
+    const ctx = makeCtx({ httpGet: async (url) => { seen.push(url); throw new Error('ECONNREFUSED'); } });
+    const saved = process.env.OPENCLAW_MC_API_URL;
+    process.env.OPENCLAW_MC_API_URL = 'http://127.0.0.1:3999';
+    try {
+      await target('ops.calendar').run(envFor(ctx));
+      await target('ops.diagnostics').run(envFor(ctx));
+    } finally {
+      if (saved === undefined) delete process.env.OPENCLAW_MC_API_URL; else process.env.OPENCLAW_MC_API_URL = saved;
+    }
+    assert.deepEqual(seen, ['http://127.0.0.1:3999/api/scheduler/status', 'http://127.0.0.1:3999/api/diagnostics']);
+  });
   it('calendar BROKEN when scheduled tasks are overdue (tick not running)', async () => {
     const ctx = makeCtx({ httpGet: async () => ({ status: 200, json: { scheduled: { at: 3, cron: 0 }, overdue: 2, overdueIds: ['T1', 'T2'], graceMinutes: 30 } }) });
     assert.equal((await target('ops.calendar').run(envFor(ctx))).status, STATUS.BROKEN);
@@ -543,26 +833,76 @@ describe('node-watch HTML dropdown view', () => {
     assert.ok(html.includes('JSON.parse'), 'embeds report data for detail rendering');
     assert.ok(html.includes('<!doctype html>'), 'self-contained page');
   });
+
+  it('detail script parses the embedded data and renders the preselected item', () => {
+    const report = {
+      ...fakeReport,
+      results: [...fakeReport.results,
+        { id: 'e', family: 'ops', label: 'L "q" </script><b>x\\y  ', signal: 's', status: 'OFF', detail: 'a\nb', evidence: '', latency_ms: 0 }],
+    };
+    const html = formatHtml(report);
+    assert.equal(html.split('</script>').length - 1, 1, 'a label cannot close the script element');
+    const body = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    let shown = '';
+    const document = {
+      getElementById: (id) => (id === 'items'
+        ? { addEventListener() {}, value: '' }
+        : { set innerHTML(v) { shown = v; }, set textContent(_v) {} }),
+    };
+    const R = new Function('document', `${body};return R;`)(document);
+    assert.deepEqual(R, report.results);
+    assert.ok(shown.includes('Inject server'), 'the first BROKEN item is rendered');
+  });
 });
 
 describe('node-watch runner', () => {
+  // runWatch ran all six health-watch checks (the embedder import, a scratch write) every
+  // minute to read one field; mem.daemon now runs only the daemon process check.
+  it('mem.daemon comes from the daemon check alone, never the full health check', async () => {
+    let fullCheck = false;
+    const report = await runWatch({
+      ctx: makeCtx(), config, probes: {}, includeHeavy: false, targets: [target('mem.daemon')],
+      checkDaemon: async () => ({ ok: true, detail: 'pid=7' }),
+      healthCheckFn: async () => { fullCheck = true; return {}; },
+    });
+    assert.equal(fullCheck, false);
+    assert.deepEqual([report.results[0].status, report.results[0].detail], [STATUS.WORKING, 'pid=7']);
+  });
+
   it('runs all targets, tallies, and drains teardown', async () => {
     const ctx = makeCtx({ httpGet: async () => { throw new Error('bridge down'); }, checkVaultLinks: async () => ({ notes: 0, links: 0, resolved: 0, dangling: [] }) });
     ctx.teardown.push(async () => { ctx._cleaned = true; });
     const report = await runWatch({
       ctx, config,
-      healthCheckFn: async () => ({ daemon: { ok: true, detail: 'pid=1' } }),
+      checkDaemon: async () => ({ ok: true, detail: 'pid=1' }),
       probes: {},
       includeHeavy: true,
       targets: [target('mem.daemon'), target('obs.links'), target('llm.cloud')],
     });
     assert.equal(report.results.length, 3);
-    assert.equal(report.counts.WORKING, 1);   // daemon (hc.ok)
+    assert.equal(report.counts.WORKING, 1);   // daemon (process check ok)
     assert.equal(report.counts.UNKNOWN, 1);    // obs.links (no probe)
     assert.equal(report.counts.OFF, 1);        // cloud via bridge (bridge down → OFF)
     assert.equal(ctx._cleaned, true);
     // honesty: nothing WORKING beyond what was observed
     assert.ok(report.results.find((r) => r.id === 'obs.links').status !== STATUS.WORKING);
+    assert.ok(report.results.every((r) => r.code && r.source), 'every result keeps its source provenance');
+  });
+
+  it('source provenance stays resolved once a later context cannot build probes', () => {
+    const first = buildSourceMap(createRuntimeContext(config, { mutate: false }), [target('net.nats')]);
+    assert.equal(first['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+    const second = buildSourceMap(makeCtx(), [target('net.nats')]);
+    assert.equal(second['net.nats'].file, 'lib/node-acceptance-probes.mjs');
+    assert.equal(second['net.nats'].code, first['net.nats'].code);
+    assert.equal(second['net.nats'].line, first['net.nats'].line);
+  });
+
+  it('a composite target that reuses a probe keeps its own provenance', () => {
+    const sm = buildSourceMap(createRuntimeContext(config, { mutate: false }), [target('ops.hyperagent'), target('net.nats')]);
+    assert.equal(sm['ops.hyperagent'].file, 'lib/node-watch.mjs');
+    assert.match(sm['ops.hyperagent'].code, /daemon-throttle\.json/);
+    assert.equal(sm['net.nats'].file, 'lib/node-acceptance-probes.mjs');
   });
 });
 
@@ -755,6 +1095,123 @@ describe('mem.ingest configured-source parity', () => {
       assert.equal(swappedVerdict.status, STATUS.UNKNOWN);
       await fs.rename(source, path.join(root, 'missing-source'));
       assert.match((await target('mem.ingest').run(envFor(ctx))).detail, /MISSING/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('mem.ingest incremental transcript parse', () => {
+  it('parses only the appended bytes of a grown transcript and re-parses a rewritten one', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'node-watch-ingest-delta-'));
+    try {
+      const home = path.join(root, '.openclaw');
+      const source = path.join(root, 'transcripts');
+      await fs.mkdir(path.join(home, 'config'), { recursive: true });
+      await fs.mkdir(source);
+      await fs.writeFile(path.join(home, 'config', 'transcript-sources.json'), JSON.stringify({
+        sources: [{ name: 'test', path: source, format: 'claude-code', enabled: true }],
+      }));
+      const file = path.join(source, 'live.jsonl');
+      const base = Date.now() - 60_000;
+      const turn = (n) => JSON.stringify({ type: n % 2 ? 'user' : 'assistant', message: { content: `turn ${n}` },
+        timestamp: new Date(base + n).toISOString() });
+      await fs.writeFile(file, `${turn(1)}\n${turn(2)}\n`);
+      let archived = { count: 2, last: JSON.parse(turn(2)).timestamp };
+      const starts = [];
+      const ctx = makeCtx({
+        config: { ...config, home, stateDb: path.join(home, 'state.db') },
+        fsp: { ...fs, open: async (candidate, flags) => {
+          const handle = await fs.open(candidate, flags);
+          const createReadStream = handle.createReadStream.bind(handle);
+          handle.createReadStream = (opts) => { starts.push(opts?.start ?? 0); return createReadStream(opts); };
+          return handle;
+        } },
+        observeIngestLag: () => ({ overdue: [], lower: [] }),
+        queryDb: (_p, fn) => fn({ prepare: (sql) => ({ get: () => sql.includes('archived_session_id')
+          ? { archived_session_id: 'live', message_count: archived.count, end_time: archived.last, actual_count: archived.count }
+          : { n: archived.count } }) }),
+      });
+      const verdict = async () => (await target('mem.ingest').run(envFor(ctx))).status;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [0]);
+
+      const grownFrom = (await fs.stat(file)).size;
+      await fs.appendFile(file, `${turn(3)}\n`);
+      archived = { count: 3, last: JSON.parse(turn(3)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [grownFrom], 'only the appended line is parsed');
+
+      // An unterminated final line counts exactly as a full parse would count it.
+      const partialFrom = (await fs.stat(file)).size;
+      await fs.appendFile(file, turn(4));
+      archived = { count: 4, last: JSON.parse(turn(4)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [partialFrom]);
+      await fs.appendFile(file, `\n${turn(5)}\n`);
+      archived = { count: 5, last: JSON.parse(turn(5)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [partialFrom], 'the uncommitted tail is re-read once it completes');
+
+      // Same inode, different prefix, larger size: the cached prefix is no longer valid.
+      await fs.writeFile(file, [7, 8, 9, 10, 11, 12].map(turn).join('\n') + '\n');
+      archived = { count: 6, last: JSON.parse(turn(12)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [0]);
+
+      await fs.writeFile(file, `${turn(1)}\n`);
+      archived = { count: 1, last: JSON.parse(turn(1)).timestamp };
+      starts.length = 0;
+      assert.equal(await verdict(), STATUS.WORKING);
+      assert.deepEqual(starts, [0], 'a shrunk transcript is re-parsed from the start');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('node-watch default output paths', () => {
+  it('writes under the install root Mission Control derives from its workspace', () => {
+    assert.deepEqual(defaultWatchPaths({ OPENCLAW_WORKSPACE: '/x/root/workspace' }), {
+      report: '/x/root/.node-watch.md', html: '/x/root/.node-watch.html', json: '/x/root/.node-watch.json',
+    });
+    assert.equal(defaultWatchPaths({ WORKSPACE_ROOT: '/y/ws', OPENCLAW_WORKSPACE: '/x/root/workspace' }).json, '/y/.node-watch.json');
+    assert.equal(defaultWatchPaths({}).json, path.join(os.homedir(), '.openclaw', '.node-watch.json'));
+  });
+});
+
+describe('node-watch CLI exit contract', () => {
+  it('a bad flag exits 3 (harness error), not 1 (BROKEN)', () => {
+    const r = spawnSync(process.execPath, [BIN, '--bogus'], { encoding: 'utf8' });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /Usage: node-watch\.mjs/);
+  });
+  it('an unknown --axis in --watch mode exits 3 instead of looping on tick errors', () => {
+    const r = spawnSync(process.execPath, [BIN, '--watch', '--quiet', '--axis', 'TYPO_AXIS'], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 3, r.stderr);
+    assert.match(r.stderr, /unknown axis 'TYPO_AXIS'/);
+  });
+});
+
+describe('OPENCLAW_HOME node isolation', () => {
+
+  it('a ~ transcript source expands to the user home, not into a spawn tree', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'node-watch-tilde-'));
+    try {
+      const home = path.join(root, '.openclaw-n2');
+      await fs.mkdir(path.join(home, 'config'), { recursive: true });
+      await fs.writeFile(path.join(home, 'config', 'transcript-sources.json'), JSON.stringify({
+        sources: [{ name: 'tilde', path: '~/.no-such-openclaw-source-dir/', format: 'claude-code', enabled: true }],
+      }));
+      const ctx = makeCtx({ config: { ...config, home, stateDb: path.join(home, 'state.db') }, fsp: fs,
+        queryDb: (_p, fn) => fn({ prepare: () => ({ get: () => ({ n: 0 }) }) }) });
+      const v = await target('mem.ingest').run(envFor(ctx));
+      assert.ok(v.detail.includes(path.join(os.homedir(), '.no-such-openclaw-source-dir')), v.detail);
+      assert.ok(!v.detail.includes(home), v.detail);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

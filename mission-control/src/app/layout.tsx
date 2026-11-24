@@ -3,10 +3,11 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { ResizableLayout } from "@/components/layout/resizable-layout";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 
 export const metadata: Metadata = {
   title: "Mission Control",
-  description: "Daedalus operational dashboard",
+  description: `${AGENT_NAME} operational dashboard`,
 };
 
 export default function RootLayout({

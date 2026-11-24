@@ -8,19 +8,24 @@
  * deploy (`mesh-deploy.js --local --from <deployed> --to <sha>`). A failure
  * checks the previous sha back out and runs the same pinned deploy in reverse
  * — never a fetching deploy, which would fast-forward onto the failed commit
- * again. No SSH needed.
+ * again. Both that rollback and a trigger to a sha the tree is not behind (the
+ * lead's --rollback) are refused when the older code cannot open this node's
+ * memory store (lib/store-schema-guard.js). No SSH needed.
  *
  * NATS subjects:
  *   mesh.deploy.trigger    — deploy command from lead
- *   mesh.deploy.status     — status query from lead (request/reply)
+ *   mesh.deploy.status.<nodeId> — per-node status query from `fleet-deploy --status` (request/reply)
  *
  * NATS KV buckets:
  *   MESH_DEPLOY_RESULTS    — write deploy result per node per SHA
- *   MESH_NODES             — update deployVersion after success
+ *   MESH_DEPLOY_LATEST     — the signed `latest` catch-up marker (no TTL)
+ *   MESH_NODES             — this node's registry entry (nodeId, role, platform,
+ *                            deployVersion, lastSeen): created at startup,
+ *                            updated after each successful deploy
  */
 
 const { connect, StringCodec } = require('nats');
-const { execFile, execFileSync } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -40,35 +45,27 @@ const REPO_REMOTE_URL = process.env.OPENCLAW_REPO_URL ||
 const DEPLOY_SCRIPT = path.join(REPO_DIR, 'bin', 'mesh-deploy.js');
 // mesh-deploy's record of the sha this node last deployed in full.
 const DEPLOY_STATE = path.join(os.homedir(), '.openclaw', '.deploy-state.json');
+const STATE_DB = path.join(os.homedir(), '.openclaw', 'state.db');
 // npm install + `next build` + rolling restarts; each step inside the deploy
 // script has its own shorter timeout.
 const DEPLOY_TIMEOUT_MS = 20 * 60 * 1000;
 const execFileAsync = promisify(execFile);
 
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
+const { RESULTS_BUCKET, RESULTS_KV_OPTS, LATEST_BUCKET, openLatestKv, readLatestMarker } = require('../lib/deploy-latest-marker');
 const sc = StringCodec();
 
-const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';
-const IS_MAC = os.platform() === 'darwin';
+const NODE_REGISTRY_HEARTBEAT_MS = 60 * 1000;
 
-// Node role — determines which components this node runs.
-function resolveNodeRole() {
-  if (process.env.OPENCLAW_NODE_ROLE) return process.env.OPENCLAW_NODE_ROLE;
-  try {
-    const envFile = path.join(os.homedir(), '.openclaw', 'openclaw.env');
-    if (fs.existsSync(envFile)) {
-      const content = fs.readFileSync(envFile, 'utf8');
-      const match = content.match(/^\s*OPENCLAW_NODE_ROLE\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch (err) { console.warn(`[deploy-listener] resolve node role: ${err.message}`); }
-  return IS_MAC ? 'lead' : 'worker';
-}
-const NODE_ROLE = resolveNodeRole();
-
-const { ROLE_COMPONENTS } = require('../lib/mesh-roles');
-const NODE_COMPONENTS = new Set(ROLE_COMPONENTS[NODE_ROLE] || ROLE_COMPONENTS.worker);
+// Node role — determines which components this node runs. main() refuses to
+// start without a saved one.
+const { FLEET_COMPONENTS, requireNodeRole } = require('../lib/mesh-roles');
+let NODE_ROLE = null;
+let NODE_ROLE_ERROR = null;
+try { NODE_ROLE = requireNodeRole(); } catch (err) { NODE_ROLE_ERROR = err; }
+const NODE_COMPONENTS = new Set(FLEET_COMPONENTS[NODE_ROLE] || []);
 
 let deploying = false; // prevent concurrent deploys
 
@@ -100,8 +97,13 @@ function writeDeployMarker(marker) {
  *   - latest already failed `maxAttempts` times here → no (operator's turn).
  *   - latest was skipped here (not for this role, or catch-up would have
  *     moved the tree backward) → no.
+ *   - latest was a targeted deploy whose `nodes` name neither this node nor
+ *     'all' → no.
  */
-function shouldCatchUp({ currentSha, latestSha, lastDeploy, maxAttempts = MAX_DEPLOY_ATTEMPTS }) {
+function shouldCatchUp({ currentSha, latestSha, lastDeploy, maxAttempts = MAX_DEPLOY_ATTEMPTS, targetNodes, nodeId }) {
+  if (Array.isArray(targetNodes) && !targetNodes.includes('all') && !targetNodes.includes(nodeId)) {
+    return { deploy: false, reason: `latest ${latestSha} targets ${targetNodes.join(', ')}, not this node` };
+  }
   const same = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
   const lastForLatest = lastDeploy && same(lastDeploy.sha, latestSha) ? lastDeploy : null;
   if (lastForLatest && lastForLatest.status === 'failed' && (lastForLatest.attempts || 0) >= maxAttempts) {
@@ -132,6 +134,24 @@ function notifyDesktop(kind, title, message) {
   } catch { /* best-effort */ }
 }
 
+// Any client that can publish can send junk triggers at line rate, and each
+// popup spawns a notifier process: one alert per window, with a count.
+function createRejectionNotifier(notify, { windowMs = 5 * 60_000, now = Date.now } = {}) {
+  let lastAt = -Infinity;
+  let suppressed = 0;
+  return (message) => {
+    const t = now();
+    if (t - lastAt < windowMs) {
+      suppressed++;
+      return;
+    }
+    const extra = suppressed ? ` (+${suppressed} more rejected since the last alert)` : '';
+    suppressed = 0;
+    lastAt = t;
+    notify('block', 'Mesh deploy REJECTED', message + extra);
+  };
+}
+
 // ── Deploy Execution ─────────────────────────────────────────────────────
 
 function git(...args) {
@@ -145,8 +165,8 @@ function isAncestor(ancestor, descendant) {
 }
 
 // The diff base: the sha mesh-deploy last deployed here in full, not HEAD.
-// HEAD moves without deploying — on the lead the repo is a working checkout
-// and `mesh deploy` publishes its HEAD, so a HEAD-based diff is always empty.
+// HEAD moves without deploying — on the lead the repo is a working checkout —
+// so a HEAD-based diff misses what changed since the last deploy.
 function deployedBase() {
   let recorded = null;
   try { recorded = JSON.parse(fs.readFileSync(DEPLOY_STATE, 'utf8')).deployedSha; } catch { /* not recorded yet */ }
@@ -185,6 +205,40 @@ async function runDeployScript(args) {
     throw Object.assign(new Error(`${DEPLOY_SCRIPT} printed no DEPLOY_RESULT — that tree's deploy script predates pinned deploys`), { stdout });
   }
   return { stdout, deployed: JSON.parse(line.slice('DEPLOY_RESULT '.length)) };
+}
+
+/**
+ * Why this node must not move back to toSha (a lead's --rollback, or any
+ * trigger to a sha its tree is not behind), or null. The lead cannot read this
+ * node's memory store, so the check is made here. A store that cannot be read
+ * refuses, as mesh-deploy --rollback refuses it: unlike the failed-deploy
+ * rollback, no failed `npm ci` took this tree's better-sqlite3, and the node
+ * stays on the tree it deployed. Only a schemaOverride covered by a verified
+ * signature goes past it. The refusal names that override for this node and
+ * this sha only: a bare --rollback --force on the lead goes to the lead's own
+ * lastSha, and to every node.
+ */
+async function backwardMoveRefusal(trigger, toSha, warnings) {
+  let refusal;
+  try {
+    refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({ repoDir: REPO_DIR, toSha, dbPath: STATE_DB });
+  } catch (err) {
+    refusal = err.message;
+  }
+  if (!refusal) return null;
+  if (trigger.schemaOverride !== true) {
+    return `${refusal} (or move it anyway, on the lead: ` +
+      `mesh-deploy.js --rollback --force --node ${NODE_ID} --to ${toSha.slice(0, 7)})`;
+  }
+  // Strict mode verified the signature, which covers every trigger field, before the trigger was queued.
+  const { requireSignedDeploy } = await import('../lib/deploy-trigger-auth.mjs');
+  if (!requireSignedDeploy()) {
+    return `${refusal} (schemaOverride ignored: OPENCLAW_REQUIRE_SIGNED_DEPLOY=0, so no verified signature covers it)`;
+  }
+  const warning = `${refusal} — rolling back anyway (signed schemaOverride from ${trigger.initiator || 'unknown'})`;
+  console.warn(`[deploy-listener] ${warning}`);
+  warnings.push(warning);
+  return null;
 }
 
 /**
@@ -257,6 +311,13 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
       if (dirty) {
         throw new Error(`tracked files differ from the commit (${dirty.split('\n').slice(0, 5).map(l => l.trim()).join(', ')}) — refusing to deploy over them`);
       }
+      if (!isAncestor(head, targetSha)) {
+        const refusal = await backwardMoveRefusal(trigger, targetSha, result.warnings);
+        if (refusal) {
+          result.rolledBack = false;
+          throw new Error(`rollback refused: ${refusal}`);
+        }
+      }
       if (head !== targetSha) {
         console.log(`[deploy-listener] Checking out ${targetSha.slice(0, 7)} (was ${head.slice(0, 7)})`);
         touched = true;
@@ -274,6 +335,7 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
 
     result.log = stdout.slice(-5000);
     result.componentsDeployed = deployed.components;
+    result.deferredRestart = deployed.deferredRestart || [];
     result.sha = git('rev-parse', '--short', 'HEAD');
     const ids = deployed.components.map(c => c.id).join(', ');
     console.log(`[deploy-listener] Success — now at ${result.sha} (${ids || 'no component changed'})`);
@@ -288,6 +350,20 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
     // deploy, which fast-forwarded straight back onto the failed commit.
     if (touched && preSha && targetSha && preSha !== targetSha) {
       try {
+        // preSha's code may predate the schema the failed deploy migrated the
+        // memory store to: it would open it without a check of its own. The node
+        // stays on the tree that matches its store. A store it cannot read (a
+        // failed `npm ci` took better-sqlite3 with it) does not block the
+        // rollback, which is what puts the old node_modules back.
+        let refusal = null;
+        try {
+          refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
+            repoDir: REPO_DIR, toSha: preSha, dbPath: STATE_DB,
+          });
+        } catch (guardErr) {
+          console.warn(`[deploy-listener] ${guardErr.message.replace(/^cannot/, 'could not')} — rolling back without the check`);
+        }
+        if (refusal) throw new Error(`rollback refused: ${refusal}`);
         if (git('rev-parse', 'HEAD') !== preSha) {
           console.log(`[deploy-listener] Rolling back ${targetSha.slice(0, 7)} → ${preSha.slice(0, 7)}`);
           git('checkout', '--detach', '--quiet', preSha);
@@ -300,7 +376,7 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
         console.log(`[deploy-listener] Rolled back to ${preSha.slice(0, 7)} and redeployed`);
       } catch (rbErr) {
         result.rolledBack = false;
-        result.errors.push(`rollback failed: ${rbErr.message}`);
+        result.errors.push(rbErr.message.startsWith('rollback refused: ') ? rbErr.message : `rollback failed: ${rbErr.message}`);
         console.error(`[deploy-listener] ROLLBACK FAILED: ${rbErr.message} — node is at an unverified tree`);
       }
     }
@@ -309,12 +385,70 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
   return result;
 }
 
-async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
-  if (deploying) {
-    console.log(`[deploy-listener] Already deploying — ignoring trigger for ${trigger.sha} (from ${trigger.initiator || 'unknown'})`);
-    return;
+// This process cannot restart its own unit in-band: systemd would kill the
+// cgroup (and launchd the job) that runs the restart command. A transient
+// systemd timer, or a setsid'd child on macOS, outlives this process and
+// restarts it once the result is written.
+const SELF_RESTART_DELAY_S = 10;
+function scheduleSelfRestart(services, { platform = os.platform(), spawnFn = spawn, uid = process.getuid?.() } = {}) {
+  const scheduled = [];
+  for (const svc of services || []) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(svc) || !/mesh-deploy-listener$/.test(svc)) {
+      console.warn(`[deploy-listener] not scheduling a restart of ${JSON.stringify(svc).slice(0, 60)}`);
+      continue;
+    }
+    const [cmd, args] = platform === 'darwin'
+      ? ['/bin/sh', ['-c', `sleep ${SELF_RESTART_DELAY_S}; exec launchctl kickstart -k "$1"`, 'sh', `gui/${uid}/${svc}`]]
+      : ['systemd-run', ['--user', `--on-active=${SELF_RESTART_DELAY_S}s`, '--', 'systemctl', '--user', 'restart', svc]];
+    try {
+      const child = spawnFn(cmd, args, { detached: true, stdio: 'ignore' });
+      child.on?.('error', err => console.error(`[deploy-listener] schedule restart of ${svc}: ${err.message}`));
+      child.unref?.();
+      scheduled.push(svc);
+      console.log(`[deploy-listener] ${svc} restarts in ${SELF_RESTART_DELAY_S}s to load the deployed code`);
+    } catch (err) {
+      console.error(`[deploy-listener] schedule restart of ${svc}: ${err.message} — restart it by hand`);
+    }
   }
+  return scheduled;
+}
 
+/**
+ * Verified triggers wait here while a deploy runs, and only the newest waits:
+ * each one deploys its own signed sha, so an older pending trigger would only
+ * be undone by the next. `offer` never blocks, so the subscription loop keeps
+ * verifying triggers on receipt — one that sat in the buffer through a long
+ * deploy used to fail the 15-minute freshness check and raise a false
+ * "Mesh deploy REJECTED" alarm. A catch-up (`{ catchUp: true }`) runs through
+ * the same queue so it never overlaps a live deploy, and never displaces a
+ * pending live trigger, which is at least as new as the catch-up marker.
+ */
+function createTriggerQueue(run, { onSuperseded = () => {} } = {}) {
+  let pending = null;
+  let running = false;
+  async function pump() {
+    running = true;
+    try {
+      while (pending) {
+        const next = pending;
+        pending = null;
+        try { await run(next); } catch (err) { console.error(`[deploy-listener] deploy ${next.sha}: ${err.message}`); }
+      }
+    } finally {
+      running = false;
+    }
+  }
+  return {
+    offer(item) {
+      if (item.catchUp && pending && !pending.catchUp) return;
+      if (pending) onSuperseded(pending, item);
+      pending = item;
+      if (!running) pump();
+    },
+  };
+}
+
+async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
   deploying = true;
   const startedAt = new Date().toISOString();
   // Sanitize sha for NATS KV key safety (KV rejects whitespace, path seps, etc.)
@@ -363,22 +497,54 @@ async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
       notifyDesktop('error', 'Mesh deploy FAILED', `${NODE_ID} (${where}, attempt ${attempts}/${MAX_DEPLOY_ATTEMPTS}): ${result.errors[0]?.slice(0, 160) || 'unknown'}`);
     }
 
-    // Update our deployVersion in the nodes registry
     if (result.status === 'success' && nodesKv) {
       try {
-        const existing = await nodesKv.get(NODE_ID);
-        if (existing && existing.value) {
-          const node = JSON.parse(sc.decode(existing.value));
-          node.deployVersion = result.sha;
-          node.lastDeploy = result.completedAt;
-          await nodesKv.put(NODE_ID, sc.encode(JSON.stringify(node)));
-          console.log(`[deploy-listener] Updated node registry: deployVersion=${result.sha.slice(0,7)}`);
-        }
+        await upsertNodeRegistry(nodesKv, { deployVersion: result.sha, lastDeploy: result.completedAt });
+        console.log(`[deploy-listener] Updated node registry: deployVersion=${result.sha.slice(0,7)}`);
       } catch (err) { console.warn(`[deploy-listener] update node deploy version: ${err.message}`); }
+    }
+
+    // Last: the result is written and the registry updated before the restart lands.
+    if (result.status === 'success' && result.deferredRestart?.length) {
+      scheduleSelfRestart(result.deferredRestart);
     }
   } finally {
     deploying = false;
   }
+}
+
+// ── Node Registry ────────────────────────────────────────────────────────
+
+/**
+ * Create or update this node's MESH_NODES entry. fleet-deploy discovers the
+ * fleet from MESH_NODES first, so the listener — which runs on every node —
+ * is the one that must create the entry, not only touch an existing one.
+ */
+async function upsertNodeRegistry(nodesKv, { deployVersion, lastDeploy } = {}) {
+  let node = {};
+  const existing = await nodesKv.get(NODE_ID);
+  if (existing && existing.value) {
+    try { node = JSON.parse(sc.decode(existing.value)); } catch { node = {}; }
+  }
+  node.nodeId = NODE_ID;
+  node.role = NODE_ROLE;
+  node.platform = os.platform();
+  if (deployVersion) node.deployVersion = deployVersion;
+  else if (node.deployVersion === undefined) node.deployVersion = null;
+  if (lastDeploy) node.lastDeploy = lastDeploy;
+  node.lastSeen = new Date().toISOString();
+  await nodesKv.put(NODE_ID, sc.encode(JSON.stringify(node)));
+  return node;
+}
+
+async function registerNode(nodesKv, { readHead = true } = {}) {
+  let headSha = null;
+  if (readHead) {
+    try { headSha = git('rev-parse', '--short', 'HEAD'); } catch (err) { console.warn(`[deploy-listener] read git HEAD: ${err.message}`); }
+  }
+  try {
+    await upsertNodeRegistry(nodesKv, { deployVersion: headSha });
+  } catch (err) { console.warn(`[deploy-listener] register in MESH_NODES: ${err.message}`); }
 }
 
 // ── Auto-Catch-Up ────────────────────────────────────────────────────────
@@ -387,13 +553,14 @@ async function executeDeploy(trigger, resultsKv, nodesKv, opts = {}) {
  * On startup, check if we're behind the latest deployed version.
  * If another deploy happened while we were offline, catch up now.
  */
-async function checkAndCatchUp(resultsKv, nodesKv) {
+async function checkAndCatchUp(resultsKv, nodesKv, latestKv) {
   try {
-    // Read the latest deploy marker from the "latest" key
-    const latest = await resultsKv.get('latest');
-    if (!latest || !latest.value) return;
-
-    const marker = JSON.parse(sc.decode(latest.value));
+    const found = await readLatestMarker({ latestKv, resultsKv });
+    if (!found) {
+      console.warn(`[deploy-listener] Catch-up: no catch-up marker in ${LATEST_BUCKET} or ${RESULTS_BUCKET} — staying at the current tree`);
+      return;
+    }
+    const marker = found.marker;
 
     // C2: the marker steers a checkout + deploy exactly like a live trigger —
     // it gets the same signature+trust gate (no freshness: markers are state,
@@ -413,7 +580,7 @@ async function checkAndCatchUp(resultsKv, nodesKv) {
     // P4-9: "HEAD == latest" is not "deployed" — a merged-but-failed deploy
     // leaves the tree there too. The local marker breaks the tie, and caps
     // automatic retries of a sha that keeps failing on this node.
-    const verdict = shouldCatchUp({ currentSha, latestSha: sha, lastDeploy: readDeployMarker() });
+    const verdict = shouldCatchUp({ currentSha, latestSha: sha, lastDeploy: readDeployMarker(), targetNodes: marker.nodes, nodeId: NODE_ID });
     console.log(`[deploy-listener] Catch-up: ${verdict.reason}`);
     if (verdict.deploy) {
       await executeDeploy(
@@ -433,6 +600,7 @@ checkAndCatchUp = tracer.wrapAsync('checkAndCatchUp', checkAndCatchUp, { tier: 2
 // ── Main ─────────────────────────────────────────────────────────────────
 
 async function main() {
+  if (NODE_ROLE_ERROR) throw NODE_ROLE_ERROR;
   console.log(`[deploy-listener] Node: ${NODE_ID}`);
   console.log(`[deploy-listener] Repo: ${REPO_DIR}`);
   console.log(`[deploy-listener] NATS: ${NATS_URL}`);
@@ -459,24 +627,49 @@ async function main() {
 
   // Get KV buckets
   const js = nc.jetstream();
-  const resultsKv = await js.views.kv(RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
+  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS);
+  const latestKv = await openLatestKv(js);
   let nodesKv = null;
   try {
-    nodesKv = await js.views.kv(NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
+    nodesKv = await openMeshKv(js, NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
   } catch (err) { console.warn(`[deploy-listener] open MESH_NODES bucket: ${err.message}`); }
+  if (nodesKv) {
+    await registerNode(nodesKv);
+    // fleet-deploy --status calls a node OFFLINE once lastSeen is 120 s old.
+    // Mid-deploy HEAD is transient, so only lastSeen is refreshed then.
+    setInterval(() => registerNode(nodesKv, { readHead: !deploying }), NODE_REGISTRY_HEARTBEAT_MS);
+  }
 
-  // Check for missed deploys while we were offline
-  await checkAndCatchUp(resultsKv, nodesKv);
-
-  // Subscribe to deploy triggers
+  // Subscribed before the startup catch-up: core NATS drops a trigger
+  // published while no subscription exists.
   const sub = nc.subscribe('mesh.deploy.trigger');
   console.log(`[deploy-listener] Listening on mesh.deploy.trigger`);
 
   // C2 fix (deep review 2026-07-03): authenticate the trigger before running
-  // `git reset --hard` + deploy. Opt-in via OPENCLAW_REQUIRE_SIGNED_DEPLOY=1
-  // (+ OPENCLAW_DEPLOY_TRUSTED_KEYS); default off preserves current behavior
-  // but warns on unsigned triggers. ESM helper loaded dynamically (this is CJS).
+  // `git reset --hard` + deploy. Strict by default: the signer must be in
+  // OPENCLAW_DEPLOY_TRUSTED_KEYS (none configured = every trigger rejected); only
+  // OPENCLAW_REQUIRE_SIGNED_DEPLOY=0 accepts unsigned triggers, with a warning.
+  // ESM helper loaded dynamically (this is CJS).
   const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
+  const notifyRejected = createRejectionNotifier(notifyDesktop);
+
+  const deployQueue = createTriggerQueue(item => (item.catchUp
+    ? checkAndCatchUp(resultsKv, nodesKv, latestKv)
+    : executeDeploy(item, resultsKv, nodesKv)), {
+    onSuperseded: async (old, next) => {
+      if (old.catchUp) return;
+      console.log(`[deploy-listener] Pending trigger ${old.sha} superseded by ${next.sha}`);
+      // The same sha re-sent keeps its key for the deploy that is about to run.
+      if (old.sha === next.sha) return;
+      const safeSha = (old.sha || 'unknown').replace(/[^a-fA-F0-9.-]/g, '');
+      try {
+        await resultsKv.put(`${safeSha}-${NODE_ID}`, sc.encode(JSON.stringify({
+          nodeId: NODE_ID, sha: old.sha, status: 'skipped', log: `superseded by ${next.sha} before it started`,
+          completedAt: new Date().toISOString(),
+        })));
+      } catch (err) { console.warn(`[deploy-listener] write superseded result: ${err.message}`); }
+    },
+  });
 
   (async () => {
     for await (const msg of sub) {
@@ -492,18 +685,21 @@ async function main() {
         const auth = verifyDeployTrigger(trigger);
         if (!auth.ok) {
           console.error(`[deploy-listener] REJECTED deploy trigger: ${auth.reason} (sha=${trigger.sha}, initiator=${trigger.initiator || 'unknown'})`);
-          notifyDesktop('block', 'Mesh deploy REJECTED', `${auth.reason} (sha=${trigger.sha}, from ${trigger.initiator || 'unknown'})`);
+          notifyRejected(`${auth.reason} (sha=${trigger.sha}, from ${trigger.initiator || 'unknown'})`);
           continue;
         }
 
-        await executeDeploy(trigger, resultsKv, nodesKv);
+        deployQueue.offer(trigger);
       } catch (err) {
         console.error(`[deploy-listener] Error handling trigger: ${err.message}`);
       }
     }
   })();
 
-  // Respond to status queries (request/reply)
+  // Check for missed deploys while we were offline
+  deployQueue.offer({ catchUp: true });
+
+  // Per-node status query from `fleet-deploy --status` (request/reply).
   const statusSub = nc.subscribe(`mesh.deploy.status.${NODE_ID}`);
   (async () => {
     for await (const msg of statusSub) {
@@ -512,16 +708,14 @@ async function main() {
         currentSha = git('rev-parse', '--short', 'HEAD');
       } catch (err) { console.warn(`[deploy-listener] read git HEAD: ${err.message}`); }
 
-      const response = {
-        nodeId: NODE_ID,
-        deployVersion: currentSha,
-        deploying,
-        repoDir: REPO_DIR,
-        platform: os.platform(),
-      };
-
       if (msg.reply) {
-        msg.respond(sc.encode(JSON.stringify(response)));
+        msg.respond(sc.encode(JSON.stringify({
+          nodeId: NODE_ID,
+          deployVersion: currentSha,
+          deploying,
+          repoDir: REPO_DIR,
+          platform: os.platform(),
+        })));
       }
     }
   })();
@@ -531,9 +725,7 @@ async function main() {
     for await (const s of nc.status()) {
       console.log(`[deploy-listener] NATS: ${s.type}`);
       // On reconnect, check for missed deploys
-      if (s.type === 'reconnect') {
-        await checkAndCatchUp(resultsKv, nodesKv);
-      }
+      if (s.type === 'reconnect') deployQueue.offer({ catchUp: true });
     }
   })();
 
@@ -549,7 +741,10 @@ async function main() {
   console.log(`[deploy-listener] ═══ Ready ═══`);
 }
 
-module.exports = { shouldCatchUp, runDeploy };
+module.exports = {
+  shouldCatchUp, runDeploy, scheduleSelfRestart, upsertNodeRegistry, checkAndCatchUp, createTriggerQueue,
+  createRejectionNotifier,
+};
 
 if (require.main === module) {
   main().catch(err => {

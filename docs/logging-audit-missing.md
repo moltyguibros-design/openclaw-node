@@ -212,7 +212,6 @@ Many core functions (especially in `mesh-collab.js`, `rule-loader.js`, `role-loa
 | `handleCancel` | Missing task_id (488), not found (491) |
 | `handleTaskApprove` | Missing task_id (512), not found (515) |
 | `handleTaskReject` | Missing task_id (532), not found (535) |
-| `handleCollabCreate` | Missing task_id (707), not found (710), no spec (711), exists (715) |
 | `handleCollabJoin` | Missing params (742), join failed (745) |
 | `handleCollabStatus` | Missing session_id (810), not found (814) |
 | `handleCollabFind` | Missing task_id (826) |
@@ -478,13 +477,12 @@ All `updateTaskInPlace` calls in `handleCollabEvent` (lines 227-332), `handlePla
 
 ## 14. Tracer & NATS Infrastructure
 
-### tracer.js (5 gaps)
+### tracer.js (4 gaps)
 
 | Line | Operation | Gap |
 |------|-----------|-----|
 | 32-34 | `setTraceMode()` — mode change silent, invalid mode silently ignored | |
 | 44-47 | `setNatsConnection()` — transport attach/replace not logged | |
-| 56-59 | `pushToRing()` — ring buffer overflow/wrap-around not logged | |
 | 112-114 | `emit()` catch — **NATS publish failure completely empty catch** | |
 | 138 | `summarizeArgs()` catch — serialization error discarded | |
 
@@ -756,12 +754,11 @@ The entire `runMigrations()` function (lines 17-507) is **completely silent**:
 1. **`natsRequest()` helpers** in mesh-agent and mesh-bridge — log subject + truncated payload.
 2. **All `_updateWithCAS` retry paths** across collab/plans/tasks — log CAS retries.
 3. **All lifecycle method null returns** in mesh-tasks.js (10 methods) — log invalid transitions.
-4. **Ring buffer overflow** in tracer.js — log when first wrap occurs.
-5. **NATS config resolution** — log which source provided URL/token.
-6. **DB migrations** — log each table/column/migration.
-7. **API request/response logging** — add middleware-level logging (path, method, status, duration).
-8. **Gateway notify** — log WebSocket lifecycle.
-9. **Silent catch blocks** — systematic sweep, add `console.warn` to all ~80 instances.
+4. **NATS config resolution** — log which source provided URL/token.
+5. **DB migrations** — log each table/column/migration.
+6. **API request/response logging** — add middleware-level logging (path, method, status, duration).
+7. **Gateway notify** — log WebSocket lifecycle.
+8. **Silent catch blocks** — systematic sweep, add `console.warn` to all ~80 instances.
 
 ### P2 — Fix This Quarter (debugging, observability)
 

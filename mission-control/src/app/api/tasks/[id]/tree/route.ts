@@ -38,7 +38,7 @@ export async function GET(
       .prepare(
         `WITH RECURSIVE tree AS (
           SELECT * FROM tasks WHERE id = ?
-          UNION ALL
+          UNION
           SELECT t.* FROM tasks t JOIN tree ON t.parent_id = tree.id
         )
         SELECT * FROM tree ORDER BY

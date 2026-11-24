@@ -24,7 +24,7 @@
       <key>PATH</key>
       <string>${OPENCLAW_WORKSPACE}/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
       <key>TZ</key>
-      <string>America/Montreal</string>
+      <string>${OPENCLAW_TIMEZONE}</string>
       <key>OPENCLAW_WORKSPACE</key>
       <string>${OPENCLAW_WORKSPACE}</string>
       <key>OPENCLAW_NATS</key>

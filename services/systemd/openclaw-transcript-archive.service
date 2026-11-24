@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenClaw Transcript Archive — append-only copy of Claude Code and gateway transcripts
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh "${OPENCLAW_WORKSPACE}/bin/archive-transcripts.sh"
+Environment="HOME=${HOME}"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="TZ=${OPENCLAW_TIMEZONE}"
+StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-transcript-archive.log
+StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-transcript-archive.err

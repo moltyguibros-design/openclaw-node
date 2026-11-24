@@ -7,6 +7,8 @@
  * No external dependencies — runs with node:test.
  */
 
+process.env.OPENCLAW_OBS_DB = ":memory:";
+
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { createTask, TaskStore, TASK_STATUS, DEFAULT_MAX_REJECTIONS, DEFAULT_MAX_LEASE_REQUEUES } = require("../lib/mesh-tasks");
@@ -23,8 +25,6 @@ describe("TASK_STATUS enum", () => {
       "failed",
       "released",
       "cancelled",
-      "proposed",
-      "rejected",
     ];
     for (const s of expected) {
       const key = Object.keys(TASK_STATUS).find(
@@ -44,12 +44,31 @@ describe("TASK_STATUS enum", () => {
       "failed",
       "released",
       "cancelled",
-      "proposed",
-      "rejected",
     ]);
     for (const [key, val] of Object.entries(TASK_STATUS)) {
       assert.ok(known.has(val), `Unexpected status: ${key}=${val}`);
     }
+  });
+});
+
+// The KV proposal intake (status "proposed", accepted or "rejected" by a 30 s full
+// MESH_TASKS scan) had no producer: tasks enter through mesh.tasks.submit only.
+describe("no KV proposal intake", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const root = path.join(__dirname, "..");
+  const read = (f) => fs.readFileSync(path.join(root, f), "utf8");
+
+  it("has no proposed or rejected task status, and the daemon no proposal loop", () => {
+    assert.equal(Object.values(TASK_STATUS).includes("proposed"), false);
+    assert.equal(Object.values(TASK_STATUS).includes("rejected"), false);
+    const daemon = read("bin/mesh-task-daemon.js");
+    assert.doesNotMatch(daemon, /processProposals|proposalTimer|TASK_STATUS\.(PROPOSED|REJECTED)/);
+    assert.doesNotMatch(read("lib/mesh-tasks.js"), /PROPOSED|REJECTED|processProposals/);
+  });
+
+  it("the README no longer advertises proposing a task through the KV bucket", () => {
+    assert.doesNotMatch(read("README.md"), /status: proposed|PROPOSED \+ REJECTED|Proposal processing|propose (new )?tasks/i);
   });
 });
 
@@ -66,6 +85,17 @@ describe("createTask()", () => {
     assert.equal(task.budget_minutes, 30);
   });
 
+  it("budget_minutes: a non-positive or unparseable budget takes the default, fractions are kept", () => {
+    const budget = (v) => createTask({ task_id: "b", title: "b", budget_minutes: v }).budget_minutes;
+    assert.equal(budget(-5), 30);
+    assert.equal(budget(0), 30);
+    assert.equal(budget("abc"), 30);
+    assert.equal(budget(undefined), 30);
+    assert.equal(budget("45m"), 45);
+    assert.equal(budget(1.5), 1.5);
+    assert.equal(budget(0.5), 0.5);
+  });
+
   it("overrides defaults when provided", () => {
     const task = createTask({
       task_id: "T-003",
@@ -77,6 +107,31 @@ describe("createTask()", () => {
     assert.equal(task.budget_minutes, 60);
     assert.equal(task.metric, "tests pass");
     assert.equal(task.priority, 5);
+  });
+
+  it("keeps the HyperAgent provenance fields a submit envelope carries", () => {
+    const provenance = {
+      execution_class: "chaos",
+      run_id: "run-7",
+      logical_task_id: "logical-3",
+      parent_task_id: "parent-1",
+      domain: "infra",
+      subdomain: "nats",
+    };
+    const task = createTask({ task_id: "T-PROV", title: "Provenance", ...provenance });
+    for (const [k, v] of Object.entries(provenance)) assert.equal(task[k], v, k);
+    const bare = createTask({ task_id: "T-PROV-0", title: "No provenance" });
+    for (const k of Object.keys(provenance)) assert.equal(bare[k], null, k);
+  });
+
+  it("refuses an execution_class outside real|mock|chaos|synthetic", () => {
+    assert.throws(
+      () => createTask({ task_id: "T-PROV-BAD", title: "Bad", execution_class: "production" }),
+      /invalid execution_class: production/,
+    );
+    for (const c of ["real", "mock", "chaos", "synthetic"]) {
+      assert.equal(createTask({ task_id: `T-${c}`, title: c, execution_class: c }).execution_class, c);
+    }
   });
 
   it("initializes state fields to null/empty", () => {
@@ -103,6 +158,8 @@ function mockKv() {
   const rows = new Map();
   let rev = 0;
   return {
+    purges: 0,
+    async purgeDeletes() { this.purges++; return { purged: 0 }; },
     async get(k) { const r = rows.get(k); return r ? { value: r.value, revision: r.revision } : null; },
     async put(k, v) { rows.set(k, { value: v, revision: ++rev }); },
     async update(k, v, expected) {
@@ -112,6 +169,30 @@ function mockKv() {
     },
     async delete(k) { rows.delete(k); },
     async keys() { return (async function* () { for (const k of [...rows.keys()]) yield k; })(); },
+  };
+}
+
+// nats 2.29.3 KV delete: writes a DEL marker with an empty payload, which
+// get() returns as-is and keys() skips.
+function tombstoneKv() {
+  const rows = new Map();
+  let rev = 0;
+  return {
+    rows,
+    async get(k) { const r = rows.get(k); return r ? { ...r } : null; },
+    async put(k, v) { rows.set(k, { value: v, revision: ++rev, operation: "PUT" }); },
+    async update(k, v, expected) {
+      const r = rows.get(k);
+      if (!r || r.revision !== expected) { const e = new Error("wrong last sequence"); e.code = "10071"; throw e; }
+      rows.set(k, { value: v, revision: ++rev, operation: "PUT" });
+    },
+    async delete(k) { rows.set(k, { value: new Uint8Array(0), revision: ++rev, operation: "DEL" }); },
+    // Markers younger than 30 minutes survive a purgeDeletes, as every marker here is.
+    async purgeDeletes() { return { purged: 0 }; },
+    async keys() {
+      const live = [...rows].filter(([, r]) => r.operation !== "DEL").map(([k]) => k);
+      return (async function* () { yield* live; })();
+    },
   };
 }
 
@@ -148,6 +229,48 @@ describe("markRejected() reject→requeue cap (P4-5)", () => {
   });
 });
 
+describe("markFailed() keeps the attempt history", () => {
+  const running = (id) => ({
+    ...createTask({ task_id: id, title: id }), status: TASK_STATUS.RUNNING, owner: "w1",
+    attempts: [{ approach: "lease expired while held by w0", result: "requeued", keep: false }],
+  });
+
+  it("a fail that reports no attempts leaves the recorded ones in place", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-F1"));
+    const t = await store.markFailed("T-F1", "boom");
+    assert.equal(t.status, TASK_STATUS.FAILED);
+    assert.deepEqual(t.attempts.map((a) => a.approach), ["lease expired while held by w0"]);
+  });
+
+  it("a fail that reports attempts replaces the list", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-F2"));
+    const t = await store.markFailed("T-F2", "boom", [{ approach: "a", result: "r", keep: false }]);
+    assert.deepEqual(t.attempts.map((a) => a.approach), ["a"]);
+  });
+});
+
+describe("markReleased() keeps the cost the worker reports", () => {
+  const running = (id) => ({ ...createTask({ task_id: id, title: id }), status: TASK_STATUS.RUNNING, owner: "w1" });
+  const cost = { estimatedCostUsd: 0.2, inputTokens: 1, outputTokens: 1 };
+
+  it("stores the reported cost on the released result", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-R1"));
+    const t = await store.markReleased("T-R1", "r", [], { cost });
+    assert.equal(t.status, TASK_STATUS.RELEASED);
+    assert.deepEqual(t.result.cost, cost);
+  });
+
+  it("a release without a cost leaves the result without one", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, running("T-R2"));
+    const t = await store.markReleased("T-R2", "r");
+    assert.deepEqual(t.result, { success: false, summary: "r", released: true });
+  });
+});
+
 describe("recordMerge() merge-after-review (P4-4)", () => {
   it("records the merge on a completed task without touching the rest of the result", async () => {
     const store = new TaskStore(mockKv());
@@ -173,7 +296,8 @@ describe("pruneTerminal() KV hygiene (P4-5)", () => {
   const fresh = new Date(now - 1 * DAY).toISOString();
 
   it("deletes old terminal tasks, keeps fresh ones and every non-terminal task", async () => {
-    const store = new TaskStore(mockKv());
+    const kv = mockKv();
+    const store = new TaskStore(kv);
     await seed(store, { ...createTask({ task_id: "old-done", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     await seed(store, { ...createTask({ task_id: "old-failed", title: "t" }), status: TASK_STATUS.FAILED, completed_at: old });
     await seed(store, { ...createTask({ task_id: "fresh-done", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: fresh });
@@ -182,20 +306,81 @@ describe("pruneTerminal() KV hygiene (P4-5)", () => {
     assert.deepEqual(pruned.sort(), ["old-done", "old-failed"]);
     assert.ok(await store.get("fresh-done"));
     assert.ok(await store.get("old-running"));
+    assert.equal(kv.purges, 1, "the DEL markers the prune left are purged once");
   });
 
   it("keeps a terminal task still referenced by a live task's depends_on (a pruned dep would strand it)", async () => {
-    const store = new TaskStore(mockKv());
+    const kv = mockKv();
+    const store = new TaskStore(kv);
     await seed(store, { ...createTask({ task_id: "dep", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     await seed(store, { ...createTask({ task_id: "child", title: "t", depends_on: ["dep"] }), status: TASK_STATUS.QUEUED });
     assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), []);
     assert.ok(await store.get("dep"));
+    assert.equal(kv.purges, 1, "a run that prunes nothing still purges the markers earlier runs left");
+  });
+
+  it("the markers one run leaves are gone after the next run, even when that run prunes nothing", async () => {
+    let clock = 0;
+    const kv = tombstoneKv();
+    const markedAt = new Map();
+    const del = kv.delete.bind(kv);
+    kv.delete = async (k) => { markedAt.set(k, clock); await del(k); };
+    kv.purgeDeletes = async (olderMillis = 30 * 60000) => {
+      for (const [k, at] of markedAt) if (at < clock - olderMillis) { kv.rows.delete(k); markedAt.delete(k); }
+    };
+    const store = new TaskStore(kv);
+    await seed(store, { ...createTask({ task_id: "gone", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    await seed(store, { ...createTask({ task_id: "live", title: "t" }), status: TASK_STATUS.RUNNING });
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), ["gone"]);
+    assert.ok(kv.rows.has("gone"), "a fresh marker survives the run that wrote it");
+    clock += 3600000;
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), []);
+    assert.deepEqual([...kv.rows.keys()], ["live"]);
   });
 
   it("is a no-op when disabled (maxAgeMs 0)", async () => {
-    const store = new TaskStore(mockKv());
+    const kv = mockKv();
+    const store = new TaskStore(kv);
     await seed(store, { ...createTask({ task_id: "x", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
     assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 0, now }), []);
+    assert.equal(kv.purges, 0);
+  });
+});
+
+describe("a pruned task reads as missing (JetStream DEL tombstone)", () => {
+  const DAY = 86400000;
+  const now = Date.parse("2026-09-06T12:00:00Z");
+  const old = new Date(now - 30 * DAY).toISOString();
+
+  async function pruned() {
+    const store = new TaskStore(tombstoneKv());
+    await seed(store, { ...createTask({ task_id: "OLD", title: "t" }), status: TASK_STATUS.COMPLETED, completed_at: old });
+    assert.deepEqual(await store.pruneTerminal({ maxAgeMs: 14 * DAY, now }), ["OLD"]);
+    return store;
+  }
+
+  it("get() and _updateWithCAS() return null", async () => {
+    const store = await pruned();
+    assert.equal(await store.get("OLD"), null);
+    assert.equal(await store._updateWithCAS("OLD", (t) => t), null);
+  });
+
+  it("claim() skips a task depending on the pruned id instead of throwing", async () => {
+    const store = await pruned();
+    await seed(store, { ...createTask({ task_id: "DEP", title: "t", depends_on: ["OLD"] }), status: TASK_STATUS.QUEUED });
+    await seed(store, { ...createTask({ task_id: "FREE", title: "t" }), status: TASK_STATUS.QUEUED });
+    const claimed = await store.claim("node-a");
+    assert.equal(claimed.task_id, "FREE");
+  });
+
+  it("list() skips a key deleted between keys() and get()", async () => {
+    const kv = tombstoneKv();
+    const store = new TaskStore(kv);
+    await seed(store, { ...createTask({ task_id: "A", title: "t" }), status: TASK_STATUS.QUEUED });
+    await seed(store, { ...createTask({ task_id: "B", title: "t" }), status: TASK_STATUS.QUEUED });
+    const keys = kv.keys.bind(kv);
+    kv.keys = async () => { const it = await keys(); await kv.delete("B"); return it; };
+    assert.deepEqual((await store.list()).map((t) => t.task_id), ["A"]);
   });
 });
 
@@ -261,5 +446,100 @@ describe("lease + fencing token (P4-5)", () => {
     const t = await store.get("L-4");
     assert.equal(t.status, TASK_STATUS.RELEASED);
     assert.match(t.result.summary, /Lease expired 3×/);
+  });
+});
+
+describe("live-task scans read the bucket once", () => {
+  function countingStore() {
+    const kv = mockKv();
+    const keys = kv.keys;
+    const counter = { scans: 0 };
+    kv.keys = async () => { counter.scans++; return keys(); };
+    return { store: new TaskStore(kv), counter };
+  }
+  const tenMinAgo = () => new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const live = (id, status, extra) => ({ ...createTask({ task_id: id, title: id }), status, owner: "w1", ...extra });
+
+  it("list({ statuses }) keeps only the listed statuses", async () => {
+    const { store } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING));
+    await seed(store, live("C", TASK_STATUS.CLAIMED));
+    await seed(store, live("D", TASK_STATUS.COMPLETED));
+    const ids = (await store.list({ statuses: [TASK_STATUS.RUNNING, TASK_STATUS.CLAIMED] })).map(t => t.task_id);
+    assert.deepEqual(ids.sort(), ["C", "R"]);
+  });
+
+  it("findStalled finds running and claimed tasks in one scan", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { last_activity: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { last_activity: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.findStalled(5)).map(t => t.task_id).sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+
+  it("findOverBudget finds running and claimed tasks in one scan", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { budget_deadline: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { budget_deadline: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.findOverBudget()).map(t => t.task_id).sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+
+  it("reapExpiredLeases scans once", async () => {
+    const { store, counter } = countingStore();
+    await seed(store, live("R", TASK_STATUS.RUNNING, { lease_token: "t1", lease_expires_at: tenMinAgo() }));
+    await seed(store, live("C", TASK_STATUS.CLAIMED, { lease_token: "t2", lease_expires_at: tenMinAgo() }));
+    counter.scans = 0;
+    assert.deepEqual((await store.reapExpiredLeases()).requeued.sort(), ["C", "R"]);
+    assert.equal(counter.scans, 1);
+  });
+});
+
+describe("requeueOwnedBy() (mesh-node-remove)", () => {
+  const leased = (id, status, owner) => ({
+    ...createTask({ task_id: id, title: id }), status, owner,
+    claimed_at: new Date().toISOString(), lease_token: "tok", lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+
+  it("re-queues only the node's claimed/running tasks and clears their lease", async () => {
+    const store = new TaskStore(mockKv());
+    await seed(store, leased("T-a", TASK_STATUS.CLAIMED, "dead"));
+    await seed(store, leased("T-b", TASK_STATUS.RUNNING, "other"));
+    await seed(store, { ...leased("T-c", TASK_STATUS.COMPLETED, "dead"), lease_token: null });
+
+    assert.deepEqual(await store.requeueOwnedBy("dead"), ["T-a"]);
+    const a = await store.get("T-a");
+    assert.equal(a.status, TASK_STATUS.QUEUED);
+    assert.equal(a.owner, null);
+    assert.equal(a.claimed_at, null);
+    assert.equal(a.lease_token, null);
+    assert.equal(a.lease_expires_at, null);
+    assert.equal((await store.get("T-b")).status, TASK_STATUS.RUNNING);
+    assert.equal((await store.get("T-b")).owner, "other");
+    assert.equal((await store.get("T-c")).status, TASK_STATUS.COMPLETED);
+  });
+
+  it("a task the daemon completes mid-requeue stays completed (CAS, not a blind put)", async () => {
+    const kv = mockKv();
+    const get = kv.get;
+    let reads = 0;
+    // The second read of T-a is the CAS read; the daemon completes the task right after it.
+    kv.get = async (k) => {
+      const entry = await get(k);
+      if (k === "T-a" && ++reads === 2) {
+        const done = { ...JSON.parse(sc.decode(entry.value)), status: TASK_STATUS.COMPLETED, completed_at: new Date().toISOString() };
+        await kv.put(k, sc.encode(JSON.stringify(done)));
+      }
+      return entry;
+    };
+    const store = new TaskStore(kv);
+    await seed(store, leased("T-a", TASK_STATUS.RUNNING, "dead"));
+
+    assert.deepEqual(await store.requeueOwnedBy("dead"), []);
+    const a = await store.get("T-a");
+    assert.equal(a.status, TASK_STATUS.COMPLETED);
+    assert.equal(a.owner, "dead");
   });
 });

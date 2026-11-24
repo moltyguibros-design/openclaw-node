@@ -85,4 +85,3 @@ bash install-hook.sh <clawhub-slug> --force
 - `scanner.py` — Main scanner engine
 - `install-hook.sh` — Safe installation wrapper
 - `whitelist.json` — Known-good and known-bad skill lists
-- `report-template.md` — Markdown report template

@@ -1,15 +1,13 @@
 #!/bin/bash
 # Self-Improvement Error Detector Hook
-# Triggers on PostToolUse for Bash to detect command failures
-# Reads CLAUDE_TOOL_OUTPUT environment variable
+# Triggers on PostToolUse for Bash to detect command failures.
+# Claude Code passes the hook input as JSON on stdin, and PostToolUse stdout on
+# exit 0 never reaches the model, so the reminder goes out as additionalContext.
 
 set -e
 
-# Check if tool output indicates an error
-# CLAUDE_TOOL_OUTPUT contains the result of the tool execution
-OUTPUT="${CLAUDE_TOOL_OUTPUT:-}"
+OUTPUT="$(jq -r '[.tool_response | .. | strings] | join("\n")')"
 
-# Patterns indicating errors (case-insensitive matching)
 ERROR_PATTERNS=(
     "error:"
     "Error:"
@@ -30,7 +28,6 @@ ERROR_PATTERNS=(
     "non-zero"
 )
 
-# Check if output contains any error pattern
 contains_error=false
 for pattern in "${ERROR_PATTERNS[@]}"; do
     if [[ "$OUTPUT" == *"$pattern"* ]]; then
@@ -39,17 +36,15 @@ for pattern in "${ERROR_PATTERNS[@]}"; do
     fi
 done
 
-# Only output reminder if error detected
 if [ "$contains_error" = true ]; then
-    cat << 'EOF'
-<error-detected>
-A command error was detected. Consider logging this to .learnings/ERRORS.md if:
+    REMINDER='<error-detected>
+A command error was detected. Consider appending one line to .learnings/lessons.md if:
 - The error was unexpected or non-obvious
 - It required investigation to resolve
 - It might recur in similar contexts
 - The solution could benefit future sessions
 
-Use the self-improvement skill format: [ERR-YYYYMMDD-XXX]
-</error-detected>
-EOF
+Format: [error] What failed and what to do instead (YYYY-MM-DD)
+</error-detected>'
+    jq -n --arg ctx "$REMINDER" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}'
 fi

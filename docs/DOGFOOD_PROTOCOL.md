@@ -8,10 +8,10 @@ The dogfood harness (`bin/dogfood-council.mjs`) is the observability layer for l
 
 ## Prerequisites
 
-- **Node.js >= 18** (same as the rest of OpenClaw)
+- **Node.js >= 22.12** (package.json engines)
 - **NATS cluster running** — see [docs/MULTI_NODE_DEPLOY.md](MULTI_NODE_DEPLOY.md) for setup
 - **3 openclaw node trees** — spawned via `bin/spawn-node.mjs` or configured manually
-- **Memory daemon running** on at least one node (to produce broadcasts)
+- **Memory daemon running with `OPENCLAW_FEDERATION=1`** on at least one node (to produce broadcasts)
 
 ---
 
@@ -31,10 +31,23 @@ See [docs/NATS_CLUSTER.md](NATS_CLUSTER.md) or [docs/MULTI_NODE_DEPLOY.md](MULTI
 
 ### 3. Start node daemons
 
+Federation is opt-in: without `OPENCLAW_FEDERATION=1` the daemon never starts the
+broadcaster, offerer or acceptor, and the harness records nothing.
+
 ```bash
-OPENCLAW_HOME=~/.openclaw-alpha OPENCLAW_NODE_ID=alpha node workspace-bin/memory-daemon.mjs &
-OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo node workspace-bin/memory-daemon.mjs &
-OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node workspace-bin/memory-daemon.mjs &
+OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-alpha OPENCLAW_NODE_ID=alpha node workspace-bin/memory-daemon.mjs &
+OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo node workspace-bin/memory-daemon.mjs &
+OPENCLAW_FEDERATION=1 OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node workspace-bin/memory-daemon.mjs &
+```
+
+The daemon runs no consolidation cycle, and the installed consolidation timer cycles only
+`~/.openclaw`, so each node also runs its own scheduler on its root (`bin/spawn-node.mjs`
+prints both lines):
+
+```bash
+OPENCLAW_HOME=~/.openclaw-alpha OPENCLAW_NODE_ID=alpha node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=~/.openclaw-bravo OPENCLAW_NODE_ID=bravo node bin/consolidation-scheduler.mjs --daemon &
+OPENCLAW_HOME=~/.openclaw-charlie OPENCLAW_NODE_ID=charlie node bin/consolidation-scheduler.mjs --daemon &
 ```
 
 ### 4. Run the dogfood harness
@@ -72,7 +85,7 @@ The harness writes one JSON object per line to `~/.openclaw/dogfood-metrics.json
 | `broadcast` | `context.broadcast.>` observed | `event_id`, `themes`, `entities`, `intensity`, `dedup_key` |
 | `offer` | `context.offer.>` observed | `event_id`, `responding_to`, `artifact_count` |
 | `accepted` | `context.accepted.>` observed | `event_id`, `responding_to_broadcast`, `accepted_artifacts` |
-| `signature_failure` | Bad signature on incoming event | `event_id`, `reason` |
+| `signature_failure` | An acceptor's `signature_rejected` counter rose (from `context.acceptor.stats.<node>`, published by each acceptor on every rejection and every minute) | `count`, `reason`, `acceptor_started_at` |
 | `dead_peer` | Dead-peer detection in health alert | `alert` |
 
 ### Example JSONL
@@ -81,7 +94,7 @@ The harness writes one JSON object per line to `~/.openclaw/dogfood-metrics.json
 {"ts":"2026-05-26T14:00:00.000Z","type":"harness_start","data":{"node_ids":["alpha","bravo","charlie"],"metrics_path":"~/.openclaw/dogfood-metrics.jsonl"}}
 {"ts":"2026-05-26T14:01:23.456Z","type":"broadcast","node_id":"alpha","data":{"event_id":"abc-123","themes":["memory","federation"],"entities":["NATS"],"intensity":"interested","dedup_key":"sha256..."}}
 {"ts":"2026-05-26T14:01:24.789Z","type":"offer","node_id":"bravo","data":{"event_id":"def-456","responding_to":"abc-123","artifact_count":2}}
-{"ts":"2026-05-26T14:01:30.012Z","type":"accepted","node_id":"alpha","data":{"event_id":"ghi-789","responding_to_broadcast":"abc-123","accepted_artifacts":1}}
+{"ts":"2026-05-26T14:01:30.012Z","type":"accepted","node_id":"alpha","data":{"event_id":"ghi-789","responding_to_broadcast":"def-456","accepted_artifacts":1}}
 ```
 
 ---
@@ -96,9 +109,9 @@ Run `node bin/dogfood-council.mjs --stats` to see a summary:
 | Offers received | Total `context.offer` events observed |
 | Accepted | Total `context.accepted` events observed |
 | Offer-to-acceptance ratio | `accepted / broadcasts` (0.0 - 1.0; higher = more useful offers) |
-| Avg round-trip (ms) | Mean time from broadcast to corresponding accepted event |
+| Avg round-trip (ms) | Mean time from broadcast to the accepted event answering one of its offers (accepted → offer → broadcast) |
 | Round-trip samples | How many broadcast→accepted pairs contributed to the average |
-| Signature failures | Events with bad or tampered ed25519 signatures |
+| Signature failures | Offers the acceptors rejected for a bad, missing or mismatched signature, as their published counters report |
 | Dead-peer events | Peer-offline detections from health alerts |
 | Duration (sec) | Total harness observation window |
 
@@ -147,7 +160,7 @@ These thresholds define a well-functioning 3-node council during a 24-hour dogfo
 
 The broadcast rate reflects how actively the council's agents are working. Expect variation by time of day — active coding sessions produce more themes than idle periods. A 24-hour run should show clear active/idle cycles.
 
-Low broadcast rate with active sessions means the broadcaster's theme detection threshold (MIN_THEMES_FOR_BROADCAST = 3) may be too strict for the content being discussed.
+A per-prompt broadcast carries only names already published in the extraction store (`private = 0`, the rule the consolidation broadcast follows); private, never-seen and credential-shaped names stay on the node, and the broadcast is suppressed (`reason: 'private'`) when fewer than three published themes remain. Low broadcast rate with active sessions therefore means either that few of the themes being discussed are published, or that the theme threshold (MIN_THEMES_FOR_BROADCAST = 3) is too strict for the content.
 
 ### Offer-to-Acceptance Ratio
 
@@ -188,7 +201,7 @@ These fire when a node has been silent for longer than `DEAD_PEER_TIMEOUT_MIN` (
 
 ### All zeros in stats
 
-The harness only records events it observes. If no daemons are broadcasting, there are no metrics. Start at least one daemon and have an active Claude Code or other LLM frontend session to generate broadcasts.
+Every daemon must run with `OPENCLAW_FEDERATION=1`; without it the daemon never starts the broadcaster/offerer/acceptor. The harness only records events it observes. If no daemons are broadcasting, there are no metrics. Start at least one daemon and have an active Claude Code or other LLM frontend session to generate broadcasts.
 
 ### Metrics file grows very large
 
@@ -196,7 +209,7 @@ At ~200 bytes per line, a 24h run with 1 broadcast/minute produces ~280 KB. With
 
 ### NATS connection refused
 
-The harness expects NATS at `nats://localhost:4222` by default. Override with `--nats-url` or `DOGFOOD_NATS_URL` env var if your cluster is on different ports.
+The harness connects to the URL `lib/nats-resolve` resolves (`OPENCLAW_NATS`, then `~/.openclaw/openclaw.env`) unless `--nats-url` or `DOGFOOD_NATS_URL` is set; spawned node configs default to `nats://localhost:4222`. The `connected to NATS at` log line names the server it reached.
 
 ---
 
@@ -205,7 +218,7 @@ The harness expects NATS at `nats://localhost:4222` by default. Override with `-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DOGFOOD_METRICS_PATH` | `~/.openclaw/dogfood-metrics.jsonl` | Metrics output path |
-| `DOGFOOD_NATS_URL` | `nats://localhost:4222` | NATS server URL |
+| `DOGFOOD_NATS_URL` | `OPENCLAW_NATS` / `~/.openclaw/openclaw.env` (`lib/nats-resolve`); spawned node configs default to `nats://localhost:4222` | NATS URL for the harness connection |
 | `OPENCLAW_SPAWN_BASE` | `~/.openclaw-` | Base prefix for spawned node trees |
 
 ---

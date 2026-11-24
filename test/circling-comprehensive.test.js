@@ -9,32 +9,12 @@
  *   1. Parser (lib/circling-parser.js) — edge cases, opts, legacy fallback
  *   2. State (lib/mesh-collab.js) — storeArtifact blob/exception, compileDirectedInput finalization,
  *      adaptive convergence edge cases
- *   3. Orchestration (daemon logic) — timeout handler, sweep logic, step lifecycle
- *   4. Prompt (buildCirclingPrompt) — all 8 role/phase/step branches, anti-preamble, finalization vote
- *   5. Bridge (gate message) — step_started event, gate formatting
+ *   3. State — step_started_at across a finalization gate (the daemon's timeout
+ *      handler and sweep are driven for real in test/daemon-circling-handlers.test.js)
+ *   4. Prompt — see test/circling-worker-harness.test.mjs (drives the real buildCirclingPrompt)
  *
  * Run: node --test test/circling-comprehensive.test.js
  */
-
-// ── Mock 'nats' module ──
-const Module = require('module');
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const mockNats = {
-  StringCodec: () => ({
-    encode: (str) => encoder.encode(str),
-    decode: (buf) => decoder.decode(buf),
-  }),
-  connect: async () => ({}),
-};
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === 'nats') return 'nats';
-  return origResolve.call(this, request, parent, ...rest);
-};
-require.cache['nats'] = {
-  id: 'nats', filename: 'nats', loaded: true, exports: mockNats,
-};
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -259,29 +239,6 @@ describe('compileDirectedInput: finalization phase', () => {
   });
 });
 
-describe('compileDirectedInput: reviewerLabel legacy fallback', () => {
-  it('falls back to array-index when reviewer IDs not stored', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    const s = await store.get(sessionId);
-    // Clear stored reviewer IDs to trigger legacy fallback
-    s.circling.reviewerA_node_id = null;
-    s.circling.reviewerB_node_id = null;
-    s.circling.phase = 'circling';
-    s.circling.current_subround = 1;
-    s.circling.current_step = 2;
-    await store.put(s);
-
-    await store.storeArtifact(sessionId, 'sr1_step2_worker_workerReviewsAnalysis', 'analysis here');
-    await store.storeArtifact(sessionId, 'sr1_step1_reviewerA_reviewArtifact', 'revA findings');
-    await store.storeArtifact(sessionId, 'sr1_step1_reviewerB_reviewArtifact', 'revB findings');
-
-    const fresh = await store.get(sessionId);
-    // Even without stored IDs, compileDirectedInput should still work via fallback
-    const revAInput = store.compileDirectedInput(fresh, 'node-revA', '');
-    assert.ok(revAInput.includes('analysis here'), 'Reviewer should get worker analysis via fallback');
-  });
-});
-
 describe('Adaptive convergence: edge cases', () => {
   it('dead node excluded from convergence check', async () => {
     const { store, sessionId } = await makeActiveSession();
@@ -346,385 +303,45 @@ describe('Adaptive convergence: edge cases', () => {
 });
 
 // ═══════════════════════════════════════════════════════
-// 3. ORCHESTRATION — Timeout handler, sweep, step lifecycle
+// 3. STATE — step_started_at across a finalization gate
 // ═══════════════════════════════════════════════════════
 
-describe('Daemon: handleCirclingStepTimeout simulation', () => {
-  /**
-   * Simulates the timeout handler logic from mesh-task-daemon.js
-   */
-  async function simulateTimeout(store, sessionId, stepSnapshot) {
-    const session = await store.get(sessionId);
-    if (!session || !session.circling) return { action: 'skip', reason: 'no session' };
-
-    const { phase, current_subround, current_step } = session.circling;
-    if (phase !== stepSnapshot.phase ||
-        current_subround !== stepSnapshot.subround ||
-        current_step !== stepSnapshot.step) {
-      return { action: 'skip', reason: 'stale' };
-    }
-
-    const currentRound = session.rounds[session.rounds.length - 1];
-    if (!currentRound) return { action: 'skip', reason: 'no round' };
-
-    const submittedNodeIds = new Set(
-      currentRound.reflections
-        .filter(r => r.circling_step === current_step)
-        .map(r => r.node_id)
-    );
-
-    const deadNodes = [];
-    for (const node of session.nodes) {
-      if (node.status !== 'dead' && !submittedNodeIds.has(node.node_id)) {
-        node.status = 'dead';
-        deadNodes.push(node.node_id);
-      }
-    }
-    await store.put(session);
-
-    const freshSession = await store.get(sessionId);
-    if (store.isCirclingStepComplete(freshSession)) {
-      return { action: 'advance', deadNodes };
-    } else {
-      return { action: 'abort', deadNodes };
-    }
-  }
-
-  it('stale timer: skips if step already advanced', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    await store.advanceCirclingStep(sessionId); // init → SR1/step1
-    await store.startRound(sessionId);
-
-    // Snapshot from init phase — but session is now at step1
-    const staleSnapshot = { phase: 'init', subround: 0, step: 0 };
-    const result = await simulateTimeout(store, sessionId, staleSnapshot);
-    assert.equal(result.action, 'skip');
-    assert.equal(result.reason, 'stale');
-  });
-
-  it('marks unsubmitted nodes as dead and advances', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    await store.advanceCirclingStep(sessionId);
-    await store.startRound(sessionId);
-
+describe('State: step_started_at across a finalization gate', () => {
+  async function atConvergedStep2(automationTier) {
+    const { store, sessionId } = await makeActiveSession({ automation_tier: automationTier });
     const s = await store.get(sessionId);
-    // Only 2 of 3 submitted
-    await store.submitReflection(sessionId, {
-      node_id: 'node-worker', vote: 'continue', confidence: 0.8, summary: 'work',
-      circling_step: 1,
-    });
-    await store.submitReflection(sessionId, {
-      node_id: 'node-revA', vote: 'continue', confidence: 0.7, summary: 'review',
-      circling_step: 1,
-    });
-    // node-revB did not submit
-
-    const snapshot = { phase: 'circling', subround: 1, step: 1 };
-    const result = await simulateTimeout(store, sessionId, snapshot);
-
-    assert.equal(result.action, 'advance', 'should advance after marking dead node');
-    assert.deepEqual(result.deadNodes, ['node-revB'], 'node-revB should be marked dead');
-  });
-
-  it('all nodes timed out: marks all dead, barrier passes (0/0)', async () => {
-    const { store, sessionId } = await makeActiveSession();
-    await store.advanceCirclingStep(sessionId);
-    await store.startRound(sessionId);
-
-    // No reflections submitted — all 3 nodes will be marked dead
-    const snapshot = { phase: 'circling', subround: 1, step: 1 };
-    const result = await simulateTimeout(store, sessionId, snapshot);
-
-    // isCirclingStepComplete returns true with 0 active nodes (0 reflections >= 0 active)
-    // The daemon would then advanceCirclingStep, which would proceed with degraded state.
-    // In the real daemon, subsequent steps would also time out → eventually abort.
-    assert.equal(result.deadNodes.length, 3, 'all 3 nodes should be marked dead');
-    assert.equal(result.action, 'advance', 'barrier passes with 0/0 active/submitted');
-  });
-});
-
-describe('Daemon: sweepCirclingStepTimeouts simulation', () => {
-  /**
-   * Simulates the sweep logic from mesh-task-daemon.js
-   */
-  function shouldSweepFire(session, timeoutMs, hasInMemoryTimer) {
-    if (session.mode !== 'circling_strategy' || !session.circling) return false;
-    if (session.circling.phase === 'complete') return false;
-    if (!session.circling.step_started_at) return false;
-    if (hasInMemoryTimer) return false;
-
-    const elapsed = Date.now() - new Date(session.circling.step_started_at).getTime();
-    return elapsed > timeoutMs;
+    s.circling.phase = 'circling';
+    s.circling.current_subround = 1;
+    s.circling.current_step = 2;
+    s.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    s.rounds = [{
+      round_number: 1,
+      reflections: ['node-worker', 'node-revA', 'node-revB'].map(node_id => ({
+        node_id, circling_step: 2, vote: 'converged',
+      })),
+    }];
+    await store.put(s);
+    return { store, sessionId, startedAt: s.circling.step_started_at };
   }
 
-  it('fires for expired step without in-memory timer', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.current_step = 1;
-    session.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString(); // 15 min ago
-    session.mode = 'circling_strategy';
+  it('a tier-2 gate clears step_started_at so the sweep cannot fire during the wait', async () => {
+    const { store, sessionId } = await atConvergedStep2(2);
+    const r = await store.advanceCirclingStep(sessionId);
+    assert.equal(r.needsGate, true);
+    assert.equal(r.phase, 'finalization');
 
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), true);
+    const after = await store.get(sessionId);
+    assert.equal(after.circling.step_started_at, null);
   });
 
-  it('skips when in-memory timer exists', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    session.mode = 'circling_strategy';
+  it('a tier-1 transition (no gate) leaves step_started_at alone', async () => {
+    const { store, sessionId, startedAt } = await atConvergedStep2(1);
+    const r = await store.advanceCirclingStep(sessionId);
+    assert.equal(r.needsGate, false);
+    assert.equal(r.phase, 'finalization');
 
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, true), false);
-  });
-
-  it('skips completed sessions', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'complete';
-    session.circling.step_started_at = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
-  it('skips when step_started_at not set', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.step_started_at = null;
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
-  it('skips non-circling sessions', () => {
-    const session = createSession('test', { mode: 'parallel' });
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-
-  it('does not fire when timeout not yet reached', () => {
-    const session = makeCirclingSession();
-    session.circling.phase = 'circling';
-    session.circling.step_started_at = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 min ago
-    session.mode = 'circling_strategy';
-
-    assert.equal(shouldSweepFire(session, 10 * 60 * 1000, false), false);
-  });
-});
-
-// ═══════════════════════════════════════════════════════
-// 4. PROMPT — buildCirclingPrompt all branches
-// ═══════════════════════════════════════════════════════
-
-describe('buildCirclingPrompt: all branches', () => {
-  // We can't import buildCirclingPrompt directly (mesh-agent.js has many deps),
-  // so we replicate the prompt logic for verification. This tests the prompt
-  // contract: what each branch SHOULD contain.
-
-  /**
-   * Minimal reimplementation of buildCirclingPrompt for testing.
-   * Mirrors mesh-agent.js lines 730-900.
-   */
-  function buildCirclingPromptTest(task, circlingData) {
-    const { circling_phase, circling_step, circling_subround, directed_input, my_role } = circlingData;
-    const isWorker = my_role === 'worker';
-    const parts = [];
-
-    parts.push(`# Task: ${task.title}`);
-    parts.push('');
-
-    switch (circling_phase) {
-      case 'init':
-        if (isWorker) {
-          parts.push('## Your Role: WORKER (Central Authority)');
-          parts.push('');
-          parts.push('Produce your initial work artifact (v0).');
-        } else {
-          parts.push('## Your Role: REVIEWER');
-          parts.push('');
-          parts.push('Produce your **reviewStrategy**.');
-        }
-        break;
-      case 'circling':
-        if (circling_step === 1) {
-          if (isWorker) {
-            parts.push('## Your Role: WORKER — Analyze Review Strategies');
-            parts.push('Do NOT touch the work artifact in this step.');
-          } else {
-            parts.push('## Your Role: REVIEWER — Review the Work Artifact');
-            parts.push('Produce concrete, actionable findings.');
-          }
-        } else if (circling_step === 2) {
-          if (isWorker) {
-            parts.push('## Your Role: WORKER — Judge Reviews & Update Artifact');
-            parts.push('You must output TWO artifacts.');
-          } else {
-            parts.push('## Your Role: REVIEWER — Refine Your Strategy');
-            parts.push('Produce your REFINED reviewStrategy.');
-          }
-        }
-        break;
-      case 'finalization':
-        if (isWorker) {
-          parts.push('## Your Role: WORKER — Final Delivery');
-          parts.push('Produce your FINAL formatted work artifact.');
-          parts.push('Also produce a completionDiff.');
-          parts.push('You must output TWO artifacts.');
-        } else {
-          parts.push('## Your Role: REVIEWER — Final Sign-Off');
-          parts.push('vote "converged" or "blocked"');
-        }
-        break;
-    }
-
-    // Vote restriction
-    if (circling_phase === 'finalization') {
-      parts.push('vote: [converged|blocked]');
-    } else {
-      parts.push('vote: [continue|converged|blocked]');
-    }
-
-    // Anti-preamble
-    parts.push('Begin your output with the artifact content DIRECTLY.');
-
-    // Multi-artifact format flag
-    const isMultiArtifact = isWorker && (circling_step === 2 || circling_phase === 'finalization');
-    if (isMultiArtifact) {
-      parts.push('===CIRCLING_ARTIFACT===');
-    }
-
-    return parts.join('\n');
-  }
-
-  const task = { title: 'Build ManaToken' };
-
-  // Init phase
-  it('init/worker: produces workArtifact v0', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'init', circling_step: 0, my_role: 'worker' });
-    assert.ok(prompt.includes('WORKER (Central Authority)'));
-    assert.ok(prompt.includes('initial work artifact'));
-    assert.ok(prompt.includes('continue|converged|blocked'));
-  });
-
-  it('init/reviewer: produces reviewStrategy', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'init', circling_step: 0, my_role: 'reviewer' });
-    assert.ok(prompt.includes('REVIEWER'));
-    assert.ok(prompt.includes('reviewStrategy'));
-  });
-
-  // Circling Step 1
-  it('step1/worker: analyzes strategies, no artifact touch', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 1, my_role: 'worker' });
-    assert.ok(prompt.includes('Analyze Review Strategies'));
-    assert.ok(prompt.includes('Do NOT touch the work artifact'));
-    assert.ok(!prompt.includes('===CIRCLING_ARTIFACT==='), 'single-artifact: no explicit delimiter in instructions');
-  });
-
-  it('step1/reviewer: reviews workArtifact, produces findings', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 1, my_role: 'reviewer' });
-    assert.ok(prompt.includes('Review the Work Artifact'));
-    assert.ok(prompt.includes('actionable findings'));
-  });
-
-  // Circling Step 2
-  it('step2/worker: judges reviews, multi-artifact output', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 2, my_role: 'worker' });
-    assert.ok(prompt.includes('Judge Reviews'));
-    assert.ok(prompt.includes('TWO artifacts'));
-    assert.ok(prompt.includes('===CIRCLING_ARTIFACT==='), 'multi-artifact format');
-  });
-
-  it('step2/reviewer: refines strategy', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'circling', circling_step: 2, my_role: 'reviewer' });
-    assert.ok(prompt.includes('Refine Your Strategy'));
-    assert.ok(prompt.includes('REFINED reviewStrategy'));
-    assert.ok(!prompt.includes('===CIRCLING_ARTIFACT==='), 'single-artifact: no multi-artifact delimiter');
-  });
-
-  // Finalization
-  it('finalization/worker: final artifact + completionDiff, multi-artifact', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'finalization', circling_step: 0, my_role: 'worker' });
-    assert.ok(prompt.includes('Final Delivery'));
-    assert.ok(prompt.includes('completionDiff'));
-    assert.ok(prompt.includes('TWO artifacts'));
-    assert.ok(prompt.includes('===CIRCLING_ARTIFACT==='));
-    assert.ok(prompt.includes('converged|blocked'), 'finalization should restrict votes');
-    assert.ok(!prompt.includes('continue|converged|blocked'), 'finalization should NOT include continue');
-  });
-
-  it('finalization/reviewer: vote converged or blocked only', () => {
-    const prompt = buildCirclingPromptTest(task, { circling_phase: 'finalization', circling_step: 0, my_role: 'reviewer' });
-    assert.ok(prompt.includes('Final Sign-Off'));
-    assert.ok(prompt.includes('converged|blocked'));
-    assert.ok(!prompt.includes('continue|converged|blocked'));
-  });
-
-  // Anti-preamble (all phases)
-  it('all phases include anti-preamble instruction', () => {
-    for (const phase of ['init', 'circling', 'finalization']) {
-      const prompt = buildCirclingPromptTest(task, { circling_phase: phase, circling_step: phase === 'circling' ? 1 : 0, my_role: 'worker' });
-      assert.ok(prompt.includes('Begin your output with the artifact content DIRECTLY'), `missing anti-preamble in ${phase}`);
-    }
-  });
-});
-
-// ═══════════════════════════════════════════════════════
-// 5. BRIDGE — Gate message formatting
-// ═══════════════════════════════════════════════════════
-
-describe('Bridge: gate message formatting edge cases', () => {
-  function buildGateMsg(session) {
-    const cg = session.circling || {};
-    const lastRound = session.rounds?.[session.rounds.length - 1];
-    const blockedVotes = lastRound?.reflections?.filter(r => r.vote === 'blocked') || [];
-    if (blockedVotes.length > 0) {
-      const reason = blockedVotes.map(r => r.summary).filter(Boolean).join('; ').slice(0, 150);
-      return `[GATE] SR${cg.current_subround} blocked — ${reason || 'reviewer flagged concern'}`;
-    }
-    return `[GATE] SR${cg.current_subround} complete — review reconciliationDoc and approve/reject`;
-  }
-
-  it('multiple blocked votes joined with semicolon', () => {
-    const msg = buildGateMsg({
-      circling: { current_subround: 2 },
-      rounds: [{
-        reflections: [
-          { vote: 'blocked', summary: 'reentrancy in withdraw()' },
-          { vote: 'blocked', summary: 'unchecked external call in deposit()' },
-          { vote: 'converged', summary: 'looks good' },
-        ],
-      }],
-    });
-    assert.ok(msg.includes('reentrancy'));
-    assert.ok(msg.includes('unchecked external call'));
-    assert.ok(msg.includes('; '), 'multiple reasons joined with semicolon');
-  });
-
-  it('truncates reason to 150 chars', () => {
-    const longReason = 'A'.repeat(200);
-    const msg = buildGateMsg({
-      circling: { current_subround: 1 },
-      rounds: [{
-        reflections: [{ vote: 'blocked', summary: longReason }],
-      }],
-    });
-    // "[GATE] SR1 blocked — " = 21 chars, so reason portion should be ≤150
-    assert.ok(msg.length < 200, 'total message should be under 200 chars');
-  });
-
-  it('handles blocked vote with empty summary', () => {
-    const msg = buildGateMsg({
-      circling: { current_subround: 1 },
-      rounds: [{
-        reflections: [{ vote: 'blocked', summary: '' }],
-      }],
-    });
-    assert.ok(msg.includes('reviewer flagged concern'), 'should fall back to generic reason');
-  });
-
-  it('handles missing rounds gracefully', () => {
-    const msg = buildGateMsg({
-      circling: { current_subround: 1 },
-      rounds: [],
-    });
-    assert.ok(msg.includes('review reconciliationDoc'), 'no rounds → generic message');
+    const after = await store.get(sessionId);
+    assert.equal(after.circling.step_started_at, startedAt);
   });
 });
 
@@ -819,5 +436,28 @@ describe('Schema: circling defaults', () => {
   it('artifact_failures initialized empty', () => {
     const s = createSession('t', { mode: 'circling_strategy' });
     assert.deepEqual(s.circling.artifact_failures, {});
+  });
+
+  it('circling_strategy max_nodes defaults to 3', () => {
+    assert.equal(createSession('t', { mode: 'circling_strategy' }).max_nodes, 3);
+  });
+
+  it('circling_strategy clamps an explicit max_nodes above 3', () => {
+    assert.equal(createSession('t', { mode: 'circling_strategy', max_nodes: 5 }).max_nodes, 3);
+  });
+
+  it('parallel max_nodes stays unlimited by default', () => {
+    assert.equal(createSession('t', { mode: 'parallel' }).max_nodes, null);
+  });
+
+  it('a default circling session refuses a 4th node', async () => {
+    const store = new CollabStore(new MockKV());
+    const session = createSession('t', { mode: 'circling_strategy' });
+    await store.put(session);
+    for (const id of ['n1', 'n2', 'n3']) {
+      assert.ok(await store.addNode(session.session_id, id), `${id} joins`);
+    }
+    assert.equal(await store.addNode(session.session_id, 'n4'), null);
+    assert.equal((await store.get(session.session_id)).nodes.length, 3);
   });
 });

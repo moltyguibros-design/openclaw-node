@@ -1,18 +1,18 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { OPENCLAW_ROOT, WORKSPACE_ROOT } from "../config";
 
 /**
  * Represents a single activity event extracted from the JSONL transcript.
  */
 export interface TranscriptEvent {
   timestamp: string;
-  type: "file_write" | "file_edit" | "file_read" | "bash_command" | "bash_result" | "message";
+  type: "file_write" | "file_edit" | "file_read" | "bash_command";
   tool: string;
   detail: string;       // human-readable summary
   filePath?: string;     // for file operations
   command?: string;      // for bash commands
-  success?: boolean;     // for bash results (exit code 0 = true)
 }
 
 /**
@@ -24,61 +24,122 @@ function toAgentProjectPath(workspacePath: string): string {
 }
 
 const HOME = process.env.HOME || os.homedir();
-const WORKSPACE = process.env.WORKSPACE_ROOT || path.join(HOME, ".openclaw/workspace");
 
-/**
- * Transcript source directories — scans ALL frontend transcript stores.
- */
+const PARSED_FORMATS = new Set(["claude-code", "openclaw-gateway"]);
+
+function registryDirs(): string[] {
+  try {
+    const reg = JSON.parse(
+      fs.readFileSync(path.join(OPENCLAW_ROOT, "config", "transcript-sources.json"), "utf-8"),
+    ) as { sources?: Array<{ path: string; format?: string; enabled?: boolean }> };
+    return (reg.sources || [])
+      .filter((s) => s.enabled !== false && PARSED_FORMATS.has(s.format || ""))
+      .map((s) => (s.path.startsWith("~") ? path.join(HOME, s.path.slice(1)) : s.path));
+  } catch {
+    return [];
+  }
+}
+
+// The two defaults stay in the union: the registry template hard-codes
+// ~/.openclaw/agents/main/sessions/, which is wrong under a non-default OPENCLAW_ROOT.
 const TRANSCRIPT_DIRS = [
-  // Agent CLI workspace sessions (cross-platform path encoding)
-  path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE)),
-  // OpenClaw Gateway sessions (Discord, Telegram, etc.)
-  path.join(HOME, ".openclaw/agents/main/sessions"),
+  ...new Set(
+    [
+      path.join(HOME, ".claude/projects", toAgentProjectPath(WORKSPACE_ROOT)),
+      path.join(OPENCLAW_ROOT, "agents", "main", "sessions"),
+      ...registryDirs(),
+    ].map((d) => path.resolve(d)),
+  ),
 ];
+
+const GATEWAY_TOOL_NAMES: Record<string, string> = { read: "Read", write: "Write", edit: "Edit", exec: "Bash" };
+
+// The live sidebar polls every 5s. A full readdir + stat of every transcript per
+// poll grows with every session, so each directory is re-listed only when its
+// mtime changes (a session file was added or removed). Between scans only the
+// remembered newest file is stat'ed; the periodic rescan catches an older
+// session that resumed and was appended to, which leaves the directory mtime alone.
+const RESCAN_MS = 60_000;
+const TAIL_BYTES = 300_000;
+
+interface DirScan {
+  dirMtimeMs: number;
+  scannedAt: number;
+  latest: string | null;
+}
+
+const dirScans = new Map<string, DirScan>();
+let tailCache: { path: string; size: number; mtimeMs: number; events: TranscriptEvent[] } | null = null;
+
+async function statOrNull(p: string): Promise<fs.Stats | null> {
+  try {
+    return await fs.promises.stat(p);
+  } catch {
+    return null;
+  }
+}
+
+async function scanDir(dir: string, dirMtimeMs: number): Promise<DirScan> {
+  const names = (await fs.promises.readdir(dir)).filter((f) => f.endsWith(".jsonl"));
+  const stats = await Promise.all(names.map((n) => statOrNull(path.join(dir, n))));
+  let latest: string | null = null;
+  let latestMtime = 0;
+  for (let i = 0; i < names.length; i++) {
+    const st = stats[i];
+    if (st && st.mtimeMs > latestMtime) {
+      latestMtime = st.mtimeMs;
+      latest = path.join(dir, names[i]);
+    }
+  }
+  const scan = { dirMtimeMs, scannedAt: Date.now(), latest };
+  dirScans.set(dir, scan);
+  return scan;
+}
+
+async function latestInDir(dir: string): Promise<{ path: string; stat: fs.Stats } | null> {
+  const dirStat = await statOrNull(dir);
+  if (!dirStat) {
+    dirScans.delete(dir);
+    return null;
+  }
+  let scan = dirScans.get(dir);
+  if (!scan || scan.dirMtimeMs !== dirStat.mtimeMs || Date.now() - scan.scannedAt >= RESCAN_MS) {
+    scan = await scanDir(dir, dirStat.mtimeMs);
+  }
+  if (!scan.latest) return null;
+  const stat = await statOrNull(scan.latest);
+  if (stat) return { path: scan.latest, stat };
+  scan = await scanDir(dir, dirStat.mtimeMs);
+  const retry = scan.latest ? await statOrNull(scan.latest) : null;
+  return retry && scan.latest ? { path: scan.latest, stat: retry } : null;
+}
 
 /**
  * Find the most recently modified .jsonl transcript across all frontend sources.
  */
-export function findLatestTranscript(): string | null {
-  let latest = "";
-  let latestMtime = 0;
-
+export async function findLatestTranscript(): Promise<{ path: string; stat: fs.Stats } | null> {
+  let best: { path: string; stat: fs.Stats } | null = null;
   for (const dir of TRANSCRIPT_DIRS) {
-    if (!fs.existsSync(dir)) continue;
-
-    const entries = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry);
-      try {
-        const stat = fs.statSync(fullPath);
-        if (stat.mtimeMs > latestMtime) {
-          latestMtime = stat.mtimeMs;
-          latest = fullPath;
-        }
-      } catch {
-        // skip unreadable files
-      }
-    }
+    const found = await latestInDir(dir);
+    if (found && (!best || found.stat.mtimeMs > best.stat.mtimeMs)) best = found;
   }
-
-  return latest || null;
+  return best;
 }
 
 /**
- * Read the tail of a JSONL file efficiently.
- * Reads the last `bytes` of the file and parses complete JSON lines.
+ * Read the last `bytes` of a JSONL file and parse its complete lines.
  */
-function tailJsonl(filePath: string, bytes: number = 200_000): object[] {
-  const stat = fs.statSync(filePath);
-  const start = Math.max(0, stat.size - bytes);
-  const fd = fs.openSync(filePath, "r");
-  const buf = Buffer.alloc(Math.min(bytes, stat.size));
-  fs.readSync(fd, buf, 0, buf.length, start);
-  fs.closeSync(fd);
+async function tailJsonl(filePath: string, size: number, bytes: number): Promise<object[]> {
+  const start = Math.max(0, size - bytes);
+  const buf = Buffer.alloc(size - start);
+  const fh = await fs.promises.open(filePath, "r");
+  try {
+    await fh.read(buf, 0, buf.length, start);
+  } finally {
+    await fh.close();
+  }
 
-  const text = buf.toString("utf-8");
-  const lines = text.split("\n");
+  const lines = buf.toString("utf-8").split("\n");
 
   // Skip first line if we started mid-file (it's likely truncated)
   const startIdx = start > 0 ? 1 : 0;
@@ -101,12 +162,21 @@ function tailJsonl(filePath: string, bytes: number = 200_000): object[] {
  * Extract activity events from the most recent transcript.
  * Returns the last `limit` events, most recent first.
  */
-export function getRecentTranscriptActivity(limit: number = 50): TranscriptEvent[] {
-  const transcriptPath = findLatestTranscript();
-  if (!transcriptPath) return [];
+export async function getRecentTranscriptActivity(limit: number = 50): Promise<TranscriptEvent[]> {
+  const latest = await findLatestTranscript();
+  if (!latest) return [];
 
-  // Read last ~200KB of the transcript
-  const entries = tailJsonl(transcriptPath, 300_000);
+  const { size, mtimeMs } = latest.stat;
+  if (!tailCache || tailCache.path !== latest.path || tailCache.size !== size || tailCache.mtimeMs !== mtimeMs) {
+    const entries = await tailJsonl(latest.path, size, TAIL_BYTES);
+    tailCache = { path: latest.path, size, mtimeMs, events: extractEvents(entries) };
+  }
+
+  // Return most recent first, limited
+  return tailCache.events.slice(-limit).reverse();
+}
+
+function extractEvents(entries: object[]): TranscriptEvent[] {
   const events: TranscriptEvent[] = [];
 
   for (const entry of entries) {
@@ -128,9 +198,10 @@ export function getRecentTranscriptActivity(limit: number = 50): TranscriptEvent
       if (!Array.isArray(content)) continue;
 
       for (const block of content) {
-        if (block.type === "tool_use") {
-          const toolName = block.name as string;
-          const input = (block.input || {}) as Record<string, unknown>;
+        const gateway = block.type === "toolCall";
+        if (block.type === "tool_use" || gateway) {
+          const toolName = gateway ? GATEWAY_TOOL_NAMES[block.name as string] : (block.name as string);
+          const input = ((gateway ? block.arguments : block.input) || {}) as Record<string, unknown>;
 
           switch (toolName) {
             case "Write": {
@@ -189,8 +260,7 @@ export function getRecentTranscriptActivity(limit: number = 50): TranscriptEvent
     }
   }
 
-  // Return most recent first, limited
-  return events.slice(-limit).reverse();
+  return events;
 }
 
 /**
@@ -198,8 +268,8 @@ export function getRecentTranscriptActivity(limit: number = 50): TranscriptEvent
  */
 function shortenPath(fp: string): string {
   const prefixes = [
-    "/Users/moltymac/.openclaw/workspace/",
-    "/Users/moltymac/",
+    `${WORKSPACE_ROOT}/`,
+    `${HOME}/`,
   ];
   for (const prefix of prefixes) {
     if (fp.startsWith(prefix)) {

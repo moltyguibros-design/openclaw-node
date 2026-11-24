@@ -3,21 +3,24 @@
  * hyperagent.mjs — CLI for the HyperAgent evidence-driven strategy protocol.
  *
  * Pure data infrastructure — no LLM calls. Manages telemetry, strategies,
- * reflections, and proposals in SQLite. LLM synthesis happens at the agent
- * level via harness rules.
+ * reflections, and proposals in SQLite. Reflection synthesis is an operator
+ * step (the synthesis runbook: `reflect --pending`, then `reflect --write-synthesis`).
  *
  * Usage:
  *   hyperagent status
  *   hyperagent log <json>
  *   hyperagent telemetry [--domain X] [--last N]
+ *   hyperagent report --run <run_id> [--json]
  *   hyperagent strategies [--domain X]
+ *   hyperagent consult --domain X [--subdomain Y]
  *   hyperagent strategy <id>
  *   hyperagent seed-strategy <json>
  *   hyperagent reflect [--force]
+ *   hyperagent reflect --pending
  *   hyperagent reflect --write-synthesis <json>
  *   hyperagent proposals
- *   hyperagent approve <id>
- *   hyperagent reject <id> [reason]
+ *   hyperagent approve <id> --reviewer <name>
+ *   hyperagent reject <id> --reviewer <name> [reason]
  *   hyperagent observe <id> [--window 60]
  */
 
@@ -33,8 +36,11 @@ const tracer = createTracer('hyperagent');
 
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
-const SOUL_ID = process.env.OPENCLAW_SOUL_ID || 'unknown';
+const STATE_DB = process.env.OPENCLAW_STATE_DB || path.join(OPENCLAW_HOME, 'state.db');
+
+// Same identity as the mesh-agent telemetry writer, or reflect/consult read another node's rows.
+const NODE_ID = require('../lib/node-id').resolveNodeId();
+const SOUL_ID = process.env.OPENCLAW_SOUL_ID || NODE_ID;
 
 // ── Helpers ────────────────────────────────────
 
@@ -79,7 +85,7 @@ function printTable(rows, columns) {
 
 function cmdStatus(store) {
   const stats = store.getStats();
-  console.log(`HyperAgent Protocol — ${OPENCLAW_HOME}`);
+  console.log(`HyperAgent Protocol — ${STATE_DB}`);
   console.log(`  Telemetry entries: ${stats.telemetry}`);
   console.log(`  Active strategies: ${stats.strategies}`);
   console.log(`  Reflections:       ${stats.reflections}`);
@@ -305,14 +311,14 @@ async function cmdReflect(store, args) {
   console.log(`  success rate: ${stats.successRate}%`);
   console.log(`  avg iterations: ${stats.avgIterations}`);
   console.log(`  strategy hit rate: ${stats.strategyHitRate}%`);
-  console.log(`  pending synthesis — agent will pick up via harness rule`);
+  console.log('  pending synthesis — run the synthesis runbook (reflect --pending, then reflect --write-synthesis) within 24 h');
 }
 
 function cmdReflectPending(store) {
   // Query for reflections awaiting synthesis (hypotheses IS NULL, < 24h old)
   const pending = store.getPendingSynthesis();
   if (!pending) {
-    // Silent — no output means nothing to do. Harness rule exits cleanly.
+    // Silent — no output means nothing to do.
     return;
   }
 
@@ -365,23 +371,33 @@ function cmdProposals(store) {
   ]);
 }
 
+// reviewed_by is provenance, not authentication: it records the name the
+// reviewer gave, never an assumed 'human' (any agent or cron can run this CLI).
+function reviewerArgs(args, usage) {
+  const idx = args.indexOf('--reviewer');
+  const reviewer = idx === -1 ? null : args[idx + 1];
+  if (!reviewer || reviewer.startsWith('--')) die(`--reviewer <name> is required\nusage: ${usage}`);
+  const rest = args.filter((_, i) => i !== idx && i !== idx + 1);
+  const id = parseInt(rest[0]);
+  if (!id) die(`usage: ${usage}`);
+  return { id, reviewer, rest: rest.slice(1) };
+}
+
 function cmdApprove(store, args) {
-  const id = parseInt(args[0]);
-  if (!id) die('usage: hyperagent approve <id>');
+  const { id, reviewer } = reviewerArgs(args, 'hyperagent approve <id> --reviewer <name>');
 
-  const result = store.approveProposal(id, 'human');
+  const result = store.approveProposal(id, reviewer);
 
-  console.log(`approved: id=${result.id} type=${result.proposal_type} "${result.title}"`);
+  console.log(`approved: id=${result.id} type=${result.proposal_type} "${result.title}" by ${result.reviewed_by}`);
 }
 
 function cmdReject(store, args) {
-  const id = parseInt(args[0]);
-  if (!id) die('usage: hyperagent reject <id> [reason]');
+  const { id, reviewer, rest } = reviewerArgs(args, 'hyperagent reject <id> --reviewer <name> [reason]');
 
-  const reason = args.slice(1).join(' ') || null;
-  const result = store.rejectProposal(id, 'human', reason);
+  const reason = rest.join(' ') || null;
+  const result = store.rejectProposal(id, reviewer, reason);
 
-  console.log(`rejected: id=${result.id} "${result.title}"`);
+  console.log(`rejected: id=${result.id} "${result.title}" by ${result.reviewed_by}`);
 }
 
 function cmdObserve(store, args) {
@@ -409,6 +425,7 @@ commands:
   status                         overview stats
   log <json|--stdin>             log telemetry entry
   telemetry [--domain X] [--last N]  list entries
+  report --run <run_id> [--json] cohort evidence report for one run
   strategies [--domain X]        list active strategies
   consult --domain X [--subdomain Y]  print the best strategy as JSON
   strategy <id>                  show strategy detail
@@ -417,20 +434,21 @@ commands:
   reflect --pending              get pending reflection for synthesis (JSON)
   reflect --write-synthesis <json|--stdin>  write LLM synthesis
   proposals                      list proposals
-  approve <id>                   approve proposal
-  reject <id> [reason]           reject proposal
+  approve <id> --reviewer <name>          approve proposal, recording the reviewer
+  reject <id> --reviewer <name> [reason]  reject proposal, recording the reviewer
   observe <id> [--window 60]     collect a non-causal observation window
 
 env:
   OPENCLAW_HOME      base dir (default: ~/.openclaw)
-  OPENCLAW_NODE_ID   node identifier (default: hostname)
-  OPENCLAW_SOUL_ID   soul identifier (default: unknown)`);
+  OPENCLAW_STATE_DB  store path (default: $OPENCLAW_HOME/state.db)
+  OPENCLAW_NODE_ID   node identifier (default: MESH_NODE_ID, else short lowercased hostname)
+  OPENCLAW_SOUL_ID   soul identifier (default: the node identifier)`);
   process.exit(0);
 }
 
 let store;
 try {
-  store = createHyperAgentStore({ dbPath: path.join(OPENCLAW_HOME, 'state.db') });
+  store = createHyperAgentStore({ dbPath: STATE_DB });
 } catch (err) {
   die(`failed to open store: ${err.message}`);
 }
@@ -443,7 +461,7 @@ cmdStrategies = tracer.wrap('cmdStrategies', cmdStrategies, { tier: 3 });
 cmdConsult = tracer.wrap('cmdConsult', cmdConsult, { tier: 3 });
 cmdStrategy = tracer.wrap('cmdStrategy', cmdStrategy, { tier: 3 });
 cmdSeedStrategy = tracer.wrap('cmdSeedStrategy', cmdSeedStrategy, { tier: 3 });
-cmdReflect = tracer.wrap('cmdReflect', cmdReflect, { tier: 3 });
+cmdReflect = tracer.wrapAsync('cmdReflect', cmdReflect, { tier: 3 });
 cmdProposals = tracer.wrap('cmdProposals', cmdProposals, { tier: 3 });
 cmdApprove = tracer.wrap('cmdApprove', cmdApprove, { tier: 3 });
 cmdReject = tracer.wrap('cmdReject', cmdReject, { tier: 3 });

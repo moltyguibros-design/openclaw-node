@@ -519,6 +519,35 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(first.domain, 'code-review');
   }));
 
+  it('with a run key, one row per run: a repeat of a run dedups, a re-run of the task is recorded', async () => withFreshStore((fresh) => {
+    const entry = {
+      node_id: 'node-a', soul_id: 'soul-a', task_id: 'task-r', domain: 'testing', run_id: 'cohort-1',
+      logical_task_id: 'task-r', outcome: 'failure', iterations: 2, run_key: 'lease-1',
+      meta_notes: 'First run of a task that review later rejected and the node redid.',
+    };
+    const first = fresh.logTelemetry(entry);
+    assert.equal(first.run_key, 'lease-1');
+    assert.equal(fresh.logTelemetry({ ...entry, outcome: 'success' }).id, first.id, 'the same run twice is one row');
+    const redo = fresh.logTelemetry({ ...entry, run_key: 'lease-2', outcome: 'success', iterations: 1 });
+    assert.notEqual(redo.id, first.id);
+    assert.equal(redo.outcome, 'success');
+    assert.equal(fresh.getTelemetry({ last: 20 }).length, 2);
+    const cohort = fresh.cohortReport('cohort-1');
+    assert.equal(cohort.totals.rows, 2);
+    assert.equal(cohort.totals.logical_tasks, 1, 'two runs of one task are still one logical task');
+  }));
+
+  it('a row from before run keys keeps first-wins for keyless writes and does not block a keyed run', async () => withFreshStore((fresh) => {
+    const entry = {
+      node_id: 'node-a', soul_id: 'soul-a', task_id: 'task-old', domain: 'testing', outcome: 'success', iterations: 1,
+      meta_notes: 'A row written without a run key, as every row was before the column existed.',
+    };
+    const legacy = fresh.logTelemetry(entry);
+    assert.equal(legacy.run_key, null);
+    assert.equal(fresh.logTelemetry({ ...entry, outcome: 'failure' }).id, legacy.id);
+    assert.notEqual(fresh.logTelemetry({ ...entry, run_key: 'lease-9' }).id, legacy.id);
+  }));
+
   it('creates independent reflection windows for each node and soul', async () => withFreshStore((fresh) => {
     for (const soul_id of ['alpha', 'beta']) {
       for (let i = 0; i < 5; i++) {
@@ -627,6 +656,80 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(result.kind, 'observational');
     assert.equal(result.treatment_applied, false);
     assert.equal(result.tasks_in_window, 1);
+  }));
+
+  it('a second observation window reports only its own telemetry', async () => withFreshStore((fresh, dbPath) => {
+    for (let i = 0; i < 5; i++) {
+      fresh.logTelemetry({
+        node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'success', iterations: 1,
+        meta_notes: `Baseline task ${i} before two consecutive observation windows.`,
+      });
+    }
+    const [reflection] = fresh.createPendingReflections(5);
+    const proposal = fresh.putProposal({
+      reflection_id: reflection.id, title: 'Observe twice', description: 'Observe matching test work twice',
+      proposal_type: 'strategy_new',
+      diff_content: JSON.stringify({ domain: 'testing', content: 'Run focused tests first.' }),
+    });
+    const Database = require('better-sqlite3');
+    const closeWindow = () => {
+      const db = new Database(dbPath);
+      db.prepare("UPDATE ha_proposals SET eval_window_end = datetime('now', '-1 minute') WHERE id = ?").run(proposal.id);
+      db.close();
+      assert.equal(fresh.checkObservationWindows(), 1);
+      return fresh.getProposals().find((row) => row.id === proposal.id);
+    };
+
+    fresh.startObservation(proposal.id, 60);
+    const first = fresh.logTelemetry({
+      node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'success', iterations: 1,
+      meta_notes: 'Matching success inside the first observation window for this strategy.',
+    });
+    assert.equal(JSON.parse(closeWindow().eval_result).tasks_in_window, 1);
+
+    const db = new Database(dbPath);
+    db.prepare("UPDATE ha_telemetry SET created_at = datetime('now', '-5 minutes') WHERE id = ?").run(first.id);
+    db.close();
+
+    fresh.startObservation(proposal.id, 60);
+    fresh.logTelemetry({
+      node_id: 'node-a', soul_id: 'alpha', domain: 'testing', outcome: 'failure', iterations: 1,
+      meta_notes: 'Matching failure inside the second observation window for this strategy.',
+    });
+    const closed = closeWindow();
+    const result = JSON.parse(closed.eval_result);
+    assert.equal(result.tasks_in_window, 1);
+    assert.equal(result.success_rate_during, 0);
+    assert.equal(closed.eval_telemetry_count, 1);
+  }));
+
+  it('chains previous hypotheses past an expired reflection', async () => withFreshStore((fresh, dbPath) => {
+    const identity = { node_id: 'node-a', soul_id: 'alpha' };
+    const reflect = (i) => {
+      fresh.logTelemetry({
+        ...identity, domain: 'testing', outcome: 'success', iterations: 1,
+        meta_notes: `Reflection window ${i} source task with enough detail to synthesize.`,
+      });
+      const last = fresh.getLastReflection(identity);
+      const stats = fresh.computeStats(last ? last.telemetry_to_id : 0, identity);
+      return fresh.putReflection({
+        ...identity, telemetry_from_id: stats.fromId, telemetry_to_id: stats.toId,
+        telemetry_count: stats.totalTasks, raw_stats: stats,
+      });
+    };
+
+    const r1 = reflect(1);
+    fresh.synthesizeReflection(r1.id, { hypotheses: ['real-h'] });
+    const r2 = reflect(2);
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath);
+    db.prepare("UPDATE ha_reflections SET created_at = datetime('now', '-25 hours') WHERE id = ?").run(r2.id);
+    db.close();
+    assert.equal(fresh.expireStalePending(), 1);
+    const r3 = reflect(3);
+
+    assert.deepEqual(JSON.parse(fresh.getPreviousReflection(r3.id).hypotheses), ['real-h']);
+    assert.notEqual(fresh.listReflections(identity).find((row) => row.id === r2.id).hypotheses, null);
   }));
 
   it('rejects invalid numeric telemetry', async () => withFreshStore((fresh) => {
@@ -762,3 +865,72 @@ describe('HyperAgentStore: integrity regressions', () => {
     assert.equal(selected.node_id, 'node-a');
   }));
 });
+
+// The pragmas a better-sqlite3 handle runs while fn does: every opener goes through openStore.
+async function pragmasWhile(fn) {
+  const Database = require('better-sqlite3');
+  const seen = [];
+  const original = Database.prototype.pragma;
+  Database.prototype.pragma = function pragma(source, ...rest) {
+    seen.push(String(source));
+    return original.call(this, source, ...rest);
+  };
+  try { await fn(); } finally { Database.prototype.pragma = original; }
+  return seen;
+}
+const integrityChecks = (pragmas) => pragmas.filter((p) => /integrity_check|quick_check/.test(p));
+
+describe('HyperAgentStore: integrity check on open', () => {
+  const dbs = [];
+  const tmpDb = () => {
+    const p = path.join(os.tmpdir(), `ha-integrity-${process.pid}-${dbs.length}.db`);
+    dbs.push(p);
+    return p;
+  };
+  after(() => {
+    for (const p of dbs) for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(p + suffix); } catch {} }
+  });
+
+  it('integrityCheck: false opens without one; the default runs one full check', async () => {
+    const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
+    let skipped;
+    assert.deepEqual(integrityChecks(await pragmasWhile(() => { skipped = createHyperAgentStore({ dbPath: tmpDb(), integrityCheck: false }); })), []);
+    skipped.close();
+    let checked;
+    assert.deepEqual(integrityChecks(await pragmasWhile(() => { checked = createHyperAgentStore({ dbPath: tmpDb() }); })), ['integrity_check']);
+    checked.close();
+  });
+});
+
+describe('HyperAgentStore: column migrations under concurrent openers', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-race-'));
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('two processes adding the missing column at once both open the store', async () => {
+    const Database = require('better-sqlite3');
+    const { pathToFileURL } = require('url');
+    const { createHyperAgentStore } = await import('../lib/hyperagent-store.mjs');
+    const { raceWorkers } = await import('./helpers/worker-race.mjs');
+    const storeUrl = pathToFileURL(path.join(__dirname, '../lib/hyperagent-store.mjs')).href;
+    for (let trial = 0; trial < 10; trial++) {
+      const dbPath = path.join(dir, `race-${trial}.db`);
+      createHyperAgentStore({ dbPath, integrityCheck: false }).close();
+      const raw = new Database(dbPath);
+      raw.exec('ALTER TABLE ha_proposals DROP COLUMN applied_at');
+      raw.close();
+
+      const results = await raceWorkers({
+        setup: 'const { createHyperAgentStore } = await import(workerData.storeUrl);',
+        act: 'createHyperAgentStore({ dbPath: workerData.dbPath, integrityCheck: false }).close();',
+        data: { storeUrl, dbPath },
+      });
+      assert.deepEqual(results, [{ ok: true }, { ok: true }], `trial ${trial}`);
+
+      const check = new Database(dbPath, { readonly: true });
+      const cols = check.prepare('PRAGMA table_info(ha_proposals)').all().filter((c) => c.name === 'applied_at');
+      check.close();
+      assert.equal(cols.length, 1);
+    }
+  });
+});
+

@@ -34,6 +34,8 @@ for dir in "${DIRS[@]}"; do
     info "Created $dir"
   fi
 done
+# Transcripts, state.db and memory live under here, and only the owner's units read them.
+run chmod 700 "$OPENCLAW_ROOT"
 info "Directory structure ready"
 
 # ============================================================
@@ -62,20 +64,33 @@ run rsync -av --exclude='*.bak' --exclude='*.bak.*' --exclude='routing-eval-test
 # these live in repo bin/ (not workspace-bin/) and must land at that path too.
 # openclaw-notify.mjs rides along: the viewer, the notify shim, and node-watch
 # all resolve it next to themselves (or at ../bin/) in the deployed tree.
+# consolidate.mjs (consolidation-scheduler's import) and memory-subscriber.mjs +
+# memory-promoter.mjs (the daemon's federation import) are siblings they load at runtime.
+# health-watch.mjs is the openclaw-health-watch unit's entrypoint.
 # -ef guard: when the workspace copy is a symlink/same inode as the repo file
 # (live-dev setups), macOS cp exits 1 ("are identical") and set -e kills the
 # install (observed 2026-07-14 on the VM). Same file = already deployed = skip.
 for _wsbin in node-watch.mjs node-acceptance.mjs openclaw-notify.mjs \
               obsidian-graph-cache.mjs observer.mjs consolidation-scheduler.mjs \
-              hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
-              nats-legacy-lock.py; do
+              consolidate.mjs hyperagent.mjs embed-probe.mjs scheduler-heartbeat.mjs \
+              memory-subscriber.mjs memory-promoter.mjs health-watch.mjs nats-legacy-lock.py; do
   if [ ! "$REPO_DIR/bin/$_wsbin" -ef "$WORKSPACE/bin/$_wsbin" ]; then
     run cp "$REPO_DIR/bin/$_wsbin" "$WORKSPACE/bin/$_wsbin"
   fi
 done
+retire_shipped_files workspace-bin "$WORKSPACE/bin"
 run chmod +x "$WORKSPACE/bin/"*
 run chmod +x "$WORKSPACE/bin/hooks/"* 2>/dev/null || true
 info "Workspace scripts installed to $WORKSPACE/bin/"
+
+# Consolidation fails its cycle without a promotion policy. The resolver's last
+# fallback is lib/../config/promotion-policy.yaml, so the policy ships beside the
+# workspace lib/ too (config.sh seeds ~/.openclaw/config, which it checks first).
+run mkdir -p "$WORKSPACE/config"
+if [ ! "$REPO_DIR/config/promotion-policy.yaml" -ef "$WORKSPACE/config/promotion-policy.yaml" ]; then
+  run cp "$REPO_DIR/config/promotion-policy.yaml" "$WORKSPACE/config/promotion-policy.yaml"
+fi
+info "Promotion policy installed to $WORKSPACE/config/promotion-policy.yaml"
 
 # Shared libs → ~/.openclaw/workspace/lib/  (workspace daemons import from ../lib/)
 # mcp-knowledge MUST be included — memory-daemon.mjs statically imports it;
@@ -83,6 +98,7 @@ info "Workspace scripts installed to $WORKSPACE/bin/"
 run mkdir -p "$WORKSPACE/lib"
 run rsync -av --exclude='node_modules' \
   "$REPO_DIR/lib/" "$WORKSPACE/lib/"
+retire_shipped_files workspace-lib "$WORKSPACE/lib"
 info "Shared libraries installed to $WORKSPACE/lib/ (incl. mcp-knowledge)"
 
 # Event schemas — local-event-log.mjs imports ../packages/event-schemas/dist;
@@ -92,55 +108,12 @@ if [ -d "$REPO_DIR/packages" ]; then
   info "Event schemas installed to $WORKSPACE/packages/"
 fi
 
-# Symlink shared deps from repo/mesh node_modules → workspace node_modules
-# (ESM static imports don't resolve via NODE_PATH alone). `nats` and `js-yaml`
+# Symlink shared deps from the repo node_modules (env.sh installed it) into the
+# workspace node_modules (deps.sh link_dependency_tree). `nats` and `js-yaml`
 # are required by the workspace daemons' import graph (2026-07-11 audit).
 OPENCLAW_MESH_HOME="${OPENCLAW_MESH_HOME:-$HOME/openclaw}"
 MESH_NM="$REPO_DIR/node_modules"
-if [ ! -d "$MESH_NM/better-sqlite3" ]; then
-  MESH_NM="$OPENCLAW_MESH_HOME/node_modules"
-fi
-
-# If native deps still missing, install them at the mesh home
-if [ ! -d "$MESH_NM/better-sqlite3" ]; then
-  info "Installing native dependencies at $OPENCLAW_MESH_HOME/..."
-  run mkdir -p "$OPENCLAW_MESH_HOME"
-  if $DRY_RUN; then
-    info "  [dry-run] would npm init + install better-sqlite3 bindings in $OPENCLAW_MESH_HOME"
-  else
-    (cd "$OPENCLAW_MESH_HOME" && [ ! -f package.json ] && npm init -y >/dev/null 2>&1; npm install --no-save better-sqlite3 bindings 2>/dev/null) || warn "Native dep install failed — SQLite features may not work"
-  fi
-  MESH_NM="$OPENCLAW_MESH_HOME/node_modules"
-fi
-
 WS_NM="$WORKSPACE/node_modules"
-link_dependency_tree() {
-  local src="$1" dest="$2" pkgdir pkg scoped_dir scoped
-  LINKED_COUNT=0
-  run mkdir -p "$dest"
-  for pkgdir in "$src"/*/; do
-    [ -d "$pkgdir" ] || continue
-    pkg=$(basename "$pkgdir")
-    [ "$pkg" = ".bin" ] && continue
-    if [[ "$pkg" == @* ]]; then
-      run mkdir -p "$dest/$pkg"
-      for scoped_dir in "$pkgdir"*/; do
-        [ -d "$scoped_dir" ] || continue
-        scoped=$(basename "$scoped_dir")
-        if [ ! -e "$dest/$pkg/$scoped" ]; then
-          run ln -sfn "$pkgdir$scoped" "$dest/$pkg/$scoped"
-          LINKED_COUNT=$((LINKED_COUNT + 1))
-        fi
-      done
-    elif [ ! -e "$dest/$pkg" ]; then
-      run ln -sfn "$src/$pkg" "$dest/$pkg"
-      LINKED_COUNT=$((LINKED_COUNT + 1))
-    fi
-  done
-}
-
-# The copied daemons and mesh libraries are the root package's runtime code.
-# Their parent node_modules trees resolve to this one installed dependency set.
 link_dependency_tree "$MESH_NM" "$WS_NM"
 info "Shared dependencies symlinked to $WS_NM/ ($LINKED_COUNT new links from $MESH_NM)"
 
@@ -149,7 +122,9 @@ MESH_BIN="$OPENCLAW_MESH_HOME/bin"
 MESH_LIB="$OPENCLAW_MESH_HOME/lib"
 run mkdir -p "$MESH_BIN" "$MESH_LIB"
 run rsync -av "$REPO_DIR/bin/" "$MESH_BIN/"
+retire_shipped_files mesh-bin "$MESH_BIN"
 run rsync -av --exclude='node_modules' "$REPO_DIR/lib/" "$MESH_LIB/"
+retire_shipped_files mesh-lib "$MESH_LIB"
 run chmod +x "$MESH_BIN/"*.sh 2>/dev/null || true
 info "Mesh daemons installed to $MESH_BIN/ ($(ls -1 "$REPO_DIR/bin/" | wc -l | tr -d ' ') files)"
 info "Shared libraries installed to $MESH_LIB/"
@@ -186,8 +161,23 @@ done
 
 step "Step 5: Soul Definitions"
 
-run rsync -av "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+# Evolved genes and evolution events are learned on the node; the repo copy only seeds a
+# soul that has none (the same contract as mesh-deploy's souls seedOnly).
+run rsync -av --exclude='/*/evolution/genes.json' --exclude='/*/evolution/events.jsonl' "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
+run rsync -a --ignore-existing "$REPO_DIR/souls/" "$OPENCLAW_ROOT/souls/"
 info "Souls installed to $OPENCLAW_ROOT/souls/"
+
+# Mission Control commits every approved evolution to this repo and refuses
+# an approval when souls is not one; the local identity lets those commits
+# succeed on a node with no global git user.
+if [ ! -d "$OPENCLAW_ROOT/souls/.git" ]; then
+  run git -C "$OPENCLAW_ROOT/souls" init -q -b main
+  run git -C "$OPENCLAW_ROOT/souls" config user.name "OpenClaw Mission Control"
+  run git -C "$OPENCLAW_ROOT/souls" config user.email "mission-control@openclaw.local"
+  run git -C "$OPENCLAW_ROOT/souls" add -A
+  run git -C "$OPENCLAW_ROOT/souls" commit -q -m "souls: installed state"
+  info "Souls history initialized at $OPENCLAW_ROOT/souls/.git"
+fi
 
 # ============================================================
 # Step 6: Copy Skills
@@ -195,8 +185,25 @@ info "Souls installed to $OPENCLAW_ROOT/souls/"
 
 step "Step 6: Skills"
 
-run rsync -av --exclude='dist/' --exclude='scripts/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
-info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -v dist | grep -v scripts | wc -l | tr -d ' ') skills)"
+# Leading "/" anchors each exclude to skills/ itself: unanchored, 'scripts/' also dropped
+# every skill's own scripts/ dir. _quarantine never ships (skills/_quarantine/README.md),
+# matching mesh-deploy's skills component.
+run rsync -av --exclude='/dist/' --exclude='/scripts/' --exclude='/_quarantine/' "$REPO_DIR/skills/" "$WORKSPACE/skills/"
+info "Skills installed to $WORKSPACE/skills/ ($(ls -d "$REPO_DIR/skills"/*/ 2>/dev/null | grep -Ev '/(dist|scripts|_quarantine)/$' | wc -l | tr -d ' ') skills)"
+# The rsync never deletes: a skill quarantined or removed from the repo stays
+# installed, and agents keep following it, until retired-files.txt archives it.
+retire_shipped_files skills "$WORKSPACE/skills"
+# Files deleted from inside shipped skills, which the rsync never removes: an INSTALL.md
+# that installed around the scanner gate, stale docs, and package.json files with no
+# dependencies that made the npm loop below re-run on every --update (npm wrote the
+# clawddocs lock there), and humanize-ai-text's detector-evasion rewriters.
+for f in moltbook-interact/INSTALL.md clawddocs/package.json clawddocs/package-lock.json \
+  clawddocs/snippets/common-configs.md crypto-price/ARCHITECTURE.md \
+  humanize-ai-text/scripts/transform.py humanize-ai-text/scripts/compare.py \
+  openclaw-skill-scanner/report-template.md; do
+  run rm -f "$WORKSPACE/skills/$f"
+done
+run rmdir "$WORKSPACE/skills/clawddocs/snippets" 2>/dev/null || true
 
 # Install skill-specific dependencies (npm/pip where needed)
 if $SANDBOX; then
@@ -211,8 +218,13 @@ for skill_dir in "$WORKSPACE/skills"/*/; do
   fi
   # pip-based skills
   if [ -f "$skill_dir/requirements.txt" ]; then
-    run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null || warn "  pip failed: $skill_name"
-    info "  pip: $skill_name"
+    # PEP 668 system Pythons (Ubuntu 24.04, Homebrew) refuse --user alone, as prereqs.sh found for PyYAML.
+    if run pip3 install --user -r "$skill_dir/requirements.txt" 2>/dev/null \
+      || run pip3 install --user --break-system-packages -r "$skill_dir/requirements.txt"; then
+      info "  pip: $skill_name"
+    else
+      warn "  pip failed: $skill_name"
+    fi
   fi
 done
 fi

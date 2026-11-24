@@ -2,16 +2,18 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import { useMemorySearch, useMemoryDocs } from "@/lib/hooks";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 import { MemoryList } from "@/components/memory/memory-list";
 import { SearchResults } from "@/components/memory/search-results";
 import { DocReader } from "@/components/memory/doc-reader";
-import { Search, FileText, BookOpen, Database, Brain } from "lucide-react";
+import { Search, FileText, BookOpen, BookMarked, Database, Brain } from "lucide-react";
 
 const SOURCES = [
   { key: undefined as string | undefined, label: "All", icon: Brain },
   { key: "daily_log", label: "Daily Logs", icon: FileText },
   { key: "long_term_memory", label: "Long-Term", icon: BookOpen },
   { key: "clawvault", label: "ClawVault", icon: Database },
+  { key: "lore", label: "Lore", icon: BookMarked },
 ];
 
 export default function MemoryPage() {
@@ -20,7 +22,8 @@ export default function MemoryPage() {
   const [source, setSource] = useState<string | undefined>(undefined);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
-  const { docs, total: docCount, isLoading: docsLoading } = useMemoryDocs(source);
+  const { docs, isLoading: docsLoading } = useMemoryDocs();
+  const visibleDocs = useMemo(() => (source ? docs.filter((d) => d.source === source) : docs), [docs, source]);
   const { results, total: searchTotal, isLoading: searchLoading } = useMemorySearch(
     debouncedQuery,
     30,
@@ -57,7 +60,7 @@ export default function MemoryPage() {
           <div>
             <h1 className="text-xl font-bold text-foreground">Memory</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Every memory Daedalus has ever created
+              Every memory {AGENT_NAME} has ever created
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -72,6 +75,10 @@ export default function MemoryPage() {
             <span className="flex items-center gap-1">
               <Database className="h-3 w-3 text-amber-400" />
               {stats.clawvault ?? 0} vault docs
+            </span>
+            <span className="flex items-center gap-1">
+              <BookMarked className="h-3 w-3 text-emerald-400" />
+              {stats.lore ?? 0} lore
             </span>
           </div>
         </div>
@@ -97,7 +104,7 @@ export default function MemoryPage() {
         <div className="flex gap-2">
           {SOURCES.map((s) => {
             const Icon = s.icon;
-            const count = s.key ? (stats[s.key] ?? 0) : docCount;
+            const count = s.key ? (stats[s.key] ?? 0) : docs.length;
             return (
               <button
                 key={s.label}
@@ -135,7 +142,7 @@ export default function MemoryPage() {
           ) : (
             <div className="p-4">
               <MemoryList
-                docs={docs}
+                docs={visibleDocs}
                 isLoading={docsLoading}
                 selectedPath={selectedPath}
                 onSelect={setSelectedPath}

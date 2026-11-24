@@ -27,6 +27,11 @@ interface EvolutionEvent {
   };
 }
 
+async function replyError(response: Response): Promise<string> {
+  const body = await response.json().catch(() => null);
+  return body?.error ?? `HTTP ${response.status}`;
+}
+
 function GuidePanel() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     structure: true,
@@ -73,8 +78,7 @@ function GuidePanel() {
 ├── capabilities.json    # Tools, permissions, evolution config
 └── evolution/
     ├── genes.json       # Learned patterns
-    ├── events.jsonl     # Evolution event log
-    └── capsules.json    # Knowledge snapshots`}
+    └── events.jsonl     # Evolution event log`}
             </pre>
           </div>
         )}
@@ -230,7 +234,6 @@ I am a [role] specializing in [domain]. My expertise:
           <div className="px-4 pb-4 border-t border-border pt-3">
             <pre className="text-xs bg-muted rounded p-3 overflow-auto">
 {`echo '{"version":"1.0.0","genes":[]}' > ~/.openclaw/souls/my-soul/evolution/genes.json
-echo '{"version":"1.0.0","capsules":[]}' > ~/.openclaw/souls/my-soul/evolution/capsules.json
 touch ~/.openclaw/souls/my-soul/evolution/events.jsonl`}
             </pre>
           </div>
@@ -257,6 +260,7 @@ touch ~/.openclaw/souls/my-soul/evolution/events.jsonl`}
           <div className="px-4 pb-4 border-t border-border pt-3">
             <pre className="text-xs bg-muted rounded p-3 overflow-auto">
 {`curl -X POST http://localhost:3000/api/souls \\
+  -H @<(printf 'Authorization: Bearer %s' "$(cat ~/.openclaw/config/mc-session-token)") \\
   -H "Content-Type: application/json" \\
   -d '{
     "id": "my-soul",
@@ -269,7 +273,7 @@ touch ~/.openclaw/souls/my-soul/evolution/events.jsonl`}
     },
     "specializations": ["domain1", "domain2"],
     "evolutionEnabled": true,
-    "parentSoul": "main-agent"
+    "parentSoul": "daedalus"
   }'`}
             </pre>
             <p className="text-xs text-muted-foreground mt-2">
@@ -296,7 +300,7 @@ export default function SoulsPage() {
     fetch("/api/souls")
       .then((res) => res.json())
       .then((data) => {
-        setSouls(data);
+        setSouls(Array.isArray(data) ? data : []);
         setLoading(false);
       });
   }, []);
@@ -318,7 +322,7 @@ export default function SoulsPage() {
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, reviewedBy: "main-agent" }),
+        body: JSON.stringify({ action }),
       }
     );
 
@@ -336,6 +340,8 @@ export default function SoulsPage() {
           setPropagationTargets(eligible);
         }
       }
+    } else {
+      alert(`Review failed: ${await replyError(response)}`);
     }
   };
 
@@ -363,6 +369,8 @@ export default function SoulsPage() {
       setPropagationTargets((prev) =>
         prev.filter((s) => s.id !== targetSoulId)
       );
+    } else {
+      alert(`Propagation failed: ${await replyError(response)}`);
     }
   };
 

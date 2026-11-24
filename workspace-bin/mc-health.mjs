@@ -25,10 +25,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mcAuthHeaders } from '../lib/mc-session-token.mjs';
+import { mcAuthHeaders, mcApiBase } from '../lib/mc-session-token.mjs';
 
 const runFile = promisify(execFile);
-const MC_URL = process.env.MC_URL || 'http://localhost:3000';
+const MC_API = mcApiBase();
 const args = process.argv.slice(2);
 const doRestart = args.includes('--restart');
 const jsonOutput = args.includes('--json');
@@ -63,7 +63,7 @@ async function waitForHealthy(maxWaitMs = 60000) {
   while (Date.now() - start < maxWaitMs) {
     await sleep(interval);
     try {
-      const { status, body } = await httpGet(`${MC_URL}/api/system/health`, 3000);
+      const { status, body } = await httpGet(`${MC_API}/api/system/health`, 3000);
       if (status === 200 && body?.status !== 'unhealthy') {
         return { ok: true, body };
       }
@@ -118,10 +118,10 @@ async function main() {
   }
 
   try {
-    let { status, body } = await httpGet(`${MC_URL}/api/system/health`);
+    let { status, body } = await httpGet(`${MC_API}/api/system/health`);
     for (let attempt = 1; doRestart && status >= 500 && attempt < 3; attempt++) {
       await sleep(1000);
-      ({ status, body } = await httpGet(`${MC_URL}/api/system/health`));
+      ({ status, body } = await httpGet(`${MC_API}/api/system/health`));
     }
 
     if (status === 200 && body?.status !== 'unhealthy') {

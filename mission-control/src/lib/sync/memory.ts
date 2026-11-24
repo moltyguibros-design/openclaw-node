@@ -29,21 +29,25 @@ export function indexAllMemory(db: DrizzleDb): SyncStats {
     const logFiles = listDailyLogs(MEMORY_DIR);
     for (const filePath of logFiles) {
       seenPaths.add(filePath);
-      if (skipIfUnchanged(db, filePath)) continue;
+      try {
+        if (skipIfUnchanged(db, filePath)) continue;
 
-      const entry = parseDailyLog(filePath);
-      const isUpdate = upsertDoc(db, {
-        source: "daily_log",
-        category: null,
-        filePath: entry.filePath,
-        title: entry.title,
-        date: entry.date,
-        frontmatter: null,
-        content: entry.content,
-        modifiedAt: entry.modifiedAt,
-      });
-      if (isUpdate) stats.updated++;
-      else stats.indexed++;
+        const entry = parseDailyLog(filePath);
+        const isUpdate = upsertDoc(db, {
+          source: "daily_log",
+          category: null,
+          filePath: entry.filePath,
+          title: entry.title,
+          date: entry.date,
+          frontmatter: null,
+          content: entry.content,
+          modifiedAt: entry.modifiedAt,
+        });
+        if (isUpdate) stats.updated++;
+        else stats.indexed++;
+      } catch (err) {
+        keptPreviousRow(filePath, err);
+      }
     }
   } catch {
     // daily logs directory may not exist yet
@@ -78,22 +82,28 @@ export function indexAllMemory(db: DrizzleDb): SyncStats {
     if (fs.existsSync(CLAWVAULT_INDEX)) {
       const entries = listVaultDocuments(CLAWVAULT_INDEX);
       for (const entry of entries) {
+        // The index can list a file already deleted from disk; leaving it unseen lets the delete pass drop its row.
+        if (!fs.existsSync(entry.path)) continue;
         seenPaths.add(entry.path);
-        if (skipIfUnchanged(db, entry.path)) continue;
+        try {
+          if (skipIfUnchanged(db, entry.path)) continue;
 
-        const doc = parseVaultDocument(entry.path);
-        const isUpdate = upsertDoc(db, {
-          source: "clawvault",
-          category: doc.category || entry.category,
-          filePath: doc.filePath,
-          title: doc.title,
-          date: doc.date || null,
-          frontmatter: doc.frontmatter ? JSON.stringify(doc.frontmatter) : null,
-          content: doc.content,
-          modifiedAt: doc.modifiedAt,
-        });
-        if (isUpdate) stats.updated++;
-        else stats.indexed++;
+          const doc = parseVaultDocument(entry.path);
+          const isUpdate = upsertDoc(db, {
+            source: "clawvault",
+            category: doc.category || entry.category,
+            filePath: doc.filePath,
+            title: doc.title,
+            date: doc.date || null,
+            frontmatter: doc.frontmatter ? JSON.stringify(doc.frontmatter) : null,
+            content: doc.content,
+            modifiedAt: doc.modifiedAt,
+          });
+          if (isUpdate) stats.updated++;
+          else stats.indexed++;
+        } catch (err) {
+          keptPreviousRow(entry.path, err);
+        }
       }
     }
   } catch {
@@ -109,30 +119,34 @@ export function indexAllMemory(db: DrizzleDb): SyncStats {
       for (const filename of files) {
         const filePath = path.join(loreDir, filename);
         seenPaths.add(filePath);
-        if (skipIfUnchanged(db, filePath)) continue;
+        try {
+          if (skipIfUnchanged(db, filePath)) continue;
 
-        const stat = fs.statSync(filePath);
-        const content = fs.readFileSync(filePath, "utf-8");
+          const stat = fs.statSync(filePath);
+          const content = fs.readFileSync(filePath, "utf-8");
 
-        // Extract title from first H1 or filename
-        const h1Match = content.match(/^#\s+(.+)/m);
-        const title = h1Match ? h1Match[1].trim() : filename.replace(/\.md$/, "");
+          // Extract title from first H1 or filename
+          const h1Match = content.match(/^#\s+(.+)/m);
+          const title = h1Match ? h1Match[1].trim() : filename.replace(/\.md$/, "");
 
-        // Derive category from parent dir name
-        const dirName = path.basename(loreDir); // "research", "canon", "drafts"
+          // Derive category from parent dir name
+          const dirName = path.basename(loreDir); // "research", "canon", "drafts"
 
-        const isUpdate = upsertDoc(db, {
-          source: "lore",
-          category: dirName,
-          filePath,
-          title,
-          date: null,
-          frontmatter: null,
-          content,
-          modifiedAt: stat.mtime.toISOString(),
-        });
-        if (isUpdate) stats.updated++;
-        else stats.indexed++;
+          const isUpdate = upsertDoc(db, {
+            source: "lore",
+            category: dirName,
+            filePath,
+            title,
+            date: null,
+            frontmatter: null,
+            content,
+            modifiedAt: stat.mtime.toISOString(),
+          });
+          if (isUpdate) stats.updated++;
+          else stats.indexed++;
+        } catch (err) {
+          keptPreviousRow(filePath, err);
+        }
       }
     } catch {
       // lore directory may not exist
@@ -153,6 +167,11 @@ export function indexAllMemory(db: DrizzleDb): SyncStats {
   }
 
   return stats;
+}
+
+// One unparseable file must not abort its source loop: the delete pass would then drop every file after it.
+function keptPreviousRow(filePath: string, err: unknown) {
+  console.warn(`[memory-sync] kept previous row for ${filePath}: ${(err as Error).message}`);
 }
 
 /**

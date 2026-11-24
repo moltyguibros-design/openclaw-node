@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
+import { OPENCLAW_ROOT } from "@/lib/config";
 
-const CONFIG_PATH = path.join(
-  process.env.OPENCLAW_HOME || path.join(os.homedir(), ".openclaw"),
-  "openclaw.json"
-);
+const CONFIG_PATH = path.join(process.env.OPENCLAW_HOME || OPENCLAW_ROOT, "openclaw.json");
 
 interface OpenclawConfig {
   agents?: {
     defaults?: {
-      heartbeat?: Record<string, string>;
+      heartbeat?: Record<string, unknown>;
       model?: Record<string, unknown>;
       compaction?: unknown;
       maxConcurrent?: number;
@@ -33,8 +30,18 @@ async function loadConfig(): Promise<OpenclawConfig> {
   return JSON.parse(raw);
 }
 
+// openclaw.json is the gateway's live config and carries its token: never leave it truncated, never widen its mode.
 async function saveConfig(config: OpenclawConfig): Promise<void> {
-  await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+  const target = await fs.realpath(CONFIG_PATH);
+  const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+  const fh = await fs.open(tmp, "wx", 0o600);
+  try {
+    await fh.writeFile(JSON.stringify(config, null, 2) + "\n");
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  await fs.rename(tmp, target);
 }
 
 /**
@@ -82,20 +89,25 @@ export async function PATCH(request: NextRequest) {
 
     // Heartbeat
     if (body.heartbeat !== undefined) {
-      const hb: Record<string, string> = { target: body.heartbeat.target || "none" };
-      if (body.heartbeat.every) {
-        hb.every = body.heartbeat.every;
-      }
+      const hb: Record<string, unknown> = { ...config.agents.defaults.heartbeat, target: body.heartbeat.target || "none" };
+      if (body.heartbeat.every) hb.every = body.heartbeat.every;
+      else delete hb.every;
       config.agents.defaults.heartbeat = hb;
     }
 
     // Max concurrent
     if (body.maxConcurrent !== undefined) {
+      if (!Number.isInteger(body.maxConcurrent) || body.maxConcurrent < 1) {
+        return NextResponse.json({ error: "maxConcurrent must be a positive integer" }, { status: 400 });
+      }
       config.agents.defaults.maxConcurrent = body.maxConcurrent;
     }
 
     // Compaction mode
     if (body.compaction !== undefined) {
+      if (body.compaction === null || typeof body.compaction !== "object" || Array.isArray(body.compaction)) {
+        return NextResponse.json({ error: "compaction must be an object" }, { status: 400 });
+      }
       config.agents.defaults.compaction = body.compaction;
     }
 

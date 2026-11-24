@@ -29,8 +29,6 @@ jobs:
 
           # Register the target repo on guibros as a remote called "target"
           git remote add target https://x-access-token:${{ secrets.GUIBROS_PAT }}@github.com/guibros/openclaw-node.git
-          #                                                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-          #                                                     Replace this with the actual repo name on guibros (must already exist)
 
           # --mirror: pushes ALL refs (branches, tags) and also propagates deletions
           git push --mirror target

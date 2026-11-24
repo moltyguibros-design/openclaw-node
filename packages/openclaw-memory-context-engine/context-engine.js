@@ -9,9 +9,11 @@
  *   - EXTRACTION is the daemon's too: it tails the gateway's session JSONL
  *     (transcript-sources.json) and flushes on idle / session end / size, so
  *     ingest, afterTurn and commitTurn here record nothing.
- *   - COMPACTION is the host's: the engine does not own an archive, so
- *     compact() hands the request to OpenClaw's native compactor when the
- *     host exposes one, and otherwise reports "not compacted" honestly.
+ *   - COMPACTION is the host's (OpenClaw's delegating mode): info.ownsCompaction
+ *     is always false, so the host keeps its built-in auto-compaction, and
+ *     compact() (called for /compact and overflow recovery) hands the request
+ *     to OpenClaw's delegateCompactionToRuntime. If that delegate is
+ *     unavailable or fails, compact() reports ok:false.
  *
  * Pure factory: no I/O of its own beyond the injected client, so the whole
  * surface is testable against a fake inject server.
@@ -63,6 +65,15 @@ export function isBypassed(sessionKey, patterns) {
   return patterns.some((p) => compileSessionPattern(p).test(sessionKey));
 }
 
+// Heartbeats run in the main session, so no session pattern singles them out,
+// and the host may not pass isHeartbeat to assemble: the heartbeat prompt
+// names its checklist file or its quiet reply.
+const HEARTBEAT_PROMPT_RE = /\bHEARTBEAT(?:\.md|_OK)\b/;
+
+export function isHeartbeatTurn({ isHeartbeat, prompt, messages }) {
+  return isHeartbeat === true || HEARTBEAT_PROMPT_RE.test(lastUserPrompt(messages, prompt));
+}
+
 /**
  * @param {object} deps
  * @param {{inject:Function, health:Function}} deps.client — from memory-client.js
@@ -72,15 +83,10 @@ export function isBypassed(sessionKey, patterns) {
  */
 export function createMemoryContextEngine({ client, config = {}, logger, runtimeCompact }) {
   const autoRecall = config.autoRecall !== false;
+  const skipHeartbeats = config.skipHeartbeats !== false;
   const maxInjectedChars = Number(config.maxInjectedChars) || DEFAULT_MAX_INJECTED_CHARS;
   const bypass = Array.isArray(config.bypassSessionPatterns) ? config.bypassSessionPatterns : [];
   const warn = (m) => (logger.warn ? logger.warn(m) : logger.info(m));
-
-  // commitTurn is retried by the host with the same advancementKey after a
-  // failure; the contract wants "duplicate" the second time. Nothing is
-  // written here, so a bounded in-memory set is the whole ledger.
-  const seenAdvancements = new Set();
-  const MAX_SEEN = 5000;
 
   // One warning per distinct failure reason, not one per turn: a daemon that
   // is down for an hour must not produce 400 identical log lines.
@@ -111,7 +117,7 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
       id: ENGINE_ID,
       name: 'openclaw-node memory',
       version: ENGINE_VERSION,
-      ownsCompaction: true,
+      ownsCompaction: false,
       transcriptSemantics: {
         currentTurnFence: 'before-current-turn-entry-v1',
         turnAdvancementIdempotency: 'atomic-idempotent-v1',
@@ -120,19 +126,11 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
 
     // The daemon ingests from the session file, not from this hook.
     async ingest() {
-      return { ingested: true };
-    },
-    async ingestBatch({ messages }) {
-      return { ingestedCount: Array.isArray(messages) ? messages.length : 0 };
+      return { ingested: false };
     },
     async afterTurn() {},
 
-    async commitTurn({ advancementKey }) {
-      if (advancementKey && seenAdvancements.has(advancementKey)) return { status: 'duplicate' };
-      if (advancementKey) {
-        if (seenAdvancements.size >= MAX_SEEN) seenAdvancements.delete(seenAdvancements.values().next().value);
-        seenAdvancements.add(advancementKey);
-      }
+    async commitTurn() {
       return { status: 'committed' };
     },
 
@@ -140,10 +138,13 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
      * Pass the messages through untouched and add the daemon's memory block
      * to the system prompt, within the host's token budget. Any failure
      * (daemon down, no token, timeout) degrades to "no memory this turn".
+     * Heartbeat turns get none (skipHeartbeats): nobody asked, and the
+     * daemon's recall would boost whatever the checklist matched.
      */
-    async assemble({ sessionId, sessionKey, messages = [], prompt, tokenBudget }) {
+    async assemble({ sessionId, sessionKey, messages = [], prompt, tokenBudget, isHeartbeat }) {
       const passthrough = { messages, estimatedTokens: messages.reduce((n, m) => n + estimateTokens(messageText(m)), 0) };
       if (!autoRecall || isBypassed(sessionKey, bypass)) return passthrough;
+      if (skipHeartbeats && isHeartbeatTurn({ isHeartbeat, prompt, messages })) return passthrough;
       let recalled;
       try {
         recalled = await recall({ sessionId, sessionKey, prompt, messages });
@@ -166,10 +167,12 @@ export function createMemoryContextEngine({ client, config = {}, logger, runtime
           const r = await runtimeCompact(params);
           if (r && typeof r === 'object') return r;
         } catch (err) {
-          warnOnce(`host compaction failed: ${err.message}`);
+          const reason = `host compaction failed: ${err.message}`;
+          warnOnce(reason);
+          return { ok: false, compacted: false, reason };
         }
       }
-      return { ok: true, compacted: false, reason: 'no_engine_archive_host_compaction_unavailable' };
+      return { ok: false, compacted: false, reason: 'host_compaction_unavailable' };
     },
   };
 

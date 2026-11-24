@@ -3,9 +3,12 @@
 /**
  * mesh-deploy.js v2 — Full-stack OpenClaw deployment across all nodes.
  *
- * Covers EVERYTHING: mesh daemons, Mission Control, memory system,
- * soul system, skills, boot compiler, companion-bridge, OpenClaw
- * gateway, database migrations, config regeneration, service definitions.
+ * Covers the repo-sourced runtime: the repo node_modules and event-schemas
+ * dist, mesh daemons and CLI, shared libs, Mission Control, memory daemon,
+ * workspace scripts, souls, skills, boot compiler and manifest, workspace docs,
+ * harness rules, config templates, lane watchdog, log rotation and the Discord
+ * tool. The npm-sourced openclaw CLI deploys only when named. Service units
+ * change only through install.sh.
  *
  * ARCHITECTURE:
  *   Each deployable component is defined in the MANIFEST with:
@@ -16,28 +19,40 @@
  *   - install:     how to deploy the change
  *   - restart:     which services to bounce
  *   - validate:    how to confirm the deploy worked
- *   - risk:        "safe" (auto-deploy) | "careful" (warn) | "manual" (skip unless --force)
+ *   - risk:        "safe" (auto-deploy) | "careful" (warn)
  *
  *   Every mode runs one function, deploy(fromSha, toSha): check out toSha, apply
  *   `git diff --name-status fromSha toSha` (deletions and renames included) to
  *   the affected components, then restart each affected service once. fromSha
  *   defaults to the sha this node last deployed in full (deploy state), not
  *   HEAD: the tree moves without a deploy (the lead's repo is a working
- *   checkout whose HEAD `mesh deploy` publishes), and a HEAD-based diff is empty.
+ *   checkout), and a HEAD-based diff is empty. The normal flow deploys, and
+ *   triggers the fleet with, origin's tip of the deploy branch.
  *
- * USAGE:
- *   mesh deploy                         — deploy everything that changed
+ * USAGE (run as node bin/mesh-deploy.js; bin/mesh.js `mesh deploy` only publishes a fleet trigger and takes --force/--component/--node):
+ *   mesh deploy                       — deploy everything that changed
  *   mesh deploy --dry-run               — preview what would happen
  *   mesh deploy --component mc          — reinstall only Mission Control (all its files)
  *   mesh deploy --component all         — reinstall everything (even unchanged)
- *   mesh deploy --force                 — reinstall everything, manual-risk components too
+ *   mesh deploy --force                 — reinstall every repo-sourced component, changed or not
  *   mesh deploy --local                 — this node only
  *   mesh deploy --local --to <sha> [--from <sha>]
  *                                       — pinned: no fetch; check out <sha> and apply the
  *                                         diff from <from> (default: last deployed sha)
- *   mesh deploy --node ubuntu           — remote node only
- *   mesh deploy --include-services      — also update launchd/systemd units
- *   mesh deploy --rollback              — revert last deploy
+ *   mesh deploy --node <id>             — only that node (repeatable): an id from
+ *                                         MESH_NODES/MESH_NODE_HEALTH, "self", or an alias
+ *                                         (~/.openclaw/mesh-aliases.json; legacy: ubuntu,
+ *                                         linux, calos, mac, macos, moltymac); unknown ids
+ *                                         are refused
+ *   mesh deploy --rollback              — revert the last deploy (one that failed partway
+ *                                         on this node first: back to the sha before it);
+ *                                         refused below the memory store's schema (each
+ *                                         remote listener checks its own) unless --force,
+ *                                         which the signed fleet trigger carries
+ *   mesh deploy --rollback --to <sha>   — roll back to that sha, not the last deploy's;
+ *                                         --rollback --force --node <id> --to <sha> is the
+ *                                         override a refusing listener names: that node,
+ *                                         that sha, nothing else
  *   mesh deploy --status                — show what's deployed vs what's in git
  *
  * ENVIRONMENT:
@@ -52,8 +67,9 @@ const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const crypto = require('crypto');
 const { createTracer } = require('../lib/tracer');
+const { resolveNodeId } = require('../lib/node-id');
+const { loadNodeAliases, planNodeTargets, unknownNodes } = require('../lib/node-aliases');
 const tracer = createTracer('mesh-deploy');
 
 // ── Constants ────────────────────────────────────────────────────────────
@@ -75,44 +91,34 @@ const REPO_DIR = process.env.OPENCLAW_REPO_DIR || path.join(HOME, 'openclaw');
 // ~/openclaw-node, or change REPO_DIR default + DIRS to point at the same tree.
 // Until then, mesh-deploy.js is the only sanctioned way to propagate changes.
 
+// The node's workspace as the installer set it (its units pass OPENCLAW_WORKSPACE).
+const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.join(HOME, '.openclaw', 'workspace');
+
 // Standard directory layout
 const DIRS = {
   OPENCLAW_HOME:    path.join(HOME, '.openclaw'),
-  WORKSPACE:        path.join(HOME, '.openclaw', 'workspace'),
-  WORKSPACE_BIN:    path.join(HOME, '.openclaw', 'workspace', 'bin'),
+  WORKSPACE,
+  WORKSPACE_BIN:    path.join(WORKSPACE, 'bin'),
+  WORKSPACE_LIB:    path.join(WORKSPACE, 'lib'),
   CLI_BIN:          path.join(HOME, 'openclaw', 'bin'),
   CLI_LIB:          path.join(HOME, 'openclaw', 'lib'),
-  MC_PROJECT:       path.join(HOME, '.openclaw', 'workspace', 'projects', 'mission-control'),
-  SKILLS:           path.join(HOME, '.openclaw', 'skills'),
+  MC_PROJECT:       path.join(WORKSPACE, 'projects', 'mission-control'),
+  SKILLS:           path.join(WORKSPACE, 'skills'),
+  MANAGED_SKILLS:   path.join(HOME, '.openclaw', 'skills'),
   SOULS:            path.join(HOME, '.openclaw', 'souls'),
   CONFIG:           path.join(HOME, '.openclaw', 'config'),
-  BOOT:             path.join(HOME, '.openclaw', 'workspace', '.boot'),
-  BOOT_SRC:         path.join(HOME, '.openclaw', 'workspace', 'bin'),  // compile-boot lives here
-  MEMORY:           path.join(HOME, '.openclaw', 'workspace', 'memory'),
-  MEMORY_VAULT:     path.join(HOME, '.openclaw', 'workspace', 'memory-vault'),
-  IDENTITY:         path.join(HOME, '.openclaw', 'identity'),
+  BOOT:             path.join(WORKSPACE, '.boot'),
+  BOOT_SRC:         path.join(WORKSPACE, 'bin'),  // compile-boot lives here
   SERVICES_MAC:     path.join(HOME, 'Library', 'LaunchAgents'),
-  SERVICES_LINUX:   path.join(HOME, '.config', 'systemd', 'user'),
-  COMPANION:        path.join(HOME, 'companion-adapter'),
-  TMP:              path.join(HOME, '.openclaw', 'workspace', '.tmp'),
   DEPLOY_STATE:     path.join(HOME, '.openclaw', '.deploy-state.json'),
 };
 
-// Node role — determines which components deploy here.
-// Reads from OPENCLAW_NODE_ROLE env, or openclaw.env, or defaults by platform.
-function resolveNodeRole() {
-  if (process.env.OPENCLAW_NODE_ROLE) return process.env.OPENCLAW_NODE_ROLE;
-  try {
-    const envFile = path.join(HOME, '.openclaw', 'openclaw.env');
-    if (fs.existsSync(envFile)) {
-      const content = fs.readFileSync(envFile, 'utf8');
-      const match = content.match(/^\s*OPENCLAW_NODE_ROLE\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch (err) { console.warn(`[mesh-deploy] resolve node role: ${err.message}`); }
-  return IS_MAC ? 'lead' : 'worker';
+// Node role — determines which components deploy here. Resolved when a deploy
+// plans its components; an unset or unknown role refuses there.
+let NODE_ROLE = null;
+function nodeRole() {
+  return (NODE_ROLE ??= require('../lib/mesh-roles').requireNodeRole({ envFile: path.join(HOME, '.openclaw', 'openclaw.env') }));
 }
-const NODE_ROLE = resolveNodeRole();
 
 // ── Console helpers ──────────────────────────────────────────────────────
 
@@ -149,13 +155,6 @@ function exec(cmd, opts = {}) {
   }
 }
 
-function fileHash(filePath) {
-  try {
-    const content = fs.readFileSync(filePath);
-    return crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
-  } catch { return null; }
-}
-
 // Git takes shas and paths as argv, never through a shell.
 function git(repoDir, args, encoding = 'utf8') {
   return execFileSync('git', args, {
@@ -166,6 +165,21 @@ function git(repoDir, args, encoding = 'utf8') {
 
 function gitLine(repoDir, args) {
   return git(repoDir, args).trim();
+}
+
+// npm builds native modules (better-sqlite3) for the node it runs under, so the
+// install scripts run with this deploy's node leading PATH. Under the deploy
+// listener that is the units' NODE_BIN, the node every daemon runs.
+const NODE_BIN_DIR = path.dirname(process.execPath);
+
+/** Run one of the checkout's install scripts, its output streamed into the deploy's. */
+function runRepoScript(repoDir, script, args, timeout) {
+  info(`Running ${script}...`);
+  execFileSync('bash', [path.join(repoDir, script), ...args], {
+    cwd: repoDir, timeout, stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, PATH: `${NODE_BIN_DIR}${path.delimiter}${process.env.PATH}` },
+  });
+  ok(`${script} done`);
 }
 
 function resolveCommit(repoDir, rev) {
@@ -207,25 +221,65 @@ function assertCommitted(repoDir) {
  * reading the env file), and every ${VAR} replaced — an unset one with
  * nothing, as envsubst does. The old regen only substituted keys present in
  * openclaw.env, which left a literal ${OPENCLAW_WORKSPACE} in openclaw.json.
+ * The first copy of a repeated key wins, as in config.sh and lib/nats-resolve.js.
  */
 function renderConfigTemplate(template, envText) {
   const vars = { ...process.env };
+  const fromFile = new Set();
   for (const line of envText.split('\n')) {
     if (/^\s*(#|$)/.test(line) || !line.includes('=')) continue;
     const key = line.slice(0, line.indexOf('=')).trim();
-    // The installer trims with xargs, which also drops surrounding quotes.
+    // Same trim + one surrounding quote pair as scripts/install/config.sh.
     const value = line.slice(line.indexOf('=') + 1).trim().replace(/^(["'])(.*)\1$/, '$2');
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) vars[key] = value;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || fromFile.has(key)) continue;
+    fromFile.add(key);
+    vars[key] = value;
   }
   vars.OPENCLAW_WORKSPACE = DIRS.WORKSPACE;
   return template.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => vars[name] ?? '');
 }
+
+// The deploy listener runs bin/mesh-deploy-listener.js and ../lib from the
+// checkout. A component with restartsListener restarts it — but never in-band
+// from a pinned deploy (`--to`): that is the listener's own child, and a
+// restart of its unit would kill the deploy mid-run. A pinned deploy reports
+// it in DEPLOY_RESULT.deferredRestart, and the listener schedules its own
+// delayed restart once the result is written.
+// The file mesh-agent loads its harness rules from (bin/mesh-agent.js HARNESS_PATH).
+const HARNESS_RULES_PATH = process.env.OPENCLAW_HARNESS_RULES || path.join(DIRS.OPENCLAW_HOME, 'harness-rules.json');
+
+const LISTENER_SERVICE = IS_MAC ? 'ai.openclaw.mesh-deploy-listener' : 'openclaw-mesh-deploy-listener';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPONENT MANIFEST — every deployable piece of OpenClaw
 // ═══════════════════════════════════════════════════════════════════════════
 
 const MANIFEST = [
+
+  // ── DEPENDENCIES ────────────────────────────────────────────────────────
+
+  {
+    id: 'deps',
+    name: 'Dependencies',
+    description: 'Repo node_modules and the event-schemas dist, refreshed when package.json, package-lock.json or packages/ change',
+    risk: 'careful',
+    repoPaths: ['package.json', 'package-lock.json', 'packages/'],
+    // Nothing is copied: install.sh's own step installs in the checkout (npm ci
+    // when package.json/package-lock.json differ from what node_modules came from),
+    // rebuilds a stale dist, and refreshes the workspace packages/ and its links.
+    targets: [],
+    // Every daemon that loads the repo's node_modules or the event-schemas dist.
+    servicesMac: ['ai.openclaw.mesh-task-daemon', 'ai.openclaw.mesh-bridge',
+                  'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher',
+                  'ai.openclaw.mesh-tool-discord', 'ai.openclaw.memory-daemon',
+                  'ai.openclaw.node-watch', 'ai.openclaw.health-watch'],
+    servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent',
+                    'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord',
+                    'openclaw-memory-daemon', 'openclaw-node-watch', 'openclaw-health-watch'],
+    restartsListener: true,
+    postInstall: (changedFiles, changes, { repoDir }) =>
+      runRepoScript(repoDir, 'scripts/install/deps.sh', [repoDir, DIRS.WORKSPACE], 900000),
+  },
 
   // ── MESH INFRASTRUCTURE ─────────────────────────────────────────────────
 
@@ -245,7 +299,7 @@ const MANIFEST = [
                   'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher'],
     servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge',
                     'openclaw-mesh-agent', 'openclaw-mesh-health-publisher'],
-    nodeFilter: 'all',  // Every node gets daemon binaries; services are per-role
+    restartsListener: true,
     validate: () => {
       // The Linux agent unit is started by hand (autostart false); the health
       // publisher runs on every role.
@@ -261,16 +315,10 @@ const MANIFEST = [
     name: 'Mesh CLI Tools',
     description: 'mesh command, health check, repair, deploy, fleet-deploy',
     risk: 'safe',
-    repoPaths: ['bin/mesh.js', 'bin/mesh-deploy.js', 'bin/fleet-deploy.js',
-                'bin/mesh-health.sh', 'bin/mesh-repair.sh'],
+    repoPaths: ['bin/mesh.js', 'bin/mesh-deploy.js', 'bin/fleet-deploy.js'],
     targets: [DIRS.CLI_BIN],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
-    postInstall: () => {
-      const wrapperPath = path.join(DIRS.CLI_BIN, 'mesh');
-      if (fs.existsSync(wrapperPath)) fs.chmodSync(wrapperPath, 0o755);
-    },
   },
 
   {
@@ -279,11 +327,19 @@ const MANIFEST = [
     description: 'nats-resolve.js, agent-activity.js, kanban-io.js, mesh-registry.js, mesh-tasks.js',
     risk: 'safe',
     repoPaths: ['lib/'],
-    targets: [DIRS.CLI_LIB],
+    // The workspace daemons (memory daemon, node-watch, health-watch) import their own
+    // ../lib under the workspace, which install.sh copies from lib/ too.
+    targets: [DIRS.CLI_LIB, DIRS.WORKSPACE_LIB],
+    guardedTargets: [DIRS.WORKSPACE_LIB],
+    // Every daemon that loads one of those lib trees at runtime.
     servicesMac: ['ai.openclaw.mesh-task-daemon', 'ai.openclaw.mesh-bridge',
-                  'ai.openclaw.mesh-agent'],
-    servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent'],
-    nodeFilter: 'all',
+                  'ai.openclaw.mesh-agent', 'ai.openclaw.mesh-health-publisher',
+                  'ai.openclaw.mesh-tool-discord', 'ai.openclaw.memory-daemon',
+                  'ai.openclaw.node-watch', 'ai.openclaw.health-watch'],
+    servicesLinux: ['openclaw-mesh-task-daemon', 'openclaw-mesh-bridge', 'openclaw-mesh-agent',
+                    'openclaw-mesh-health-publisher', 'openclaw-mesh-tool-discord',
+                    'openclaw-memory-daemon', 'openclaw-node-watch', 'openclaw-health-watch'],
+    restartsListener: true,
   },
 
   // ── MISSION CONTROL ─────────────────────────────────────────────────────
@@ -297,19 +353,19 @@ const MANIFEST = [
     targets: [DIRS.MC_PROJECT],
     servicesMac: ['ai.openclaw.mission-control'],
     servicesLinux: ['openclaw-mission-control'],
-    nodeFilter: 'lead',
-    postInstall: (changedFiles) => {
-      if (changedFiles.some(f => /(^|\/)package(-lock)?\.json$/.test(f))) {
-        info('Running npm install for Mission Control...');
-        exec('npm install', { cwd: DIRS.MC_PROJECT, timeout: 300000 });
-        ok('npm install complete');
-      }
-      // The service runs `next start`, which serves the prebuilt .next — a
-      // restart without a rebuild keeps serving the old UI.
-      info('Building Mission Control (next build)...');
-      exec('npm run build', { cwd: DIRS.MC_PROJECT, timeout: 900000 });
-      ok('Mission Control built');
+    // A join-path worker (openclaw-node-init) has no Mission Control to update.
+    // package.json, not the dir: the tracer creates data/mission-control.db on any node.
+    preInstall: () => {
+      if (fs.existsSync(path.join(DIRS.MC_PROJECT, 'package.json'))) return true;
+      skip('  Mission Control is not installed on this node — skipped');
+      return false;
     },
+    // The service runs `next start`, which serves the prebuilt .next — a restart
+    // without a rebuild keeps serving the old UI. install.sh's own steps: npm@10 ci
+    // and the better-sqlite3 rebuild under this deploy's node when the lockfile or
+    // node changed, and a build that puts the previous one back when it fails.
+    postInstall: (changedFiles, changes, { repoDir }) =>
+      runRepoScript(repoDir, 'scripts/install/mc-build.sh', [DIRS.MC_PROJECT, NODE_BIN_DIR], 1200000),
     validate: () => {
       const dbPath = path.join(DIRS.MC_PROJECT, 'data', 'mission-control.db');
       return fs.existsSync(dbPath);
@@ -330,21 +386,31 @@ const MANIFEST = [
     targets: [DIRS.WORKSPACE_BIN],
     servicesMac: ['ai.openclaw.memory-daemon'],
     servicesLinux: ['openclaw-memory-daemon'],
-    nodeFilter: 'lead',
   },
 
   {
-    id: 'memory-harness',
-    name: 'Memory Harness Templates',
-    description: 'MEMORY.md template, extraction configs, consolidation rules',
-    risk: 'careful',
-    repoPaths: ['config/memory-config.json', 'config/extraction-rules.json'],
-    targets: [DIRS.CONFIG],
-    servicesMac: ['ai.openclaw.memory-daemon'],
-    servicesLinux: ['openclaw-memory-daemon'],
-    nodeFilter: 'lead',
-    notes: 'Does NOT overwrite MEMORY.md, memory-vault/, or daily logs — those are user data. ' +
-           'Only deploys config templates that control extraction and consolidation behavior.',
+    id: 'workspace-bin',
+    name: 'Workspace Scripts',
+    description: 'workspace-bin/ and the repo bin/ files install.sh copies into the workspace bin',
+    risk: 'safe',
+    // The set scripts/install/workspace.sh Step 3 installs.
+    repoPaths: ['workspace-bin/', ...['node-watch.mjs', 'node-acceptance.mjs', 'openclaw-notify.mjs',
+      'obsidian-graph-cache.mjs', 'observer.mjs', 'consolidation-scheduler.mjs', 'consolidate.mjs',
+      'hyperagent.mjs', 'embed-probe.mjs', 'scheduler-heartbeat.mjs', 'memory-subscriber.mjs',
+      'memory-promoter.mjs', 'health-watch.mjs', 'nats-legacy-lock.py'].map(f => `bin/${f}`)],
+    exclude: [
+      // Owned by 'memory-daemon' and 'boot'.
+      'workspace-bin/memory-daemon.mjs', 'workspace-bin/memory-maintenance.mjs', 'workspace-bin/compile-boot',
+      'workspace-bin/routing-eval-tests.json',
+      // The timer cohort and its sources keep their reviewed handoff
+      // (workspace-bin/timer-hold-control.py TIMERS): a deploy never rewrites them.
+      'workspace-bin/archive-transcripts.sh', 'bin/scheduler-heartbeat.mjs',
+      'bin/consolidation-scheduler.mjs', 'bin/consolidate.mjs', 'bin/observer.mjs',
+    ],
+    targets: [DIRS.WORKSPACE_BIN],
+    guardedTargets: [DIRS.WORKSPACE_BIN],
+    servicesMac: ['ai.openclaw.memory-daemon', 'ai.openclaw.node-watch', 'ai.openclaw.health-watch'],
+    servicesLinux: ['openclaw-memory-daemon', 'openclaw-node-watch', 'openclaw-health-watch'],
   },
 
   // ── SOUL SYSTEM ─────────────────────────────────────────────────────────
@@ -358,7 +424,6 @@ const MANIFEST = [
     targets: [DIRS.SOULS],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     // A soul's evolved genes and event log are learned on the node; the repo
     // copy only seeds a soul that has none. The old backup-then-overwrite reset
     // them to the seed on every --force and kept one .pre-deploy copy.
@@ -376,12 +441,14 @@ const MANIFEST = [
     risk: 'safe',
     repoPaths: ['skills/'],
     // Quarantined skills must never reach a node (skills/_quarantine/README.md):
-    // neither installed nor, through the diff, removed.
-    exclude: ['skills/_quarantine/'],
+    // neither installed nor, through the diff, removed. skills/dist/ (build
+    // bundles, gitignored) and the top-level skills/scripts/ are not skills,
+    // matching the installer's rsync excludes.
+    exclude: ['skills/_quarantine/', 'skills/dist/', 'skills/scripts/'],
     targets: [DIRS.SKILLS],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
+    postInstall: () => retireManagedSkillCopies(),
   },
 
   // ── BOOT SYSTEM ─────────────────────────────────────────────────────────
@@ -395,19 +462,19 @@ const MANIFEST = [
     targets: [DIRS.BOOT_SRC],  // = WORKSPACE_BIN (compile-boot lives there)
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'lead',
-    postInstall: () => {
-      const compilerPath = path.join(DIRS.BOOT_SRC, 'compile-boot');
-      if (fs.existsSync(compilerPath)) {
-        info('Recompiling boot profiles...');
-        try {
-          exec(`python3 "${compilerPath}"`, { cwd: DIRS.WORKSPACE });
-          ok('Boot profiles recompiled');
-        } catch (err) {
-          warn(`Boot recompile failed: ${err.message}`);
-        }
-      }
-    },
+    postInstall: () => recompileBoot(),
+  },
+
+  {
+    id: 'boot-manifest',
+    name: 'Boot Manifest',
+    description: 'Profile definitions compile-boot reads (.boot/manifest.yaml)',
+    risk: 'safe',
+    repoPaths: ['boot/manifest.yaml'],
+    targets: [DIRS.BOOT],
+    servicesMac: [],
+    servicesLinux: [],
+    postInstall: () => recompileBoot(),
   },
 
   // ── WORKSPACE ROOT DOCUMENTS ────────────────────────────────────────────
@@ -415,54 +482,73 @@ const MANIFEST = [
   {
     id: 'workspace-docs',
     name: 'Workspace Root Documents',
-    description: 'CLAUDE.md, SOUL.md, AGENTS.md, PRINCIPLES.md, HEARTBEAT.md',
+    description: 'Agent docs from identity/: CLAUDE, SOUL, PRINCIPLES, AGENTS, DELEGATION, HEARTBEAT, MEMORY_SPEC, TOOLS',
     risk: 'careful',
-    repoPaths: ['workspace-docs/CLAUDE.md', 'workspace-docs/SOUL.md',
-                'workspace-docs/AGENTS.md', 'workspace-docs/PRINCIPLES.md'],
+    // The same source and file list as install.sh (scripts/install/workspace.sh
+    // Step 4), so an installed and a deployed node carry the same docs.
+    repoPaths: ['CLAUDE.md', 'SOUL.md', 'PRINCIPLES.md', 'AGENTS.md', 'DELEGATION.md',
+                'HEARTBEAT.md', 'MEMORY_SPEC.md', 'TOOLS.md'].map(f => `identity/${f}`),
     targets: [DIRS.WORKSPACE],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
-    preInstall: (changedFiles) => {
-      let differs = false;
-      for (const f of changedFiles) {
+    // Per file, as install.sh does: a doc that differs on this node keeps its
+    // copy (the repo version is saved beside it as .repo); the others install.
+    // The old all-or-nothing veto left every doc behind for one edited one.
+    preInstall: (files, { repoDir, toSha, dryRun }) => {
+      const kept = files.filter(f => {
         const basename = path.basename(f);
         const targetPath = path.join(DIRS.WORKSPACE, basename);
-        if (fs.existsSync(targetPath)) {
-          const srcPath = path.join(REPO_DIR, f);
-          const diff = exec(`diff "${targetPath}" "${srcPath}" | head -20`, { ignoreError: true });
-          if (diff) {
-            warn(`${basename} differs from repo version:`);
-            console.log(C.dim(diff.split('\n').map(l => `      ${l}`).join('\n')));
-            info(`Repo version saved to ${basename}.repo — merge manually if needed`);
-            fs.copyFileSync(srcPath, targetPath + '.repo');
-            differs = true;
-          }
+        if (!fs.existsSync(targetPath)) return false;
+        // A dry run has not checked out toSha: compare against it and write nothing.
+        if (dryRun) {
+          if (fs.readFileSync(targetPath).equals(git(repoDir, ['show', `${toSha}:${f}`], 'buffer'))) return false;
+          warn(`${basename} differs from repo version — a deploy would save it as ${basename}.repo and keep this node's copy`);
+          return true;
         }
-      }
-      if (differs) return false; // Don't overwrite
+        const srcPath = path.join(repoDir, f);
+        const diff = exec(`diff "${targetPath}" "${srcPath}" | head -20`, { ignoreError: true });
+        if (!diff) return false;
+        warn(`${basename} differs from repo version:`);
+        console.log(C.dim(diff.split('\n').map(l => `      ${l}`).join('\n')));
+        info(`Repo version saved to ${basename}.repo — merge manually if needed`);
+        fs.copyFileSync(srcPath, targetPath + '.repo');
+        return true;
+      });
+      // installFiles copies the list this hook was handed.
+      for (const f of kept) files.splice(files.indexOf(f), 1);
+      if (kept.length > 0 && files.length === 0) return false;
+    },
+    // The compiled boot profiles are built from AGENTS.md; only where 'boot' runs.
+    postInstall: (changedFiles) => {
+      const bootFilter = MANIFEST.find(c => c.id === 'boot').nodeFilter;
+      if (changedFiles.includes('identity/AGENTS.md') && (bootFilter === 'all' || bootFilter === nodeRole())) recompileBoot();
     },
     notes: 'These files are your agent identity docs. They are NOT auto-overwritten. ' +
            'If the repo has updates, they are saved as .repo files for manual merge.',
   },
 
-  // ── IDENTITY ────────────────────────────────────────────────────────────
+  // ── HARNESS RULES ───────────────────────────────────────────────────────
 
   {
-    id: 'identity',
-    name: 'Node Identity',
-    description: 'Node identity files, mesh enrollment config',
-    risk: 'manual',
-    repoPaths: ['identity/'],
-    targets: [DIRS.IDENTITY],
-    servicesMac: [],
-    servicesLinux: [],
-    nodeFilter: 'all',
-    preInstall: () => {
-      if (fs.existsSync(path.join(DIRS.IDENTITY, 'device.json'))) {
-        skip('Identity files already exist — skipping (use --force to overwrite)');
-        return false;
-      }
+    id: 'harness-rules',
+    name: 'Harness Rules',
+    description: 'Merges config/harness-rules.json into the copy mesh-agent reads (user edits kept)',
+    risk: 'careful',
+    repoPaths: ['config/harness-rules.json'],
+    // Nothing is copied: the live file is a merge of the repo rules and the
+    // node's edits, written by harness-sync (as install.sh does).
+    targets: [],
+    servicesMac: ['ai.openclaw.mesh-agent'],
+    servicesLinux: ['openclaw-mesh-agent'],
+    postInstall: (changedFiles, changes, { repoDir }) => {
+      const src = path.join(repoDir, 'config', 'harness-rules.json');
+      if (!fs.existsSync(src)) return;
+      info(`Merging harness rules into ${HARNESS_RULES_PATH}...`);
+      const out = execFileSync(process.execPath, [
+        path.join(repoDir, 'bin', 'harness-sync.js'), 'apply', '--src', src, '--dst', HARNESS_RULES_PATH,
+      ], { cwd: repoDir, encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] });
+      for (const line of out.trim().split('\n').filter(Boolean)) console.log(`    ${C.dim(line)}`);
+      ok('Harness rules merged');
     },
   },
 
@@ -474,10 +560,11 @@ const MANIFEST = [
     description: 'Daemon configs, transcript configs, sync settings',
     risk: 'careful',
     repoPaths: ['config/'],
+    // Owned by 'harness-rules': nothing reads a copy under ~/.openclaw/config.
+    exclude: ['config/harness-rules.json'],
     targets: [DIRS.CONFIG],
     servicesMac: [],
     servicesLinux: [],
-    nodeFilter: 'all',
     postInstall: (changedFiles, changes) => {
       const templatePath = path.join(DIRS.CONFIG, 'openclaw.json.template');
       const envPath = path.join(DIRS.OPENCLAW_HOME, 'openclaw.env');
@@ -509,35 +596,6 @@ const MANIFEST = [
     notes: 'openclaw.env is NEVER deployed — it contains API keys and is per-node.',
   },
 
-  // ── SERVICE DEFINITIONS ─────────────────────────────────────────────────
-
-  {
-    id: 'services',
-    name: 'Service Definitions',
-    description: 'launchd plists (macOS) / systemd units (Ubuntu)',
-    risk: 'manual',
-    repoPaths: IS_MAC ? ['services/launchd/'] : ['services/systemd/'],
-    targets: [IS_MAC ? DIRS.SERVICES_MAC : DIRS.SERVICES_LINUX],
-    servicesMac: [],
-    servicesLinux: [],
-    nodeFilter: 'all',
-    preInstall: () => {
-      warn('Service definitions require --include-services flag');
-      warn('A bad plist/unit can prevent services from starting');
-      return false;
-    },
-    postInstall: () => {
-      if (IS_MAC) {
-        info('Plists updated — run this to reload:');
-        console.log('    launchctl unload ~/Library/LaunchAgents/ai.openclaw.*.plist');
-        console.log('    launchctl load ~/Library/LaunchAgents/ai.openclaw.*.plist');
-      } else {
-        info('Units updated — run: systemctl --user daemon-reload');
-        exec('systemctl --user daemon-reload', { ignoreError: true });
-      }
-    },
-  },
-
   // ── OPENCLAW GATEWAY (npm package) ──────────────────────────────────────
 
   {
@@ -549,13 +607,13 @@ const MANIFEST = [
     targets: [],
     servicesMac: ['ai.openclaw.gateway'],
     servicesLinux: ['openclaw-gateway'],
-    nodeFilter: 'all',
     detect: () => {
       try {
         const current = exec('openclaw --version 2>/dev/null', { ignoreError: true });
         const latest = exec('npm view openclaw version 2>/dev/null', { ignoreError: true });
-        if (current && latest && current !== latest) {
-          return { changed: true, current, latest };
+        const installed = current.match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)?.[0] || current;
+        if (installed && latest && installed !== latest) {
+          return { changed: true, current: installed, latest };
         }
       } catch (err) { console.warn(`[mesh-deploy] detect openclaw version: ${err.message}`); }
       return { changed: false };
@@ -569,53 +627,22 @@ const MANIFEST = [
         throw new Error('--component openclaw installs an exact pinned version: set OPENCLAW_CLI_VERSION=<x.y.z>' +
           (version ? ` (got ${JSON.stringify(version).slice(0, 40)})` : ''));
       }
+      // npm creates <prefix>/lib/node_modules on first use: probe the nearest existing ancestor.
+      const prefix = exec('npm prefix -g');
+      let probe = path.join(prefix, 'lib', 'node_modules');
+      while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+      let writable = true;
+      try { fs.accessSync(probe, fs.constants.W_OK); } catch { writable = false; }
+      const hint = `the global npm prefix ${prefix} is not writable by this user — run: sudo npm install -g openclaw@${version}`;
       if (dryRun) {
-        info(`Would run: npm install -g openclaw@${version}`);
+        if (writable) info(`Would run: npm install -g openclaw@${version}`);
+        else warn(`Would refuse: ${hint}`);
         return;
       }
+      if (!writable) throw new Error(hint);
       info(`Installing OpenClaw gateway ${version}...`);
       exec(`npm install -g openclaw@${version}`, { timeout: 180000 });
       ok(`OpenClaw ${version} installed`);
-    },
-  },
-
-  // ── COMPANION BRIDGE ────────────────────────────────────────────────────
-
-  {
-    id: 'companion',
-    name: 'Companion Bridge',
-    description: 'companion-bridge npm package + local adapter.ts patches',
-    risk: 'careful',
-    repoPaths: [],
-    targets: [],
-    servicesMac: ['ai.openclaw.gateway'],
-    servicesLinux: ['openclaw-gateway'],
-    nodeFilter: 'lead',
-    detect: () => {
-      try {
-        if (fs.existsSync(DIRS.COMPANION)) {
-          const status = exec('git status --porcelain', { cwd: DIRS.COMPANION, ignoreError: true });
-          if (status) return { changed: true, reason: 'uncommitted local changes' };
-        }
-        const current = exec('npm ls companion-bridge --json 2>/dev/null', { ignoreError: true });
-        const latest = exec('npm view companion-bridge version 2>/dev/null', { ignoreError: true });
-        if (current && latest) {
-          return { changed: !current.includes(latest), current, latest };
-        }
-      } catch (err) { console.warn(`[mesh-deploy] detect companion version: ${err.message}`); }
-      return { changed: false };
-    },
-    install: (dryRun) => {
-      if (dryRun) {
-        info('Would update companion-bridge');
-        return;
-      }
-      if (fs.existsSync(DIRS.COMPANION)) {
-        info('Pulling companion-bridge source...');
-        exec('git pull origin main', { cwd: DIRS.COMPANION, ignoreError: true });
-        exec('npm install && npm run build', { cwd: DIRS.COMPANION, timeout: 120000 });
-        ok('companion-bridge rebuilt');
-      }
     },
   },
 
@@ -630,7 +657,6 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.lane-watchdog'],
     servicesLinux: ['openclaw-lane-watchdog'],
-    nodeFilter: 'lead',
   },
 
   // ── LOG ROTATION ────────────────────────────────────────────────────────
@@ -640,11 +666,10 @@ const MANIFEST = [
     name: 'Log Rotation',
     description: 'Weekly log file rotation (copytruncate)',
     risk: 'safe',
-    repoPaths: ['bin/log-rotate.sh'],
+    repoPaths: ['bin/log-rotate'],
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.log-rotate'],
-    servicesLinux: [],  // Ubuntu uses logrotate.d natively
-    nodeFilter: 'lead',
+    servicesLinux: ['openclaw-log-rotate'],
   },
 
   // ── DISCORD TOOL ────────────────────────────────────────────────────────
@@ -658,9 +683,24 @@ const MANIFEST = [
     targets: [DIRS.CLI_BIN],
     servicesMac: ['ai.openclaw.mesh-tool-discord'],
     servicesLinux: ['openclaw-mesh-tool-discord'],
-    nodeFilter: 'lead',
   },
 ];
+
+// Which role runs each component comes from lib/mesh-roles.js, the list the
+// deploy listener filters fleet triggers through and the health record
+// advertises: an id here that it lacks (or the reverse) is refused, not skipped.
+const { DEPLOY_COMPONENTS } = require('../lib/mesh-roles');
+{
+  const roles = new Map(DEPLOY_COMPONENTS.map(c => [c.id, c]));
+  const unlisted = MANIFEST.filter(c => !roles.has(c.id)).map(c => c.id);
+  const unknown = DEPLOY_COMPONENTS.filter(r => !MANIFEST.some(c => c.id === r.id)).map(r => r.id);
+  if (unlisted.length || unknown.length) {
+    throw new Error('MANIFEST and lib/mesh-roles.js disagree: ' +
+      [unlisted.length && `not in mesh-roles: ${unlisted.join(', ')}`,
+       unknown.length && `not in MANIFEST: ${unknown.join(', ')}`].filter(Boolean).join('; '));
+  }
+  for (const comp of MANIFEST) Object.assign(comp, { nodeFilter: roles.get(comp.id).nodeFilter, localOnly: !!roles.get(comp.id).localOnly });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DEPLOY ENGINE
@@ -690,6 +730,72 @@ function saveDeployState(state) {
  */
 function deployedBase(repoDir) {
   return resolveCommit(repoDir, loadDeployState().deployedSha) || gitLine(repoDir, ['rev-parse', 'HEAD']);
+}
+
+/**
+ * mesh-deploy used to ship the skill library to ~/.openclaw/skills, where the
+ * workspace copies install.sh wrote take precedence, so those copies never
+ * loaded. Move each leftover repo skill the workspace now holds (and the
+ * dist/ and scripts/ packaging dirs) into a dated archive; never delete. The
+ * mesh skill stays: integrations.sh installs it there for every agent.
+ *
+ * A skill retired-files.txt lists (quarantined or deleted) is archived from
+ * both dirs, as install.sh does: the diff misses it on a node this deploy has
+ * not recorded, and archiving only the workspace copy would un-shadow an old
+ * managed one.
+ */
+function retireManagedSkillCopies() {
+  const date = new Date().toISOString().slice(0, 10);
+  const retired = retiredSkillNames();
+  const archiveTo = (src, dst) => {
+    if (fs.existsSync(dst)) {
+      warn(`  ${src} left in place — ${dst} already exists`);
+      return;
+    }
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.renameSync(src, dst);
+    console.log(`  ${C.dim('retire')} ${src} → ${dst}`);
+  };
+  for (const name of retired) {
+    const src = path.join(DIRS.SKILLS, name);
+    if (fs.existsSync(src)) archiveTo(src, path.join(DIRS.OPENCLAW_HOME, 'retired', date, 'skills', name));
+  }
+  if (!fs.existsSync(DIRS.MANAGED_SKILLS)) return;
+  const repoSkills = new Set(fs.readdirSync(path.join(REPO_DIR, 'skills')));
+  const archive = path.join(DIRS.OPENCLAW_HOME, `skills.retired-${date}`);
+  for (const name of fs.readdirSync(DIRS.MANAGED_SKILLS)) {
+    if (name === 'mesh') continue;
+    if (!retired.includes(name)) {
+      if (!repoSkills.has(name)) continue;
+      const packaging = name === 'dist' || name === 'scripts';
+      if (!packaging && !fs.existsSync(path.join(DIRS.SKILLS, name))) continue;
+    }
+    archiveTo(path.join(DIRS.MANAGED_SKILLS, name), path.join(archive, name));
+  }
+}
+
+// Without --all compile-boot prints the main profile to stdout and writes no
+// .boot/<profile>.compiled.md; install.sh runs the same command.
+function recompileBoot() {
+  const compilerPath = path.join(DIRS.BOOT_SRC, 'compile-boot');
+  if (!fs.existsSync(compilerPath)) return;
+  info('Recompiling boot profiles...');
+  try {
+    exec(`python3 "${compilerPath}" --all`, { cwd: DIRS.WORKSPACE });
+    ok('Boot profiles recompiled');
+  } catch (err) {
+    warn(`Boot recompile failed: ${err.message}`);
+  }
+}
+
+// The `skills` names in retired-files.txt, refused like retire_shipped_files
+// refuses them so nothing outside the skill dirs and no backup is ever moved.
+function retiredSkillNames() {
+  return fs.readFileSync(path.join(REPO_DIR, 'scripts', 'install', 'retired-files.txt'), 'utf8')
+    .split('\n')
+    .map(line => line.trim().split(/\s+/))
+    .filter(([group, name]) => group === 'skills' && name && !name.includes('/') && !name.startsWith('.') && !name.includes('.bak'))
+    .map(([, name]) => name);
 }
 
 /**
@@ -737,7 +843,7 @@ function planComponents(changes, { filterIds = [], force = false, listAll }) {
   const plans = [];
 
   for (const comp of MANIFEST) {
-    if (comp.nodeFilter !== 'all' && comp.nodeFilter !== NODE_ROLE) continue;
+    if (comp.nodeFilter !== 'all' && comp.nodeFilter !== nodeRole()) continue;
     if (named.length > 0 && !named.includes(comp.id)) continue;
 
     if (comp.repoPaths.length === 0) {
@@ -753,6 +859,29 @@ function planComponents(changes, { filterIds = [], force = false, listAll }) {
     if (install.length > 0 || remove.length > 0) plans.push({ comp, install, remove });
   }
   return plans;
+}
+
+/**
+ * The targets a component may write. A guarded target (the workspace lib and
+ * bin) that is a symlink is never written through: one that resolves to the
+ * component's own checkout dir already is the deployed tree and is skipped;
+ * any other is refused, since writing through it changes a tree this deploy
+ * does not own.
+ */
+function writableTargets(comp, repoDir) {
+  return comp.targets.filter(target => {
+    if (!(comp.guardedTargets || []).includes(target)) return true;
+    let link;
+    try { link = fs.lstatSync(target).isSymbolicLink(); } catch { return true; }
+    if (!link) return true;
+    const own = comp.repoPaths.length === 1 && comp.repoPaths[0].endsWith('/')
+      ? path.join(repoDir, comp.repoPaths[0]) : null;
+    if (own && fs.existsSync(own) && fs.realpathSync(target) === fs.realpathSync(own)) {
+      skip(`  ${target} links to the checkout — nothing to copy`);
+      return false;
+    }
+    throw new Error(`refusing to write through symlinked ${target} (→ ${fs.realpathSync(target)})`);
+  });
 }
 
 /**
@@ -838,7 +967,7 @@ function removeFiles(comp, repoDir, fromSha, files, dryRun) {
  * deploy whose new code is not running did not succeed, and the listener rolls
  * it back.
  */
-function restartService(svc) {
+function restartService(svc, { probeOnly = false } = {}) {
   try {
     if (IS_MAC) {
       const plistPath = path.join(DIRS.SERVICES_MAC, `${svc}.plist`);
@@ -856,6 +985,7 @@ function restartService(svc) {
         skip(`  ${svc} not running${state === 'not running' ? '' : ` (${state || 'not loaded'})`} — left stopped`);
         return false;
       }
+      if (probeOnly) return true;
       exec(`launchctl kickstart -k ${target}`);
     } else {
       const loadState = exec(`systemctl --user show -p LoadState --value ${svc}`);
@@ -870,6 +1000,7 @@ function restartService(svc) {
         skip(`  ${svc} not running (${activeState || 'unknown'}) — left stopped`);
         return false;
       }
+      if (probeOnly) return true;
       exec(`systemctl --user try-restart ${svc}`);
     }
   } catch (err) {
@@ -886,9 +1017,22 @@ function restartService(svc) {
  * all files are in place, so no daemon boots new bin/ against old lib/.
  * Throws on any failed step. Never fetches: the caller brought toSha in.
  */
-function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includeServices = false,
-                  dryRun = false, noRestart = false }) {
+function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false,
+                  dryRun = false, noRestart = false, pinned = false, recordPending = true }) {
   assertCommitted(repoDir);
+  // A deploy that throws past this point leaves part of toSha installed. The
+  // first such sha is kept until a run completes, so --rollback reverts it (and
+  // the listener's own rollback deploy, from it, does not replace it). A
+  // --rollback records none: retried, it repeats the same rollback.
+  let setPending = false;
+  if (recordPending && !dryRun && fromSha !== toSha) {
+    const state = loadDeployState();
+    if (!state.pendingSha) {
+      Object.assign(state, { pendingSha: toSha, pendingFrom: fromSha });
+      saveDeployState(state);
+      setPending = true;
+    }
+  }
   if (!dryRun && gitLine(repoDir, ['rev-parse', 'HEAD']) !== toSha) {
     info(`Checking out ${toSha.slice(0, 8)}`);
     git(repoDir, ['checkout', '--detach', '--quiet', toSha]);
@@ -905,48 +1049,47 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
 
   const deployed = [];
   const services = [];
+  let listenerAffected = false;
   for (const { comp, install, remove } of plans) {
-    const risk = comp.risk === 'safe' ? C.green('●')
-      : comp.risk === 'careful' ? C.yellow('●')
-      : C.red('●');
+    const risk = comp.risk === 'safe' ? C.green('●') : C.yellow('●');
     console.log(`  ${risk} ${C.bold(comp.name)} ${C.dim(`(${comp.id})`)}`);
     console.log(`    ${C.dim(comp.description)}`);
 
-    // Skip manual-risk components unless forced or named
-    if (comp.risk === 'manual' && !force && !filterIds.includes(comp.id)) {
-      if (comp.id === 'services' && !includeServices) {
-        skip(`    Skipped (use --include-services)`);
-        continue;
-      }
-      if (comp.id !== 'services') {
-        skip(`    Skipped (use --force or --component ${comp.id})`);
-        continue;
-      }
-    }
-
     // Pre-install hook (backup, merge protection, etc.) — false vetoes the component
-    if (comp.preInstall && comp.preInstall(install) === false) continue;
+    if (comp.preInstall && comp.preInstall(install, { repoDir, toSha, dryRun }) === false) continue;
 
     let installed = 0;
     let removed = 0;
     if (comp.install) {
       comp.install(dryRun);
     } else {
-      installed = installFiles(comp, repoDir, install, dryRun);
-      removed = removeFiles(comp, repoDir, fromSha, remove, dryRun);
+      const writable = { ...comp, targets: writableTargets(comp, repoDir) };
+      installed = installFiles(writable, repoDir, install, dryRun);
+      removed = removeFiles(writable, repoDir, fromSha, remove, dryRun);
       if (!dryRun) ok(`    Installed ${installed}, removed ${removed} file(s)`);
     }
 
     // Post-install hook (npm install, next build, config regen, boot compile, etc.).
     // It also gets the diff: under --force/--component, `install` lists every file.
-    if (comp.postInstall && !dryRun) comp.postInstall([...install, ...remove], changes);
+    if (comp.postInstall && !dryRun) comp.postInstall([...install, ...remove], changes, { repoDir });
 
     for (const svc of (IS_MAC ? comp.servicesMac : comp.servicesLinux) || []) {
       if (!services.includes(svc)) services.push(svc);
     }
+    if (comp.restartsListener) listenerAffected = true;
     if (comp.notes && dryRun) console.log(`    ${C.dim('Note: ' + comp.notes)}`);
     console.log('');
     deployed.push({ comp, installed, removed });
+  }
+
+  const deferredRestart = [];
+  if (listenerAffected && pinned && !dryRun && !noRestart) {
+    if (restartService(LISTENER_SERVICE, { probeOnly: true })) {
+      deferredRestart.push(LISTENER_SERVICE);
+      info(`${LISTENER_SERVICE} restart deferred to the listener (it runs this deploy)`);
+    }
+  } else if (listenerAffected) {
+    services.push(LISTENER_SERVICE);
   }
 
   const restarted = [];
@@ -967,7 +1110,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
       if (comp.validate()) ok(`${comp.name}: validated`);
       else warn(`${comp.name}: validation failed — check manually`);
     }
-    recordDeploy({ fromSha, toSha, filterIds, deployed });
+    recordDeploy({ fromSha, toSha, filterIds, deployed, setPending });
   }
 
   return {
@@ -976,6 +1119,7 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
     changedFiles: changes.length,
     components: deployed.map(({ comp, installed, removed }) => ({ id: comp.id, installed, removed })),
     restarted,
+    deferredRestart,
   };
 }
 
@@ -984,12 +1128,20 @@ function deploy({ repoDir, fromSha, toSha, filterIds = [], force = false, includ
  * --component run leaves the other components behind. lastSha (the --rollback
  * target) moves only when this run changed something and left a version that
  * had actually been deployed — not on a run that deploys nothing, and not on
- * the listener's rollback away from a sha that failed.
+ * a rollback away from a sha that failed. The failed deploy's pendingSha clears
+ * once the run that set it, a complete run, or its revert succeeds.
  */
-function recordDeploy({ fromSha, toSha, filterIds, deployed }) {
+function recordDeploy({ fromSha, toSha, filterIds, deployed, setPending }) {
   const state = loadDeployState();
   const complete = filterIds.every(id => id === 'all');
-  const leftDeployedVersion = fromSha !== toSha && (!state.deployedSha || state.deployedSha === fromSha);
+  const revertsPending = !!state.pendingSha && fromSha === state.pendingSha;
+  const leftDeployedVersion = fromSha !== toSha && !revertsPending &&
+    (!state.deployedSha || state.deployedSha === fromSha);
+  const clearsPending = !!state.pendingSha && (setPending || complete || revertsPending);
+  if (clearsPending) {
+    delete state.pendingSha;
+    delete state.pendingFrom;
+  }
   if (deployed.length > 0) {
     if (leftDeployedVersion) state.lastSha = fromSha;
     state.lastDeploy = new Date().toISOString();
@@ -998,7 +1150,66 @@ function recordDeploy({ fromSha, toSha, filterIds, deployed }) {
     }
   }
   if (complete) state.deployedSha = toSha;
-  if (complete || deployed.length > 0) saveDeployState(state);
+  if (complete || deployed.length > 0 || clearsPending) saveDeployState(state);
+}
+
+/** Refuse --node ids the fleet registry has never seen, before anything deploys. */
+async function assertKnownNodes(ids) {
+  const { discoverNodes } = require('./fleet-deploy');
+  const { connect } = require('nats');
+  const { natsConnectOpts } = require('../lib/nats-resolve');
+  let nc;
+  try {
+    nc = await connect(natsConnectOpts({ name: 'deploy-node-check', timeout: 10000 }));
+  } catch (err) {
+    throw new Error(`cannot check --node ${ids.join(', ')} against MESH_NODES/MESH_NODE_HEALTH: ${err.message}`);
+  }
+  try {
+    const nodes = await discoverNodes(nc);
+    const unknown = unknownNodes(ids, nodes);
+    if (unknown.length > 0) {
+      throw new Error(`unknown node ${unknown.join(', ')} — known: ${nodes.map(n => n.nodeId).join(', ') || 'none'}`);
+    }
+  } finally {
+    await nc.close();
+  }
+}
+
+// Every node may build Mission Control (npm ci + next build), so the run waits
+// for a deploying node as long as its listener lets the deploy run.
+const FLEET_RESULT_WAIT_MS = 20 * 60 * 1000;
+
+/** Publish a fleet trigger and wait for the nodes: { outcome } from fleetDeploy, or { error }. */
+async function triggerFleet(connName, opts) {
+  try {
+    const { fleetDeploy } = require('./fleet-deploy');
+    const { connect } = require('nats');
+    const { natsConnectOpts } = require('../lib/nats-resolve');
+    const nc = await connect(natsConnectOpts({ name: connName, timeout: 10000 }));
+    try {
+      return { outcome: await fleetDeploy(nc, { ...opts, timeoutMs: FLEET_RESULT_WAIT_MS }) };
+    } finally {
+      await nc.close();
+    }
+  } catch (error) {
+    return { error };
+  }
+}
+
+// A node that never reported catches up on reconnect, so only an error or a
+// failed node fails the run.
+function fleetFailed({ outcome, error }) {
+  return !!error || outcome.failed > 0;
+}
+
+function remoteSummary({ outcome, error }) {
+  if (error) return C.red(`FAILED (${error.message.split('\n')[0]})`);
+  if (outcome.failed > 0) return C.red(`FAILED (${outcome.failed} of ${outcome.expected} node(s))`);
+  if (outcome.expected === 0) return C.dim('no remote nodes');
+  if (outcome.missing + outcome.stillDeploying > 0) {
+    return C.yellow(`partial (${outcome.missing} pending catch-up, ${outcome.stillDeploying} still deploying)`);
+  }
+  return C.green('deployed');
 }
 
 // ── Tracer Instrumentation ───────────────────────────────────────────────
@@ -1018,7 +1229,12 @@ async function main() {
   const localOnly = args.includes('--local');
   const noRestart = args.includes('--no-restart');
   const doRollback = args.includes('--rollback');
-  const includeServices = args.includes('--include-services');
+  // Its component could never install (its preInstall always vetoed), and units
+  // hold templates only the installer renders: refused rather than ignored.
+  if (args.includes('--include-services')) {
+    throw new Error('--include-services was removed: service units change only through install.sh ' +
+      '(scripts/install/services.sh)');
+  }
   const forceAll = args.includes('--force');
   const showStatus = args.includes('--status');
 
@@ -1036,20 +1252,33 @@ async function main() {
   const fromArg = argValue('--from');
   const toArg = argValue('--to');
 
-  // Parse --node flag
-  let deployLocal = true, deployRemote = !localOnly;
+  // Not in pinned mode: the listener's rollback runs the previous sha's script
+  // with the forward deploy's --component args, which may name a newer id.
+  if (!toArg) {
+    const known = MANIFEST.map(c => c.id);
+    const unknown = filterIds.filter(id => id !== 'all' && !known.includes(id));
+    if (unknown.length > 0) throw new Error(`unknown component ${unknown.join(', ')} — known: ${known.join(', ')}`);
+  }
+
+  // --node <id> (repeatable): exactly those nodes. An unknown name used to
+  // match neither alias list and fell through to "this node + every node".
+  const nodeNames = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--node' && args[i + 1]) {
-      const target = args[i + 1].toLowerCase();
-      if (['ubuntu', 'linux', 'calos'].includes(target)) {
-        deployLocal = false;
-        deployRemote = true;
-      } else if (['mac', 'macos', 'moltymac', 'self'].includes(target)) {
-        deployLocal = true;
-        deployRemote = false;
-      }
+      nodeNames.push(args[i + 1]);
       i++;
     }
+  }
+  let deployLocal = true, deployRemote = !localOnly, targetNodes = null;
+  if (nodeNames.length > 0) {
+    const localId = resolveNodeId();
+    const plan = planNodeTargets(nodeNames, { localId, aliases: loadNodeAliases() });
+    if (localOnly && plan.remoteIds.length > 0) {
+      throw new Error(`--local conflicts with --node ${plan.remoteIds.join(', ')} (this node is ${localId})`);
+    }
+    deployLocal = plan.deployLocal;
+    deployRemote = plan.remoteIds.length > 0;
+    targetNodes = deployRemote ? plan.remoteIds : null;
   }
 
   // ── Status mode ──
@@ -1083,9 +1312,7 @@ async function main() {
       if (affected.length > 0) {
         console.log(`\n  Affected components:`);
         for (const { comp, install, remove } of affected) {
-          const risk = comp.risk === 'safe' ? C.green(comp.risk)
-            : comp.risk === 'careful' ? C.yellow(comp.risk)
-            : C.red(comp.risk);
+          const risk = comp.risk === 'safe' ? C.green(comp.risk) : C.yellow(comp.risk);
           console.log(`    ${comp.name} [${risk}] — ${install.length + remove.length} files`);
         }
       }
@@ -1105,51 +1332,84 @@ async function main() {
     return;
   }
 
+  if (targetNodes) await assertKnownNodes(targetNodes);
+
   // ── Rollback mode ──
   if (doRollback) {
     header('Rolling Back Last Deploy');
     const state = loadDeployState();
-    if (!state.lastSha) {
+    // Older code carries no newer-schema check of its own: refuse to put it in
+    // front of a memory store a later deploy migrated, unless told to (--force).
+    const assertStoreSchema = (toSha) => {
+      let refusal;
+      try {
+        refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
+          repoDir: REPO_DIR, toSha, dbPath: path.join(DIRS.OPENCLAW_HOME, 'state.db'),
+        });
+      } catch (err) {
+        refusal = err.message;
+      }
+      if (!refusal) return;
+      if (!forceAll) throw new Error(`${refusal} (or roll back anyway: mesh-deploy.js --rollback --force)`);
+      warn(`${refusal} — rolling back anyway (--force)`);
+    };
+    // --to: the exact sha a refusing listener names. lastSha cannot stand in for
+    // it: a rollback that moved this node made lastSha the sha the node left.
+    const pinnedTo = toArg ? resolveCommit(REPO_DIR, toArg) : null;
+    if (toArg && !pinnedTo) throw new Error(`--to ${toArg} is not a commit in ${REPO_DIR}`);
+    // A deploy that failed partway on this node: revert it, not the one before.
+    // The fleet never received it (the trigger goes out after the local deploy).
+    const pendingSha = deployLocal ? resolveCommit(REPO_DIR, state.pendingSha) : null;
+    if (pendingSha && pinnedTo) {
+      throw new Error(`a deploy of ${pendingSha.slice(0, 7)} failed partway on this node — revert it first ` +
+        '(mesh-deploy.js --rollback), or leave this node out with --node');
+    }
+    if (pendingSha) {
+      const toSha = resolveCommit(REPO_DIR, state.pendingFrom);
+      if (!toSha) {
+        fail(`pendingFrom in deploy state is not a commit in ${REPO_DIR}: ${JSON.stringify(state.pendingFrom).slice(0, 50)}`);
+        process.exitCode = 1;
+        return;
+      }
+      warn(`Rolling back ${pendingSha.slice(0, 7)} → ${toSha.slice(0, 7)}: reverting the failed deploy of ${pendingSha.slice(0, 7)}`);
+      assertStoreSchema(toSha);
+      deploy({ repoDir: REPO_DIR, fromSha: pendingSha, toSha, dryRun, noRestart });
+      ok(`Rolled back to ${toSha.slice(0, 8)}`);
+      if (deployRemote) skip('Remote nodes never received the failed deploy — remote rollback skipped');
+      return;
+    }
+    if (!pinnedTo && !state.lastSha) {
       fail('No previous deploy state found — cannot rollback');
       return;
     }
-    const toSha = resolveCommit(REPO_DIR, state.lastSha);
+    const toSha = pinnedTo || resolveCommit(REPO_DIR, state.lastSha);
     if (!toSha) {
       fail(`lastSha in deploy state is not a commit in ${REPO_DIR}: ${JSON.stringify(state.lastSha).slice(0, 50)}`);
       return;
     }
     const fromSha = deployedBase(REPO_DIR);
     warn(`Rolling back ${fromSha.slice(0, 7)} → ${toSha.slice(0, 7)}`);
-    deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart });
-    ok(`Rolled back to ${toSha.slice(0, 8)}`);
+    if (deployLocal) {
+      assertStoreSchema(toSha);
+      deploy({ repoDir: REPO_DIR, fromSha, toSha, dryRun, noRestart, recordPending: false });
+      ok(`Rolled back to ${toSha.slice(0, 8)}`);
+    } else {
+      skip('This node is not targeted — local rollback skipped');
+    }
 
     if (deployRemote) {
       header('Rolling back remote nodes');
-      try {
-        const { fleetDeploy } = require('./fleet-deploy');
-        const { connect } = require('nats');
-        const { natsConnectOpts: natsOpts } = require('../lib/nats-resolve');
-        const nc = await connect(natsOpts({ name: 'deploy-rollback', timeout: 10000 }));
-        try {
-          // Trigger fleet deploy at the rollback SHA — listeners check it out exactly
-          await fleetDeploy(nc, {
-            components: null,
-            targetNodes: null,
-            dryRun: false,
-            force: true,
-            timeoutMs: 120000,
-          });
-        } finally {
-          await nc.close();
-        }
-        ok('Remote rollback triggered via fleet deploy');
-      } catch (err) {
-        if (err.code === 'MODULE_NOT_FOUND') {
-          warn('Fleet deploy not available — remote rollback skipped');
-        } else {
-          fail(`Remote rollback failed: ${err.message}`);
-        }
-      }
+      // Listeners check out the rollback sha exactly, after checking it against
+      // their own memory store: this node cannot read theirs.
+      const remote = await triggerFleet('deploy-rollback', {
+        components: null, targetNodes, sha: toSha.slice(0, 7), branch: DEPLOY_BRANCH, dryRun, force: true,
+        schemaOverride: forceAll,
+      });
+      if (remote.error?.code === 'MODULE_NOT_FOUND') warn('Fleet deploy not available — remote rollback skipped');
+      else if (remote.error) fail(`Remote rollback failed: ${remote.error.message}`);
+      else if (remote.outcome.failed > 0) fail(`Remote rollback failed on ${remote.outcome.failed} of ${remote.outcome.expected} node(s)`);
+      else if (!dryRun) ok('Remote rollback triggered via fleet deploy');
+      if (fleetFailed(remote)) process.exitCode = 1;
     }
     return;
   }
@@ -1157,31 +1417,35 @@ async function main() {
   // ── Pinned mode: no fetch, this node only (the deploy listener's forward
   // deploy and its rollback). DEPLOY_RESULT is the line the listener parses.
   if (toArg) {
-    header(`Pinned deploy (${NODE_ROLE})`);
+    header(`Pinned deploy (${nodeRole()})`);
     const toSha = resolveCommit(REPO_DIR, toArg);
     if (!toSha) throw new Error(`--to ${toArg} is not a commit in ${REPO_DIR} (pinned mode never fetches)`);
     const fromSha = fromArg ? resolveCommit(REPO_DIR, fromArg) : deployedBase(REPO_DIR);
     if (!fromSha) throw new Error(`--from ${fromArg} is not a commit in ${REPO_DIR}`);
-    const result = deploy({ repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, includeServices, dryRun, noRestart });
+    const result = deploy({ repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, dryRun, noRestart, pinned: true });
     console.log(`DEPLOY_RESULT ${JSON.stringify(result)}`);
     return;
   }
 
   // ═══ Normal deploy flow ═══
 
+  if (deployLocal) header(`Deploying to ${IS_MAC ? 'macOS' : 'Linux'} (${nodeRole()})`);
+
+  if (!fs.existsSync(REPO_DIR)) {
+    fail(`Repo not found at ${REPO_DIR}`);
+    console.log(`  Clone it: git clone https://github.com/moltyguibros-design/openclaw-node.git "${REPO_DIR}"`);
+    process.exit(1);
+  }
+
+  // One target for this node and the fleet, dry run or not: origin's tip. The
+  // lead's HEAD is a working checkout, and only the local deploy moves it.
+  info(`Fetching origin/${DEPLOY_BRANCH}...`);
+  git(REPO_DIR, ['fetch', 'origin', DEPLOY_BRANCH]);
+  const toSha = gitLine(REPO_DIR, ['rev-parse', `origin/${DEPLOY_BRANCH}^{commit}`]);
+  const toShort = gitLine(REPO_DIR, ['rev-parse', '--short', toSha]);
+
   if (deployLocal) {
-    header(`Deploying to ${IS_MAC ? 'macOS (lead)' : 'Ubuntu (worker)'}`);
-
-    if (!fs.existsSync(REPO_DIR)) {
-      fail(`Repo not found at ${REPO_DIR}`);
-      console.log(`  Clone it: git clone https://github.com/moltyguibros-design/openclaw-node.git "${REPO_DIR}"`);
-      process.exit(1);
-    }
-
-    info(`Fetching origin/${DEPLOY_BRANCH}...`);
-    git(REPO_DIR, ['fetch', 'origin', DEPLOY_BRANCH]);
     const head = gitLine(REPO_DIR, ['rev-parse', 'HEAD']);
-    const toSha = gitLine(REPO_DIR, ['rev-parse', `origin/${DEPLOY_BRANCH}^{commit}`]);
     if (!isAncestor(REPO_DIR, head, toSha)) {
       throw new Error(`HEAD ${head.slice(0, 8)} has commits that are not on origin/${DEPLOY_BRANCH} — ` +
         'push them first, or deploy an exact commit with --local --to <sha>');
@@ -1196,54 +1460,55 @@ async function main() {
       ok(`Fast-forwarded ${DEPLOY_BRANCH}: ${head.slice(0, 7)} → ${toSha.slice(0, 7)}`);
     }
     const result = deploy({
-      repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, includeServices, dryRun, noRestart,
+      repoDir: REPO_DIR, fromSha, toSha, filterIds, force: forceAll, dryRun, noRestart,
     });
     console.log(`DEPLOY_RESULT ${JSON.stringify(result)}`);
   }
 
   // ── Fleet deploy (replaces old SSH remote block) ──
+  const localOnlyIds = filterIds.filter(id => MANIFEST.some(c => c.id === id && c.localOnly));
+  const fleetIds = filterIds.filter(id => !localOnlyIds.includes(id));
+  if (deployRemote && localOnlyIds.length > 0) {
+    warn(`${localOnlyIds.join(', ')}: local-only (not from this repo) — run \`mesh deploy --local --component <id>\` on each node`);
+    if (fleetIds.length === 0) deployRemote = false;
+  }
+  let remote = null;
   if (deployRemote) {
-    try {
-      const { fleetDeploy } = require('./fleet-deploy');
-      const { connect } = require('nats');
-      const { natsConnectOpts: natsOpts2 } = require('../lib/nats-resolve');
-
-      const nc = await connect(natsOpts2({ name: 'deploy-cli', timeout: 10000 }));
-      try {
-        await fleetDeploy(nc, {
-          components: filterIds.length > 0 ? filterIds : null,
-          targetNodes: null,  // all remote nodes
-          dryRun,
-          force: forceAll,
-          timeoutMs: 120000,
-        });
-      } finally {
-        await nc.close();
-      }
-    } catch (err) {
-      if (err.code === 'MODULE_NOT_FOUND') {
-        warn('Fleet deploy not available (fleet-deploy.js or nats not found)');
-        info('Install: npm install nats && copy fleet-deploy.js to bin/');
-      } else {
-        fail(`Fleet deploy failed: ${err.message}`);
-      }
+    remote = await triggerFleet('deploy-cli', {
+      components: filterIds.length > 0 ? filterIds : null,
+      targetNodes,  // null: every node but this one
+      sha: toShort,
+      branch: DEPLOY_BRANCH,
+      dryRun,
+      force: forceAll,
+    });
+    if (remote.error?.code === 'MODULE_NOT_FOUND') {
+      warn('Fleet deploy not available (fleet-deploy.js or nats not found)');
+      info('Install: npm install nats && copy fleet-deploy.js to bin/');
+    } else if (remote.error) {
+      fail(`Fleet deploy failed: ${remote.error.message}`);
     }
+    if (fleetFailed(remote)) process.exitCode = 1;
   }
 
   // ── Summary ──
   if (!dryRun && (deployLocal || deployRemote)) {
     header('Deploy Complete');
-    const sha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR, ignoreError: true });
-    console.log(`  Commit:  ${sha}`);
+    console.log(`  Commit:  ${toShort}`);
     console.log(`  Branch:  ${DEPLOY_BRANCH}`);
     console.log(`  Local:   ${deployLocal ? C.green('deployed') : C.dim('skipped')}`);
-    console.log(`  Remote:  ${deployRemote ? C.green('deployed') : C.dim('skipped')}`);
+    console.log(`  Remote:  ${remote ? remoteSummary(remote) : C.dim('skipped')}`);
     console.log('');
   }
 }
 
 main().catch(err => {
   fail(`Deploy error: ${err.message}`);
+  // The listener (pinned, --to) reverts a failed deploy itself.
+  const { pendingSha } = loadDeployState();
+  if (pendingSha && !process.argv.includes('--to')) {
+    info(`Recover: node bin/mesh-deploy.js --rollback (reverts the failed deploy of ${pendingSha.slice(0, 7)})`);
+  }
   console.log(`DEPLOY_ERROR ${JSON.stringify(err.message)}`); // the cause the listener reports
   process.exit(1);
 });

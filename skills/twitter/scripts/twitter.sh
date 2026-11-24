@@ -60,6 +60,17 @@ oauth_header() {
     "oauth_version=1.0"
   )
 
+  # RFC 5849 3.4.1.2-3: the base string URI excludes the query; its pairs are signed as parameters.
+  local base_url="${url%%\?*}"
+  if [[ "$url" == *\?* ]]; then
+    local -a query_pairs
+    local pair
+    IFS='&' read -ra query_pairs <<< "${url#*\?}"
+    for pair in "${query_pairs[@]}"; do
+      params+=("$(pct_encode "${pair%%=*}")=$(pct_encode "${pair#*=}")")
+    done
+  fi
+
   # Add body params if present (for form-encoded POST)
   if [[ -n "$body_params" ]]; then
     while IFS= read -r line; do
@@ -69,13 +80,13 @@ oauth_header() {
 
   # Sort and join
   local sorted
-  sorted=$(printf '%s\n' "${params[@]}" | sort)
+  sorted=$(printf '%s\n' "${params[@]}" | LC_ALL=C sort)
   local param_string
   param_string=$(printf '%s\n' "$sorted" | paste -sd '&' -)
 
   # Signature base string
   local sig_base
-  sig_base="${method}&$(pct_encode "$url")&$(pct_encode "$param_string")"
+  sig_base="${method}&$(pct_encode "$base_url")&$(pct_encode "$param_string")"
 
   # Signing key
   local signing_key
@@ -98,12 +109,31 @@ oauth_header() {
 
 api_get() {
   local url="$1"
-  local auth
+  local auth hdr response http_code body reset
   auth=$(oauth_header "GET" "$url")
-  curl -sf -H "Authorization: $auth" "$url" 2>&1 || {
-    # Re-run without -f to get error body
-    curl -s -H "Authorization: $(oauth_header "GET" "$url")" "$url"
-  }
+  hdr=$(mktemp)
+  response=$(curl -s -D "$hdr" -w "\n%{http_code}" -H "Authorization: $auth" "$url")
+  http_code=$(echo "$response" | tail -1)
+  body=$(echo "$response" | sed '$d')
+
+  if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+    rm -f "$hdr"
+    echo "$body"
+    return 0
+  fi
+  echo "HTTP $http_code" >&2
+  case "$http_code" in
+    401|403) echo "Auth failed. Check your credentials." >&2 ;;
+    429)
+      reset=$(tr -d '\r' < "$hdr" | awk -F': *' 'tolower($1) == "x-rate-limit-reset" { print $2 }')
+      if [[ -n "$reset" ]]; then
+        echo "Rate limited until $(jq -rn --argjson t "$reset" '$t | todate') — do not retry" >&2
+      fi
+      ;;
+  esac
+  echo "$body" >&2
+  rm -f "$hdr"
+  return 1
 }
 
 api_post_json() {
@@ -159,7 +189,7 @@ api_delete() {
 cmd_whoami() {
   local url="${BASE_URL}/users/me?user.fields=username,name,id,public_metrics"
   local result
-  result=$(api_get "$url")
+  result=$(api_get "$url") || return 1
   if echo "$result" | jq -e '.data' >/dev/null 2>&1; then
     echo "$result" | jq '{
       id: .data.id,
@@ -170,7 +200,7 @@ cmd_whoami() {
       tweets: .data.public_metrics.tweet_count
     }'
   else
-    echo "Auth failed. Check your credentials." >&2
+    echo "Unexpected response:" >&2
     echo "$result" >&2
     return 1
   fi
@@ -230,7 +260,7 @@ cmd_lookup() {
   username="${username#@}"
   local url="${BASE_URL}/users/by/username/${username}?user.fields=name,username,id,description,public_metrics,created_at,profile_image_url"
   local result
-  result=$(api_get "$url")
+  result=$(api_get "$url") || return 1
   if echo "$result" | jq -e '.data' >/dev/null 2>&1; then
     echo "$result" | jq '{
       id: .data.id,

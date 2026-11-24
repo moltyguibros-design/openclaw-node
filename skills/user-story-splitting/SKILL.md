@@ -8,7 +8,6 @@ type: component
 triggers:
   - "split this user story"
   - "this story is too big"
-  - "break down this epic into stories"
   - "help me decompose this feature"
 negative_triggers:
   - "write a user story from scratch"

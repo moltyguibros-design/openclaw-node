@@ -16,10 +16,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { connect, nkeys, nkeyAuthenticator } from 'nats';
+import { connect, nkeys, nkeyAuthenticator, StorageType } from 'nats';
 import { natsServerBin, freePort, startNatsServer, writeServerConfig } from './helpers/nats-server.mjs';
 import { renderAuthorization } from '../bin/nats-auth-render.mjs';
 import { getOrCreateIdentity } from '../lib/node-identity.mjs';
+import { buildMemoryEvent, createLocalEventLog, localEventStreamName, localEventSubjectPrefix } from '../lib/local-event-log.mjs';
+import { ensureSharedStream, SHARED_STREAM_NAME, SHARED_SUBJECTS } from '../lib/shared-event-stream.mjs';
+import { createMemoryWatcher } from '../lib/memory-watcher.mjs';
 
 const require = createRequire(import.meta.url);
 const { identityToNkey, nkeyAuthenticatorFor } = require('../lib/nats-nkey.js');
@@ -95,6 +98,57 @@ describe('nkey auth on a real nats-server', { skip: SKIP }, () => {
     await nc.flush();
     await new Promise((r) => setTimeout(r, 200));
     assert.deepEqual(errors, [], 'the deny set must not touch KV or mesh.tasks');
+    await nc.close();
+  });
+
+  // Denying only STREAM.DELETE protected no data: the same worker credential could purge a
+  // whole bucket, shrink a stream to one message, or delete single messages.
+  it('the worker cannot purge, shrink or delete messages from a stream; the lead still can', async () => {
+    const leadNc = await connect({ servers: url(), authenticator: nkeyAuthenticatorFor(path.join(dir, 'lead')), timeout: 3000 });
+    const leadKv = await leadNc.jetstream().views.kv('NKEY_GUARD', { history: 5 });
+    await leadKv.put('a', '1');
+    await leadKv.put('b', '2');
+    const stream = 'KV_NKEY_GUARD';
+    const nc = await connect({ servers: url(), authenticator: nkeyAuthenticatorFor(path.join(dir, 'worker')), timeout: 3000 });
+    const jsm = await nc.jetstreamManager();
+    const { config } = await jsm.streams.info(stream);
+    await assert.rejects(jsm.streams.purge(stream), /permissions violation/i, 'STREAM.PURGE');
+    await assert.rejects(jsm.streams.update(stream, { ...config, max_msgs: 1 }), /permissions violation/i, 'STREAM.UPDATE');
+    await assert.rejects(jsm.streams.deleteMessage(stream, 1), /permissions violation/i, 'STREAM.MSG.DELETE');
+    assert.equal((await jsm.streams.info(stream)).state.messages, 2, 'the stream kept every message');
+    const kv = await nc.jetstream().views.kv('NKEY_GUARD');
+    await kv.put('c', '3');
+    assert.equal((await kv.get('a')).string(), '1');
+    await kv.purge('b');
+    await nc.close();
+    const leadJsm = await leadNc.jetstreamManager();
+    assert.equal((await leadJsm.streams.purge(stream)).success, true, 'the allow-all lead keeps its maintenance path (pruneTerminal purgeDeletes)');
+    await leadNc.close();
+  });
+
+  // The worker deny on STREAM.UPDATE also refuses the retention update a
+  // worker's memory daemon makes on its own pre-retention streams.
+  it('a worker on pre-retention event streams keeps its local event log and watcher, logging the lead command', async () => {
+    const nc = await connect({ servers: url(), authenticator: nkeyAuthenticatorFor(path.join(dir, 'worker')), timeout: 3000 });
+    const jsm = await nc.jetstreamManager();
+    await jsm.streams.add({ name: localEventStreamName('w1'), subjects: [`${localEventSubjectPrefix('w1')}.>`], storage: StorageType.File, num_replicas: 1 });
+    await jsm.streams.add({ name: SHARED_STREAM_NAME, subjects: SHARED_SUBJECTS, storage: StorageType.File, num_replicas: 1 });
+    const logs = [];
+    const eventLog = await createLocalEventLog(nc, 'w1', { log: (m) => logs.push(m) });
+    const watcher = await createMemoryWatcher(nc, 'w1', { outputPath: path.join(dir, 'watcher-w1.jsonl'), log: () => {} });
+    try {
+      await eventLog.publishLocal(buildMemoryEvent('memory.session_started', 'sess-w1', 'session',
+        { session_id: 'sess-w1', start_time: new Date().toISOString(), session_type: 'daemon' }, 'w1'));
+      assert.equal((await jsm.streams.info(localEventStreamName('w1'))).state.messages, 1);
+      await ensureSharedStream(nc, { log: (m) => logs.push(m) });
+    } finally {
+      await watcher.stop();
+    }
+    assert.deepEqual(logs, [
+      'local-events-w1 has no retention limit and this connection may not update streams; from a lead: nats stream edit local-events-w1 --max-age 720h --max-bytes 268435456 --discard old',
+      'OPENCLAW_SHARED has no retention limit and this connection may not update streams; from a lead: nats stream edit OPENCLAW_SHARED --max-age 720h --max-bytes 268435456 --discard old',
+    ]);
+    assert.equal((await jsm.streams.info(localEventStreamName('w1'))).config.max_age, 0, 'the worker changed no stream');
     await nc.close();
   });
 

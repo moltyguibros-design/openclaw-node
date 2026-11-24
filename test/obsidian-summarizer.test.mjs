@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, readdir, writeFile } from 'node:fs/promises';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -128,16 +129,25 @@ describe('buildConceptBody', () => {
 
 describe('generateConceptSummary', () => {
   it('calls LLM client and returns summary', async () => {
+    let seen;
     const mockClient = {
-      async generate(messages, opts) {
+      async generateAnalysis(messages, opts) {
+        seen = opts;
         assert.ok(messages[1].content.includes('NATS JetStream'));
-        return { content: 'NATS JetStream provides durable message streaming for the mesh.' };
+        return { mode: 'llm', value: { content: 'NATS JetStream provides durable message streaming for the mesh.' } };
       },
     };
     const result = await generateConceptSummary(mockClient, 'NATS JetStream', [
       { session_id: 's1', salience: 0.9 },
-    ]);
-    assert.ok(result.includes('durable message streaming'));
+    ], { waitTimeoutMs: 5000 });
+    assert.equal(result, 'NATS JetStream provides durable message streaming for the mesh.');
+    assert.equal(seen.maxTokens, 256);
+    assert.equal(seen.waitTimeoutMs, 5000);
+  });
+
+  it('returns null when the analysis lane falls back', async () => {
+    const client = { generateAnalysis: async () => ({ mode: 'fallback', value: { content: 'long enough summary text' } }) };
+    assert.equal(await generateConceptSummary(client, 'X', []), null);
   });
 
   it('returns null when client is null', async () => {
@@ -147,10 +157,15 @@ describe('generateConceptSummary', () => {
 
   it('returns null on client error', async () => {
     const mockClient = {
-      async generate() { throw new Error('timeout'); },
+      async generateAnalysis() { throw new Error('timeout'); },
     };
     const result = await generateConceptSummary(mockClient, 'Test', []);
     assert.equal(result, null);
+  });
+
+  it('returns null for a client without generateAnalysis', async () => {
+    const client = { generate: async () => ({ content: 'long enough summary text' }) };
+    assert.equal(await generateConceptSummary(client, 'X', []), null);
   });
 });
 
@@ -416,9 +431,14 @@ describe('queryConceptData + generateConceptNotes integration', () => {
   it('regression_F-N102 (now opt-IN): respectPrivacy:true filters for federation-era surfaces', async () => {
     const db = seedDb();
     db.exec(`UPDATE entities SET private = 1 WHERE name = 'NATS JetStream'`);
-    // Also private-ify the decision so it doesn't slip through coMentioned wikilinks.
-    db.exec(`UPDATE decisions SET private = 1`);
+    db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, private) VALUES (?, ?, ?, ?, ?, 1)`).run(
+      'session-002', 'Private call on spreading', 'internal', 0.9, '2026-05-15'
+    );
     const vaultPath = join(tmpDir, 'vault-privacy');
+    // An existing note makes the private entity's slug resolvable, so only the
+    // privacy filter can keep the link out.
+    await mkdir(join(vaultPath, 'concepts'), { recursive: true });
+    await writeFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), '---\ntype: concept\n---\n');
 
     try {
       const result = await generateConceptNotes({
@@ -433,9 +453,9 @@ describe('queryConceptData + generateConceptNotes integration', () => {
 
       const spreadingContent = await readFile(
         join(vaultPath, 'concepts', 'spreading-activation.md'), 'utf-8');
-      assert.ok(!spreadingContent.includes('[[NATS JetStream]]'),
-        'filtered note must not wikilink to a private entity');
-      assert.ok(!spreadingContent.includes('Use NATS over RabbitMQ'),
+      assert.ok(!spreadingContent.includes('nats-jetstream'),
+        'filtered note must not link a private entity');
+      assert.ok(!spreadingContent.includes('Private call on spreading'),
         'private decision text must not leak into filtered note body');
     } finally {
       db.close();
@@ -446,7 +466,11 @@ describe('queryConceptData + generateConceptNotes integration', () => {
     const db = seedDb();
     const vaultPath = join(tmpDir, 'vault-keep');
     const proseClient = {
-      generate: async () => ({ content: 'NATS JetStream is the persistence layer of the mesh.' }),
+      generateAnalysis: async () => ({ mode: 'llm', value: { content: 'NATS JetStream is the persistence layer of the mesh.' } }),
+    };
+    let fallbacks = 0;
+    const busyClient = {
+      generateAnalysis: async () => { fallbacks++; return { mode: 'fallback' }; },
     };
 
     try {
@@ -454,10 +478,14 @@ describe('queryConceptData + generateConceptNotes integration', () => {
       const withProse = await readFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), 'utf-8');
       assert.ok(withProse.includes('persistence layer of the mesh'));
 
-      // Next cycle: LLM unavailable. The note must keep its prose, not
-      // regress to the placeholder.
-      await generateConceptNotes({ db, vaultPath, threshold: 5, client: null });
+      // The entity row changes so the note is rebuilt, and the analysis lane
+      // is busy: the note must keep its prose, not regress to the placeholder.
+      db.prepare(`UPDATE entities SET mention_count = 11, last_seen = '2026-05-21' WHERE name = 'NATS JetStream'`).run();
+      const busy = await generateConceptNotes({ db, vaultPath, threshold: 5, client: busyClient });
+      assert.equal(fallbacks, 1);
+      assert.deepEqual(busy.notes, ['nats-jetstream.md']);
       const afterOutage = await readFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), 'utf-8');
+      assert.match(afterOutage, /mention_count: 11/);
       assert.ok(afterOutage.includes('persistence layer of the mesh'));
       assert.ok(!afterOutage.includes('_Summary not yet generated._'));
     } finally {
@@ -478,6 +506,107 @@ describe('queryConceptData + generateConceptNotes integration', () => {
       assert.equal(second.generated, 0, 'identical data must not rewrite notes');
       assert.equal(second.unchanged, 2);
       assert.equal(second.attempted, 2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('re-summarizes a note that has prose only when its entity row changed', async () => {
+    const db = seedDb();
+    const vaultPath = join(tmpDir, 'vault-refresh');
+    const calls = [];
+    const proseClient = {
+      generateAnalysis: async (messages) => {
+        calls.push(messages[1].content);
+        return { mode: 'llm', value: { content: `Prose number ${calls.length} for this concept.` } };
+      },
+    };
+
+    try {
+      await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(calls.length, 2);
+
+      const idle = await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(calls.length, 2, 'unchanged entity rows must not spend LLM calls');
+      assert.equal(idle.attempted, 0);
+      assert.equal(idle.unchanged, 2);
+      assert.equal(idle.skipped, 0);
+      assert.equal(idle.generated, 0);
+
+      db.prepare(`UPDATE entities SET mention_count = 11, last_seen = '2026-05-21' WHERE name = 'NATS JetStream'`).run();
+      const changed = await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(calls.length, 3);
+      assert.match(calls[2], /NATS JetStream/);
+      assert.deepEqual(changed.notes, ['nats-jetstream.md']);
+      assert.equal(changed.unchanged, 1);
+      const note = await readFile(join(vaultPath, 'concepts', 'nats-jetstream.md'), 'utf-8');
+      assert.match(note, /mention_count: 11/);
+      assert.match(note, /Prose number 3/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('walks the vault for boundary scores only when a remaining candidate already has a note', async () => {
+    const db = seedDb();
+    const vaultPath = join(tmpDir, 'vault-walk');
+    const proseClient = {
+      generateAnalysis: async () => ({ mode: 'llm', value: { content: 'A concept summary that is long enough.' } }),
+    };
+    const fsp = createRequire(import.meta.url)('node:fs/promises');
+    const realReadFile = fsp.readFile;
+    const sentinel = join(vaultPath, 'sessions', 'sentinel.md');
+    let sentinelReads = 0;
+    fsp.readFile = function (p, ...rest) {
+      if (String(p) === sentinel) sentinelReads++;
+      return realReadFile.call(this, p, ...rest);
+    };
+    syncBuiltinESMExports();
+
+    try {
+      await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      await writeFile(sentinel, '# sentinel\n');
+      sentinelReads = 0;
+
+      const idle = await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(idle.unchanged, 2);
+      assert.equal(sentinelReads, 0, 'nothing left to rank: no vault walk');
+
+      db.prepare(`UPDATE entities SET mention_count = 11, last_seen = '2026-05-21' WHERE name = 'NATS JetStream'`).run();
+      await generateConceptNotes({ db, vaultPath, threshold: 5, client: proseClient });
+      assert.equal(sentinelReads, 1, 'a stale existing note is ranked by boundary score');
+    } finally {
+      fsp.readFile = realReadFile;
+      syncBuiltinESMExports();
+      db.close();
+    }
+  });
+
+  it('runs per-entity detail queries only for the concepts inside the budget, prepared once', async () => {
+    const db = seedDb();
+    db.prepare(`INSERT INTO entities (name, type, first_seen, last_seen, mention_count, private)
+      VALUES ('Third Concept', 'concept', '2026-05-11', '2026-05-18', 6, 0)`).run();
+    const vaultPath = join(tmpDir, 'vault-detail-budget');
+    const prepared = [];
+    const executed = [];
+    const spyDb = {
+      prepare(sql) {
+        const stmt = db.prepare(sql);
+        prepared.push(sql);
+        return {
+          get: (...args) => { executed.push(sql); return stmt.get(...args); },
+          all: (...args) => { executed.push(sql); return stmt.all(...args); },
+        };
+      },
+    };
+    const isSalience = (sql) => sql.includes('AVG(salience)');
+
+    try {
+      const result = await generateConceptNotes({ db: spyDb, vaultPath, threshold: 5, client: null, maxConcepts: 2 });
+      assert.equal(result.generated, 2);
+      assert.equal(result.skipped, 1);
+      assert.equal(executed.filter(isSalience).length, 2, 'details only for the 2 budgeted concepts');
+      assert.equal(prepared.filter(isSalience).length, 1, 'detail statements prepared once per call');
     } finally {
       db.close();
     }

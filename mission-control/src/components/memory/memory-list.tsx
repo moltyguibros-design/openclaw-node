@@ -1,7 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
-import { FileText, BookOpen, Database, ChevronRight } from "lucide-react";
+import { FileText, BookOpen, BookMarked, Database, ChevronRight } from "lucide-react";
 import type { MemoryDocListItem } from "@/lib/hooks";
 
 const SOURCE_STYLES: Record<
@@ -25,6 +25,12 @@ const SOURCE_STYLES: Record<
     dotColor: "bg-amber-400",
     icon: Database,
     label: "ClawVault",
+  },
+  lore: {
+    color: "text-emerald-400",
+    dotColor: "bg-emerald-400",
+    icon: BookMarked,
+    label: "Lore",
   },
 };
 
@@ -68,8 +74,6 @@ export function MemoryList({
       </div>
     );
   }
-
-  // Group by date for chronological display
 
   return (
     <div className="space-y-1">

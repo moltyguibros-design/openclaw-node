@@ -4,6 +4,8 @@ import { openStore, closeStore, getVersion, setVersion } from '../lib/sqlite-sto
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { once } from 'node:events';
+import { Worker } from 'node:worker_threads';
 
 const TMP_DIR = path.join(os.tmpdir(), 'sqlite-store-test-' + process.pid);
 
@@ -147,5 +149,98 @@ describe('R21 (repair 5.5): readonly opens get busy_timeout', () => {
     assert.equal(ro.pragma('busy_timeout', { simple: true }), 5000);
     ro.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('open-time corruption check: full at boot, quick on recurring opens', () => {
+  async function checksRun(open) {
+    const { default: Database } = await import('better-sqlite3');
+    const seen = [];
+    const original = Database.prototype.pragma;
+    Database.prototype.pragma = function (source, options) {
+      if (/^(integrity|quick)_check$/.test(source)) seen.push(source);
+      return original.call(this, source, options);
+    };
+    try {
+      open().close();
+    } finally {
+      Database.prototype.pragma = original;
+    }
+    return seen;
+  }
+
+  it('runs the full integrity_check by default and quick_check for integrityCheck: quick', async () => {
+    const dbPath = path.join(TMP_DIR, 'checks.db');
+    assert.deepEqual(await checksRun(() => openStore(dbPath)), ['integrity_check']);
+    assert.deepEqual(await checksRun(() => openStore(dbPath, { integrityCheck: 'quick' })), ['quick_check']);
+    assert.deepEqual(await checksRun(() => openStore(dbPath, { integrityCheck: false })), []);
+  });
+
+  it('quick_check still refuses a file that is not a database', () => {
+    const dbPath = path.join(TMP_DIR, 'corrupt-quick.db');
+    fs.writeFileSync(dbPath, 'not a sqlite database');
+    assert.throws(() => openStore(dbPath, { integrityCheck: 'quick' }), /quick check failed|not a database/i);
+  });
+
+  it('the recurring openers ask for quick_check', async () => {
+    const { createExtractionStore } = await import('../lib/extraction-store.mjs');
+    const { SessionStore } = await import('../lib/session-store.mjs');
+    const { initDatabase } = await import('../lib/mcp-knowledge/core.mjs');
+    const dbPath = path.join(TMP_DIR, 'state.db');
+    assert.deepEqual(await checksRun(() => createExtractionStore({ dbPath, integrityCheck: 'quick' })), ['quick_check']);
+    assert.deepEqual(await checksRun(() => new SessionStore({ dbPath, integrityCheck: 'quick' })), ['quick_check']);
+    assert.deepEqual(await checksRun(() => initDatabase(path.join(TMP_DIR, 'k.db'), { integrityCheck: 'quick' })), ['quick_check']);
+
+    const { runScheduledCycle } = await import('../bin/consolidation-scheduler.mjs');
+    let asked;
+    await runScheduledCycle({ hardCapMs: 5000, client: {}, runCycle: async (args) => { asked = args.integrityCheck; return {}; } });
+    assert.equal(asked, 'quick', 'each consolidation cycle opens state.db with quick_check');
+  });
+
+  it('the flush worker and the index job open with quick_check', () => {
+    const worker = fs.readFileSync(new URL('../workspace-bin/flush-worker.mjs', import.meta.url), 'utf8');
+    assert.equal((worker.match(/new SessionStore\(\{ dbPath: stateDb, integrityCheck: 'quick' \}\)/g) || []).length, 2);
+    assert.match(worker, /createExtractionStore\(\{ dbPath: stateDb, integrityCheck: 'quick' \}\)/);
+    const job = fs.readFileSync(new URL('../workspace-bin/knowledge-index-job.mjs', import.meta.url), 'utf8');
+    assert.match(job, /initDatabase\(knowledgePath, \{ integrityCheck: 'quick' \}\)/);
+    assert.match(job, /openStore\(statePath, \{ readonly: true, integrityCheck: 'quick' \}\)/);
+    assert.doesNotMatch(worker + job, /integrityCheck: false/);
+  });
+});
+
+describe('backupStore temp file', () => {
+  it('is per thread: a worker never writes into, or deletes, another thread\'s in-progress copy', async () => {
+    const dbFile = path.join(TMP_DIR, 'seed.db');
+    const db = openStore(dbFile);
+    db.exec('CREATE TABLE t (x); INSERT INTO t VALUES (1);');
+    closeStore(db);
+    const dir = path.join(TMP_DIR, 'backups');
+    fs.mkdirSync(dir);
+    const now = '2026-01-01T00:00:00.000Z';
+    const target = path.join(dir, 'seed.db-20260101T000000000Z.db');
+    // The main thread's copy of the same millisecond, still being written.
+    const planted = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(planted, 'in progress');
+
+    const worker = new Worker(`
+      const { parentPort, workerData } = require('node:worker_threads');
+      (async () => {
+        const { openStore, backupStore } = await import(workerData.mod);
+        const db = openStore(workerData.dbFile, { integrityCheck: false });
+        try {
+          parentPort.postMessage({ ok: true, path: backupStore(db, { dir: workerData.dir, now: new Date(workerData.now) }).path });
+        } catch (err) {
+          parentPort.postMessage({ ok: false, error: err.message });
+        } finally {
+          db.close();
+        }
+      })();
+    `, { eval: true, workerData: { mod: new URL('../lib/sqlite-store.mjs', import.meta.url).href, dbFile, dir, now } });
+    const [msg] = await once(worker, 'message');
+    await once(worker, 'exit');
+
+    assert.deepEqual(msg, { ok: true, path: target });
+    assert.equal(fs.readFileSync(planted, 'utf8'), 'in progress');
+    openStore(target, { readonly: true, integrityCheck: 'quick' }).close();
   });
 });

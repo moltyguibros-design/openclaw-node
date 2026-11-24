@@ -27,7 +27,7 @@ export async function GET() {
 
   // Memory stats
   const memoryDocCount = (raw.prepare("SELECT COUNT(*) as count FROM memory_docs").get() as { count: number }).count;
-  const memoryItemCount = (raw.prepare("SELECT COUNT(*) as count FROM memory_items WHERE status = 'active'").get() as { count: number }).count;
+  const memoryItemCount = (raw.prepare("SELECT COUNT(*) as count FROM memory_items WHERE status = 'active' AND valid_to IS NULL").get() as { count: number }).count;
   const entityCount = (raw.prepare("SELECT COUNT(*) as count FROM memory_entities").get() as { count: number }).count;
   const relationCount = (raw.prepare("SELECT COUNT(*) as count FROM memory_relations WHERE valid_to IS NULL").get() as { count: number }).count;
 

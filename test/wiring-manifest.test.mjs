@@ -19,7 +19,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -35,15 +35,23 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'createOfferer',          calledIn: 'lib/federation-startup.mjs' },
   { factory: 'createAcceptor',         calledIn: 'lib/federation-startup.mjs' },
   { factory: 'startFederation',        calledIn: 'workspace-bin/memory-daemon.mjs' },
+  // Built is not driven: each half of the trio's API needs a production caller.
+  { factory: 'maybeBroadcast',         calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'checkAcceptance',        calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'getTopOffer',            calledIn: 'lib/memory-inject-server.mjs' },
+  { factory: 'broadcastFromConsolidation', calledIn: 'lib/federation-startup.mjs' },
+  { factory: 'broadcastConsolidation', calledIn: 'workspace-bin/memory-daemon.mjs' },
+  { factory: 'createPeerTracker',      calledIn: 'lib/federation-startup.mjs' },
 
   // F-N2: registry + seenIds must be constructed at startup, not left null.
   { factory: 'createIdentityRegistry', calledIn: 'lib/federation-startup.mjs' },
   { factory: 'createSeenEventCache',   calledIn: 'lib/federation-startup.mjs' },
 
-  // Subscriber + in-process consolidation scheduler are wired from the same
-  // federation section of the one daemon.
+  // The subscriber is wired from the federation section of the one daemon.
+  // Consolidation cycles are the standalone timer's (its CLI builds the
+  // scheduler); the daemon only broadcasts (broadcastConsolidation above).
   { factory: 'createSubscriber',       calledIn: 'workspace-bin/memory-daemon.mjs' },
-  { factory: 'createConsolidationScheduler', calledIn: 'workspace-bin/memory-daemon.mjs' },
+  { factory: 'createConsolidationScheduler', calledIn: 'bin/consolidation-scheduler.mjs' },
   // STUB_AUDIT wiring: Channel 5 (spreading activation) — the daemon's
   // getGraphCache() constructs it and both the inject server and federation
   // reuse the instance. (The extraction trigger + runFlush wires are locked
@@ -85,6 +93,7 @@ const REQUIRED_PRODUCTION_WIRES = [
   { factory: 'withKanbanLockSync',       calledIn: 'mission-control/src/lib/sync/tasks.ts' }, // MC takes the kanban lock (P5-5)
   // Phase 6 — remaining plan items.
   { factory: 'reapExpiredLeases',        calledIn: 'bin/mesh-task-daemon.js' },       // dead-worker requeue (P4-5)
+  { factory: 'requeueOwnedBy',           calledIn: 'bin/mesh-node-remove.js' },       // node removal requeues under CAS
   { factory: 'renderServiceTemplate',    calledIn: 'bin/openclaw-node-init.js' },     // one service definition (P4-8)
   // The flush runs OFF the daemon's main thread since the flush-worker change
   // (audits/flush_worker): the daemon invokes runFlushInWorker at every flush
@@ -128,6 +137,57 @@ function stripImports(src) {
     ;
 }
 
+// Comments and the factory's own declaration are also in call position, so a
+// row whose factory is defined in its calledIn file could never fail. Comment
+// strips are anchored to line starts: an unanchored /* would open inside glob
+// strings such as 'test/**'.
+function isInvoked(src, name) {
+  const code = stripImports(src)
+    .replace(/^\s*\/\*[\s\S]*?\*\//gm, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s*\\*?\\s*${name}\\s*\\(`, 'g'), '');
+  return new RegExp(`\\b${name}\\s*\\(`).test(code);
+}
+
+describe('isInvoked self-test', () => {
+  it('a definition plus a comment mention is not a call', () => {
+    assert.equal(isInvoked('async function f() {}\n// f (see x)\n', 'f'), false);
+    assert.equal(isInvoked('export async function f() {}\n/* f(x) */\n', 'f'), false);
+  });
+
+  it('a definition plus a real call is a call', () => {
+    assert.equal(isInvoked('function f() {}\nf();', 'f'), true);
+  });
+
+  it('dropping the only call of a factory defined in its calledIn file fails the row', () => {
+    const src = readFileSync(join(REPO_ROOT, 'bin/mesh-agent.js'), 'utf8');
+    assert.ok(src.includes('await reconcileKeptBranches();'));
+    assert.equal(isInvoked(src.replace('await reconcileKeptBranches();', ''), 'reconcileKeptBranches'), false);
+  });
+});
+
+describe('every mesh.collab.* subject the task daemon serves has a sender', () => {
+  const DAEMON = 'bin/mesh-task-daemon.js';
+  const SELF = 'test/wiring-manifest.test.mjs';
+  const daemonSrc = readFileSync(join(REPO_ROOT, DAEMON), 'utf8');
+  const subjects = [...daemonSrc.matchAll(/^\s*'(mesh\.collab\.[a-z.]+)':/gm)].map((m) => m[1]);
+  const senders = ['bin', 'lib', 'mission-control/src', 'test']
+    .flatMap((dir) => readdirSync(join(REPO_ROOT, dir), { recursive: true }).map((f) => join(dir, f)))
+    .filter((f) => /\.(c|m)?js$|\.tsx?$/.test(f) && f !== DAEMON && f !== SELF)
+    .map((f) => ({ f, src: readFileSync(join(REPO_ROOT, f), 'utf8') }));
+
+  it('the handler map serves collab subjects', () => {
+    assert.ok(subjects.includes('mesh.collab.join'), subjects.join(', '));
+  });
+
+  for (const subject of subjects) {
+    it(`${subject} has a sender outside the daemon`, () => {
+      const literal = new RegExp(`${subject.replace(/\./g, '\\.')}['"\`]`);
+      assert.ok(senders.some(({ src }) => literal.test(src)), `${subject} is served but nothing sends it`);
+    });
+  }
+});
+
 describe('production wiring manifest', () => {
   for (const { factory, calledIn } of REQUIRED_PRODUCTION_WIRES) {
     it(`regression_F-N1: ${factory} is invoked (call position) in ${calledIn}`, () => {
@@ -137,16 +197,10 @@ describe('production wiring manifest', () => {
       } catch (err) {
         assert.fail(`expected entrypoint ${calledIn} to exist (${err.message})`);
       }
-      // Strip imports so a factory that's imported-but-never-called fails.
-      const stripped = stripImports(src);
-      // Match `factory(` or `factory (` — explicit call position. F-P110
-      // / F-Q412: previously the regex was just `\b${factory}\b` which
-      // a comment or leftover import would satisfy.
-      const callPattern = new RegExp(`\\b${factory}\\s*\\(`);
-      assert.match(stripped, callPattern,
+      assert.ok(isInvoked(src, factory),
         `${factory} must be INVOKED (call position) in ${calledIn} — not just imported. ` +
         `If the factory was renamed, update REQUIRED_PRODUCTION_WIRES. ` +
-        `If intentionally inert, document the gap in memory-plan/STUB_AUDIT.md and remove the row. ` +
+        `If intentionally inert, document the gap in memory-plan/plans/legacy/STUB_AUDIT.md and remove the row. ` +
         `See F-N1 + F-P110 + F-Q412.`);
     });
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNats, sc } from "@/lib/nats";
 import { getDb } from "@/lib/db";
-import { tasks, clusterMembers } from "@/lib/db/schema";
+import { tasks, clusters, clusterMembers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateTaskId } from "@/lib/task-id";
 import { statusToKanban } from "@/lib/parsers/task-markdown";
@@ -25,11 +25,11 @@ export async function POST(request: NextRequest) {
     description,
     clusterId,
     nodes: manualNodes,
-    mode = "parallel",
-    convergence = { type: "unanimous" },
+    mode,
+    convergence,
     scopeStrategy = "shared",
     budgetMinutes = 30,
-    maxRounds = 5,
+    maxRounds,
     metric,
     scope = [],
   } = body;
@@ -41,8 +41,16 @@ export async function POST(request: NextRequest) {
   // Resolve nodes from cluster or manual list
   const db = getDb();
   let nodeIds: string[] = [];
+  let cluster: typeof clusters.$inferSelect | undefined;
 
   if (clusterId) {
+    cluster = db.select().from(clusters).where(eq(clusters.id, clusterId)).get();
+    if (!cluster || cluster.status !== "active") {
+      return NextResponse.json(
+        { error: `Cluster "${clusterId}" is not active` },
+        { status: 400 }
+      );
+    }
     const members = db
       .select()
       .from(clusterMembers)
@@ -52,11 +60,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (Array.isArray(manualNodes) && manualNodes.length > 0) {
-    // Pre-existing behavior: entries missing both keys flow through as
-    // undefined rather than being filtered.
-    const manualIds = manualNodes.map(
-      (n: { node_id?: string; nodeId?: string }) => n.node_id || n.nodeId
-    ) as string[];
+    const manualIds = manualNodes
+      .map((n: { node_id?: string; nodeId?: string }) => n.node_id || n.nodeId)
+      .filter((x): x is string => typeof x === "string" && x.length > 0);
     nodeIds = [...new Set([...nodeIds, ...manualIds])];
   }
 
@@ -67,17 +73,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const conv = convergence ?? {
+    type: cluster?.defaultConvergence ?? "unanimous",
+    threshold: cluster?.convergenceThreshold,
+  };
+
   // Build collaboration spec (bridge reads this from markdown)
   const collabSpec = {
-    mode,
+    mode: mode ?? cluster?.defaultMode ?? "parallel",
     min_nodes: Math.min(nodeIds.length, 2),
     max_nodes: nodeIds.length,
     join_window_s: 30,
-    max_rounds: maxRounds,
+    max_rounds: maxRounds ?? cluster?.maxRounds ?? 5,
     convergence: {
-      type: convergence.type || "unanimous",
-      threshold: (convergence.threshold ?? 66) / 100,
-      metric: convergence.metric || null,
+      type: conv.type || "unanimous",
+      threshold: (conv.threshold ?? 66) / 100,
+      metric: conv.metric || null,
       min_quorum: Math.min(nodeIds.length, 2),
     },
     scope_strategy: scopeStrategy,

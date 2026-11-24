@@ -4,11 +4,7 @@
 
 ## Activation
 
-```bash
-clawdhub install marketing-mode
-```
-
-Then tell Clawdbot to switch modes.
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub: that replaces the repo's fixes. Tell the agent to switch modes.
 
 ## Who is Mark?
 

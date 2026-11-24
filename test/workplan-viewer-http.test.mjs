@@ -7,12 +7,12 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const script = fileURLToPath(new URL('../workspace-bin/workplan-viewer.mjs', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fixture(t) {
+async function fixture(t, { prepare = () => ({}) } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'viewer-http-'));
   const plan = path.join(root, 'plans/fixture');
   const tokenFile = path.join(root, 'token');
@@ -21,6 +21,7 @@ async function fixture(t) {
   fs.mkdirSync(path.join(root, 'bin'));
   fs.writeFileSync(tokenFile, master, { mode: 0o600 });
   fs.writeFileSync(path.join(root, 'bin/launchctl'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  fs.writeFileSync(path.join(root, 'bin/git'), '#!/bin/sh\necho "$@" >> "' + path.join(root, 'git-calls') + '"\n', { mode: 0o700 });
   fs.writeFileSync(path.join(plan, 'VERSION'), 'v1.0\n');
   fs.writeFileSync(path.join(plan, 'INVENTORY.md'), '# Fixture\n');
   fs.writeFileSync(path.join(plan, 'tick-logs/sample.log'), 'FIXTURE_LOG\n');
@@ -33,10 +34,12 @@ async function fixture(t) {
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const origin = `http://127.0.0.1:${port}`;
+  const extraEnv = prepare(root, plan);
   const child = spawn(process.execPath, [script], { cwd: root,
     env: { ...process.env, HOME: root, WORKPLAN_ROOTS: path.join(root, 'plans'),
       WORKPLAN_VIEWER_TOKEN_FILE: tokenFile, WORKPLAN_VIEWER_PORT: String(port),
-      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH },
+      MEMORY_PLAN_NOTIFY: 'off', PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH,
+      WORKPLAN_VIEWER_PLATFORM: 'darwin', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -102,7 +105,10 @@ test('all private routes reject anonymous access before effects; the shell expos
   assert.match(shell.headers['content-security-policy'], /script-src 'self'/);
   assert.match(shell.headers['content-security-policy'], /frame-ancestors 'none'/);
   assert.equal(shell.headers['access-control-allow-origin'], undefined);
-  assert.equal((await f.request('/viewer-client.js')).status, 200);
+  const client = await f.request('/viewer-client.js');
+  assert.equal(client.status, 200);
+  assert.ok(!client.text.includes('\\\\n'), 'client strings must not contain a literal backslash-n');
+  assert.ok(!client.text.includes('memory-plan/BLOCKED.md'), 'BLOCKED.md lives in the plan silo');
   assert.equal((await f.request('/viewer-session.mjs')).status, 200);
 });
 
@@ -241,6 +247,120 @@ test('authenticated controls preserve errors and execute only the fixture comman
   assert.ok(!f.output().includes(f.master));
 });
 
+test('a plan close_check reaches the tick as WORKPLAN_CLOSE_CHECK from the plist and from run-once', async t => {
+  const f = await fixture(t);
+  const opts = { token: f.master };
+  const seen = path.join(f.root, 'close-check');
+  const tick = path.join(f.root, 'env-tick.sh');
+  fs.writeFileSync(tick, '#!/bin/sh\nprintf %s "$WORKPLAN_CLOSE_CHECK" > "' + seen + '"\n', { mode: 0o700 });
+  const plist = path.join(f.root, 'fixture.plist');
+  const config = { tick_command: tick, working_dir: f.root, plist_label: 'fixture-only', plist_path: plist,
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800,
+    close_check: 'node --test test/service-gate.test.mjs' };
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: config })).status, 200);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8')).close_check, config.close_check);
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  assert.match(fs.readFileSync(plist, 'utf8'),
+    /<key>WORKPLAN_CLOSE_CHECK<\/key>\n\s*<string>node --test test\/service-gate\.test\.mjs<\/string>/);
+  assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+  for (let i = 0; i < 50 && !(fs.existsSync(seen) && fs.statSync(seen).size); i++) await sleep(20);
+  assert.equal(fs.readFileSync(seen, 'utf8'), config.close_check);
+});
+
+test('a plan agent_provider reaches the tick as WORKPLAN_AGENT_PROVIDER; an unknown one is refused', async t => {
+  const f = await fixture(t);
+  const opts = { token: f.master };
+  const seen = path.join(f.root, 'agent-provider');
+  const tick = path.join(f.root, 'env-tick.sh');
+  fs.writeFileSync(tick, '#!/bin/sh\nprintf %s "$WORKPLAN_AGENT_PROVIDER" > "' + seen + '"\n', { mode: 0o700 });
+  const plist = path.join(f.root, 'fixture.plist');
+  const config = { tick_command: tick, working_dir: f.root, plist_label: 'fixture-only', plist_path: plist,
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+  const refused = await f.request('/api/plans/fixture/automation/config',
+    { ...opts, method: 'PUT', body: { ...config, agent_provider: 'ollama' } });
+  assert.equal(refused.status, 400);
+  assert.match(JSON.parse(refused.text).error, /agent_provider must be one of claude, codex, gemini/);
+  assert.equal(fs.existsSync(path.join(f.plan, 'automation.json')), false);
+
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: config })).status, 200);
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  assert.doesNotMatch(fs.readFileSync(plist, 'utf8'), /WORKPLAN_AGENT_PROVIDER/, 'no provider set means plan-tick picks its default');
+
+  assert.equal((await f.request('/api/plans/fixture/automation/config',
+    { ...opts, method: 'PUT', body: { agent_provider: 'codex' } })).status, 200);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8')).agent_provider, 'codex');
+  assert.match(fs.readFileSync(plist, 'utf8'), /<key>WORKPLAN_AGENT_PROVIDER<\/key>\n\s*<string>codex<\/string>/);
+  assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+  for (let i = 0; i < 50 && !(fs.existsSync(seen) && fs.statSync(seen).size); i++) await sleep(20);
+  assert.equal(fs.readFileSync(seen, 'utf8'), 'codex');
+});
+
+test("the repo-level tick lock refuses run-once and shows only on the plan that holds it", async t => {
+  const f = await fixture(t);
+  const opts = { token: f.master };
+  const lock = path.join(f.root, '.tick.lock');
+  fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, 'plan'), 'other\n');
+  fs.writeFileSync(path.join(f.root, 'tick-run.sh'), '#!/bin/sh\nprintf ran > "' + path.join(f.root, 'ran') + '"\n', { mode: 0o700 });
+  const config = { tick_command: path.join(f.root, 'tick-run.sh'), working_dir: f.root,
+    plist_label: 'fixture-only', plist_path: path.join(f.root, 'fixture.plist'),
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: config })).status, 200);
+  const refused = await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' });
+  assert.equal(refused.status, 409);
+  assert.match(JSON.parse(refused.text).error, /lock held by other/);
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, false);
+  fs.writeFileSync(path.join(lock, 'plan'), 'fixture\n');
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, true);
+  await sleep(100);
+  assert.equal(fs.existsSync(path.join(f.root, 'ran')), false);
+
+  const old = new Date(Date.now() - 2 * 3600 * 1000);
+  fs.utimesSync(lock, old, old);
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/state', opts)).text).locked, false);
+  assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+  for (let i = 0; i < 50 && !fs.existsSync(path.join(f.root, 'ran')); i++) await sleep(20);
+  assert.equal(fs.readFileSync(path.join(f.root, 'ran'), 'utf8'), 'ran');
+});
+
+test('a filesystem error in one route answers 500 and the viewer stays up', async t => {
+  const f = await fixture(t, { prepare: (root, plan) => {
+    fs.symlinkSync(path.join(root, 'missing.md'), path.join(plan, 'NOTES.md'));
+    return {};
+  } });
+  const opts = { token: f.master };
+  const docs = await f.request('/api/plans/fixture/docs', opts);
+  assert.equal(docs.status, 500);
+  assert.match(JSON.parse(docs.text).error, /ENOENT/);
+  assert.equal((await f.request('/api/plans/fixture/state', opts)).status, 200);
+  assert.equal(f.child.exitCode, null);
+});
+
+test('default automation config points at the repo that holds memory-plan/plans', async t => {
+  const f = await fixture(t);
+  const r = await f.request('/api/plans/fixture/automation', { token: f.master });
+  assert.equal(r.status, 200);
+  const { config } = JSON.parse(r.text);
+  const repo = path.dirname(f.root);
+  assert.equal(config._persisted, false);
+  assert.equal(config.tick_command, path.join(repo, 'workspace-bin', 'fixture-tick.sh'));
+  assert.equal(config.working_dir, repo);
+  assert.equal(fs.existsSync(path.join(f.plan, 'automation.json')), false);
+});
+
+test('only the per-plan state route spends a git status on tree_dirty', async t => {
+  const f = await fixture(t);
+  const calls = path.join(f.root, 'git-calls');
+  const plans = await f.request('/api/plans', { token: f.master });
+  assert.equal(plans.status, 200);
+  assert.equal(JSON.parse(plans.text).plans[0].tree_dirty, null);
+  assert.equal(fs.existsSync(calls), false);
+  const state = await f.request('/api/plans/fixture/state', { token: f.master });
+  assert.equal(state.status, 200);
+  assert.equal(JSON.parse(state.text).tree_dirty, false);
+  assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 1);
+});
+
 test('session exchange, streamed logs, revocation and file rotation work through HTTP', async t => {
   const f = await fixture(t);
   const login = () => f.request('/api/session', { method: 'POST', headers: { Origin: f.origin, 'Sec-Fetch-Site': 'same-origin' }, body: { token: f.master } });
@@ -285,4 +405,283 @@ test('a pinned stream keeps its original file when the selected name is replaced
   assert.ok(!text.includes('PRIVATE_OUTSIDE_LOG_ROOT'));
   await reader.cancel();
   assert.equal((await f.request('/api/plans/fixture/stream?log=sample.log', { token: f.master })).status, 404);
+});
+
+async function sseEvents(t, f, route) {
+  const controller = new AbortController();
+  const response = await fetch(f.origin + route, { headers: { Authorization: `Bearer ${f.master}` }, signal: controller.signal });
+  assert.equal(response.status, 200);
+  const events = [];
+  const decoder = new TextDecoder();
+  let pending = '';
+  const pump = (async () => {
+    try {
+      for await (const chunk of response.body) {
+        pending += decoder.decode(chunk, { stream: true });
+        let end;
+        while ((end = pending.indexOf('\n\n')) !== -1) {
+          const block = pending.slice(0, end);
+          pending = pending.slice(end + 2);
+          const event = block.match(/^event: (.*)$/m)?.[1];
+          if (event) events.push({ event, data: block.match(/^data: (.*)$/m)?.[1] });
+        }
+      }
+    } catch {}
+  })();
+  const close = async () => { controller.abort(); await pump; };
+  t.after(close);
+  async function waitFor(predicate, ms = 3000) {
+    for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(25)) {
+      const hit = events.find(predicate);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  return { events, waitFor, close };
+}
+
+test('global streams share one session-transcript scan instead of re-listing it on every poll', async t => {
+  let sessions, counter;
+  const f = await fixture(t, { prepare(root, plan) {
+    const old = new Date(Date.now() - 3600000);
+    fs.utimesSync(path.join(plan, 'tick-logs/sample.log'), old, old);
+    const suffix = path.join('.claude/projects', fs.realpathSync(root).replace(/[/.]/g, '-'));
+    sessions = path.join(root, suffix);
+    fs.mkdirSync(sessions, { recursive: true });
+    for (const name of ['a', 'c', 'd']) {
+      fs.writeFileSync(path.join(sessions, name + '.jsonl'), '');
+      fs.utimesSync(path.join(sessions, name + '.jsonl'), old, old);
+    }
+    counter = path.join(root, 'session-scans');
+    const hook = path.join(root, 'count-scans.mjs');
+    fs.writeFileSync(hook, `import fs from 'node:fs';
+const readdirSync = fs.readdirSync;
+fs.readdirSync = function (dir, ...rest) {
+  if (String(dir).endsWith(${JSON.stringify(suffix)})) fs.appendFileSync(${JSON.stringify(counter)}, '.');
+  return readdirSync.call(this, dir, ...rest);
+};
+`);
+    return { NODE_OPTIONS: '--import ' + pathToFileURL(hook).href };
+  } });
+  const activity = await sseEvents(t, f, '/api/global/activity-stream');
+  const live = await sseEvents(t, f, '/api/global/stream');
+  assert.ok(await activity.waitFor(e => e.event === 'reset'), f.output());
+  assert.ok(await live.waitFor(e => e.event === 'file'), f.output());
+  await sleep(3000);
+  const scans = fs.readFileSync(counter, 'utf8').length;
+  assert.ok(scans >= 1 && scans <= 4, `session dir listed ${scans} times in ~3s`);
+  fs.writeFileSync(path.join(sessions, 'b.jsonl'), '');
+  const switched = await activity.waitFor(e => e.event === 'reset' && JSON.parse(e.data).source === 'b.jsonl', 3500);
+  assert.ok(switched, 'a newer session transcript is picked up within the cache window');
+});
+
+// The repo prefix that Progress strips from tool paths was one operator's
+// checkout, so every other checkout showed full (or ~-relative) paths.
+test('progress shortens tool paths relative to the checkout the viewer runs from', async t => {
+  const f = await fixture(t, { prepare(root, plan) {
+    const event = { type: 'assistant', message: { content: [
+      { type: 'tool_use', name: 'Read', input: { file_path: path.join(fs.realpathSync(root), 'lib', 'probe.mjs') } },
+    ] } };
+    fs.writeFileSync(path.join(plan, 'tick-logs/sample.jsonl'), JSON.stringify(event) + '\n');
+    return {};
+  } });
+  const activity = await sseEvents(t, f, '/api/plans/fixture/activity-stream');
+  const read = await activity.waitFor(e => e.event === 'activity');
+  assert.ok(read, f.output());
+  assert.match(JSON.parse(read.data).body, /^lib\/probe\.mjs\b/);
+});
+
+test('a log stream keeps a multi-byte character split across writes', async t => {
+  const f = await fixture(t);
+  const file = path.join(f.plan, 'tick-logs/sample.log');
+  fs.writeFileSync(file, Buffer.concat([Buffer.from('FIXTURE_LOG\n'), Buffer.from([0xc3])]));
+  const stream = await sseEvents(t, f, '/api/plans/fixture/stream?log=sample.log');
+  const appends = () => stream.events.filter(e => e.event === 'append');
+  const text = () => appends().map(e => JSON.parse(e.data)).join('');
+  assert.ok(await stream.waitFor(() => appends().length === 1), f.output());
+  fs.appendFileSync(file, Buffer.from([0xa9, 0x58, 0x0a]));
+  assert.ok(await stream.waitFor(() => appends().length === 2), JSON.stringify(text()));
+  assert.equal(text(), 'FIXTURE_LOG\néX\n');
+});
+
+// The Steps tab paired row N with the Nth alphabetical audit dir, so a step
+// showed another step's audit (foreman shifted by one; step310 sorted before
+// step31). Rows now resolve by step id: an explicit step-id marker, else the
+// canonical step<B><S>_ name.
+test('a step resolves its own audit dir by step id, never by row position', async t => {
+  const audits = {
+    'remediation_2026-09-26': null,
+    step11_shadow: null,
+    step12_timeline: null,
+    step31_service_gate: null,
+    step310_first_transition: null,
+    'step05_sequential-era': '<!-- step-id: 2.3 -->',
+  };
+  const f = await fixture(t, { prepare: (root, plan) => {
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), [
+      '| Block | Step | Version | Status | Description |', '|---|---|---|---|---|',
+      ...['1.1', '1.2', '3.1', '3.10', '2.3', '0.5'].map(s => `| ${s.split('.')[0]} | ${s} | v1.0 | [x] | step ${s} |`),
+    ].join('\n') + '\n');
+    for (const [d, marker] of Object.entries(audits)) {
+      fs.mkdirSync(path.join(plan, 'audits', d), { recursive: true });
+      fs.writeFileSync(path.join(plan, 'audits', d, 'AUDIT_PRE.md'), `# PRE ${d}\n${marker ?? ''}\n`);
+      fs.writeFileSync(path.join(plan, 'audits', d, 'AUDIT_POST.md'), `# POST ${d}\n`);
+    }
+    return {};
+  } });
+  const expected = ['step11_shadow', 'step12_timeline', 'step31_service_gate', 'step310_first_transition', 'step05_sequential-era', null];
+  for (const [idx, dirName] of expected.entries()) {
+    const r = JSON.parse((await f.request(`/api/plans/fixture/audits/${idx}`, { token: f.master })).text);
+    assert.equal(r.dirName, dirName, `row ${idx} (${r.step?.step})`);
+    if (dirName) assert.equal(r.pre, `# PRE ${dirName}\n${audits[dirName] ?? ''}\n`);
+  }
+  const history = JSON.parse((await f.request('/api/plans/fixture/logs', { token: f.master })).text)
+    .filter(e => e.kind === 'step').map(e => e.name).sort();
+  assert.deepEqual(history, ['1.1 shadow', '1.2 timeline', '2.3 sequential-era', '3.1 service gate', '3.10 first transition', 'remediation_2026-09-26']);
+});
+
+// Pre-protocol silos number audit dirs in closing order (legacy step45 is step
+// 9.1), so History read the first dir digit as the block. The AUDIT_POST title
+// now names the step; the dir digits are only the fallback.
+test('history labels a sequentially numbered audit dir by its title step id', async t => {
+  const audits = {
+    step45_broadcast_schemas: '# AUDIT_POST — Step 9.1: Broadcast schemas',
+    step59_dogfood_harness: '# AUDIT_POST — step 10.9 · Dogfood harness',
+    step31_service_gate: '# AUDIT_POST',
+  };
+  const f = await fixture(t, { prepare: (root, plan) => {
+    fs.writeFileSync(path.join(plan, 'INVENTORY.md'), [
+      '| Block | Step | Version | Status | Description |', '|---|---|---|---|---|',
+      ...['3.1', '9.1', '10.9'].map(s => `| ${s.split('.')[0]} | ${s} | v1.0 | [x] | step ${s} |`),
+    ].join('\n') + '\n');
+    for (const [d, title] of Object.entries(audits)) {
+      fs.mkdirSync(path.join(plan, 'audits', d), { recursive: true });
+      fs.writeFileSync(path.join(plan, 'audits', d, 'AUDIT_POST.md'), `${title}\n\nStep 4.5 is mentioned below the title.\n`);
+    }
+    return {};
+  } });
+  const history = JSON.parse((await f.request('/api/plans/fixture/logs', { token: f.master })).text)
+    .filter(e => e.kind === 'step').map(e => e.name).sort();
+  assert.deepEqual(history, ['10.9 dogfood harness', '3.1 service gate', '9.1 broadcast schemas']);
+  const row = JSON.parse((await f.request('/api/plans/fixture/audits/1', { token: f.master })).text);
+  assert.equal(row.dirName, 'step45_broadcast_schemas');
+});
+
+// A launchctl that keeps the job's loaded state and PID in files under root and logs every call.
+function statefulLaunchctl(root) {
+  const loaded = path.join(root, 'launchd-loaded');
+  const pid = path.join(root, 'launchd-pid');
+  const calls = path.join(root, 'launchctl-calls');
+  fs.writeFileSync(path.join(root, 'bin/launchctl'), `#!/bin/sh
+echo "$*" >> "${calls}"
+case "$1" in
+  list)
+    [ -n "$2" ] || { printf 'PID\\tStatus\\tLabel\\n'; exit 0; }
+    [ -f "${loaded}" ] || exit 113
+    printf '{\\n\\t"Label" = "%s";\\n' "$2"
+    [ -f "${pid}" ] && printf '\\t"PID" = %s;\\n' "$(cat "${pid}")"
+    printf '};\\n' ;;
+  bootstrap) touch "${loaded}" ;;
+  bootout)
+    [ -f "${loaded}" ] || { echo "Boot-out failed: 3: No such process" >&2; exit 3; }
+    rm -f "${loaded}" ;;
+esac
+exit 0
+`, { mode: 0o700 });
+  return {
+    calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : ''),
+    resetCalls: () => fs.rmSync(calls, { force: true }),
+    setPid: (value) => (value ? fs.writeFileSync(pid, String(value)) : fs.rmSync(pid, { force: true })),
+    selfPause: () => fs.rmSync(loaded, { force: true }),
+  };
+}
+
+function schedulerConfig(f) {
+  return { tick_command: path.join(f.root, 'tick.sh'), working_dir: f.root,
+    plist_label: 'fixture-only', plist_path: path.join(f.root, 'fixture.plist'),
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+}
+
+// kickstart -k and the bootout/bootstrap reload both killed a running tick mid-step.
+test('Fire-now and schedule changes refuse while the scheduled tick runs, and kill nothing', async t => {
+  let launchd;
+  const f = await fixture(t, { prepare: (root) => { launchd = statefulLaunchctl(root); return {}; } });
+  const opts = { token: f.master };
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: schedulerConfig(f) })).status, 200);
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  const saved = fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8');
+  launchd.setPid(4242);
+  launchd.resetCalls();
+
+  const fire = await f.request('/api/plans/fixture/automation/kickstart', { ...opts, method: 'POST' });
+  assert.equal(fire.status, 409);
+  assert.match(JSON.parse(fire.text).error, /a tick is running, retry after it exits/);
+  const change = await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: { interval_seconds: 3600 } });
+  assert.equal(change.status, 409);
+  assert.match(JSON.parse(change.text).error, /a tick is running, retry after it exits/);
+  assert.equal(fs.readFileSync(path.join(f.plan, 'automation.json'), 'utf8'), saved);
+  assert.doesNotMatch(launchd.calls(), /kickstart|bootout|bootstrap/);
+
+  launchd.setPid(null);
+  assert.equal((await f.request('/api/plans/fixture/automation/kickstart', { ...opts, method: 'POST' })).status, 200);
+  assert.match(launchd.calls(), /^kickstart -k gui\/\d+\/fixture-only$/m);
+  const client = (await f.request('/viewer-client.js')).text;
+  assert.ok(!client.includes('Most actions will refuse'), 'the client names exactly which actions refuse');
+});
+
+// Stop scheduler left the plist on disk, so Resume took a deliberate stop for a self-pause.
+test('Resume reloads a scheduler that paused itself, never one the operator stopped', async t => {
+  let launchd;
+  const f = await fixture(t, { prepare: (root) => { launchd = statefulLaunchctl(root); return {}; } });
+  const opts = { token: f.master };
+  const plist = path.join(f.root, 'fixture.plist');
+  const block = () => f.request('/api/plans/fixture/block', { ...opts, method: 'POST', body: { content: 'Paused' } });
+  const unblock = async () => JSON.parse((await f.request('/api/plans/fixture/unblock', { ...opts, method: 'POST' })).text);
+  assert.equal((await f.request('/api/plans/fixture/automation/config', { ...opts, method: 'PUT', body: schedulerConfig(f) })).status, 200);
+
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  assert.equal((await f.request('/api/plans/fixture/automation/unload', { ...opts, method: 'POST' })).status, 200);
+  assert.equal(fs.existsSync(plist), false, 'Stop removes the plist; Start regenerates it');
+  assert.equal((await block()).status, 200);
+  launchd.resetCalls();
+  assert.equal((await unblock()).scheduler_reloaded, false);
+  assert.doesNotMatch(launchd.calls(), /bootstrap/);
+
+  assert.equal((await f.request('/api/plans/fixture/automation/load', { ...opts, method: 'POST' })).status, 200);
+  launchd.selfPause();
+  assert.equal((await block()).status, 200);
+  launchd.resetCalls();
+  assert.equal((await unblock()).scheduler_reloaded, true);
+  assert.match(launchd.calls(), /^bootstrap gui\/\d+ /m);
+});
+
+// On Linux, Start wrote a launchd plist under ~/Library/LaunchAgents and then failed on the missing
+// launchctl, and every later Resume reported a failed reload.
+test('on Linux the launchd routes refuse, write nothing under ~/Library, and Run one tick keeps its agent provider', async t => {
+  const f = await fixture(t, { prepare: () => ({ WORKPLAN_VIEWER_PLATFORM: 'linux' }) });
+  const opts = { token: f.master };
+  const seen = path.join(f.root, 'agent-provider');
+  const tick = path.join(f.root, 'env-tick.sh');
+  fs.writeFileSync(tick, '#!/bin/sh\nprintf %s "$WORKPLAN_AGENT_PROVIDER" > "' + seen + '"\n', { mode: 0o700 });
+  const config = { tick_command: tick, working_dir: f.root,
+    stdout_path: path.join(f.root, 'stdout'), stderr_path: path.join(f.root, 'stderr'), interval_seconds: 1800 };
+  for (const provider of ['codex', 'gemini']) {
+    fs.rmSync(seen, { force: true });
+    assert.equal((await f.request('/api/plans/fixture/automation/config',
+      { ...opts, method: 'PUT', body: { ...config, agent_provider: provider } })).status, 200);
+    assert.equal((await f.request('/api/plans/fixture/automation/run-once', { ...opts, method: 'POST' })).status, 200);
+    for (let i = 0; i < 50 && !(fs.existsSync(seen) && fs.statSync(seen).size); i++) await sleep(20);
+    assert.equal(fs.readFileSync(seen, 'utf8'), provider);
+  }
+  for (const route of ['load', 'unload', 'kickstart']) {
+    const r = await f.request('/api/plans/fixture/automation/' + route, { ...opts, method: 'POST' });
+    assert.equal(r.status, 501, route);
+    assert.match(JSON.parse(r.text).error, /launchd scheduling is macOS-only; use Run one tick/);
+  }
+  assert.equal(fs.existsSync(path.join(f.root, 'Library')), false);
+  assert.equal(JSON.parse((await f.request('/api/plans/fixture/automation', opts)).text).scheduler_supported, false);
+  assert.match((await f.request('/viewer-client.js')).text, /if \(s\.scheduler_supported === false\) \{\n\s+html \+= '<button[^\n]*btn-run-once/);
+  assert.equal((await f.request('/api/plans/fixture/block', { ...opts, method: 'POST', body: { content: 'Paused' } })).status, 200);
+  const resumed = JSON.parse((await f.request('/api/plans/fixture/unblock', { ...opts, method: 'POST' })).text);
+  assert.deepEqual([resumed.scheduler_reloaded, resumed.scheduler_error], [false, null]);
 });

@@ -9,10 +9,17 @@ addition. This replaces the companion-bridge proxy as the path memory takes into
 the gateway.
 
 What stays in the daemon: retrieval (the six-channel pipeline), the token
-budget, `@memory` directives, reconsolidation write-back, and **extraction** —
+budget, `@memory` directives (the daemon honours them, but this plugin passes
+the conversation through unchanged, so unlike the publisher wrappers the model
+still sees the directive text), reconsolidation write-back, and **extraction** —
 the daemon already tails `~/.openclaw/agents/*/sessions/*.jsonl` and flushes on
 idle / session end / pre-compaction size, so this plugin records nothing.
-Compaction is delegated to OpenClaw's native compactor.
+Compaction runs in OpenClaw's delegating mode: the engine always declares
+`ownsCompaction: false`, so the gateway keeps its built-in auto-compaction, and
+`compact()` (used by `/compact` and overflow recovery) calls
+`delegateCompactionToRuntime` from `openclaw/plugin-sdk/core`. If that import
+fails the plugin logs one warning and `compact()` returns `ok: false`
+(`host_compaction_unavailable`).
 
 ## Install
 
@@ -35,10 +42,11 @@ and the daemon's `memory.injected` events (Mission Control → watcher) show
 | Key | Default | Meaning |
 |---|---|---|
 | `injectUrl` | `http://127.0.0.1:7893` | Must be loopback; the client refuses anything else. |
-| `tokenPath` | `~/.openclaw/config/memory-injection-token` | Re-read on every request. |
+| `tokenPath` | `$OPENCLAW_HOME/config/memory-injection-token` (`~/.openclaw/...` when `OPENCLAW_HOME` is unset, as the daemon writes it) | Re-read on every request. |
 | `autoRecall` | `true` | Inject on every turn. |
+| `skipHeartbeats` | `true` | No recall on heartbeat turns: flagged by the host (`isHeartbeat`) or a prompt naming `HEARTBEAT.md` / `HEARTBEAT_OK`. Saves the daemon's query analysis and keeps heartbeat checks from boosting memory ranking; a user turn naming either also goes without memory. |
 | `maxInjectedChars` | `6000` | Longer blocks are cut on a line boundary. |
-| `timeoutMs` | `4000` | On timeout the turn proceeds without memory. |
+| `timeoutMs` | `12000` | Above the daemon's worst case (up to 8 s of LLM query analysis, then embedding and retrieval: about 9–11 s); the turn can wait that long. On timeout the turn proceeds without memory. |
 | `bypassSessionPatterns` | `[]` | e.g. `agent:*:cron:**` — no recall for matching session keys. |
 
 ## Tools

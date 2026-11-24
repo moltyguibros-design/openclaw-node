@@ -6,10 +6,10 @@
  * host's Ollama answers.
  */
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,7 +36,7 @@ exit 7`,
 };
 
 function machine(vars = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'llm-host-'));
+  const dir = tmpDir('llm-host-');
   for (const [name, body] of Object.entries(STUBS)) {
     const file = join(dir, name);
     writeFileSync(file, `#!/bin/bash\n${body}\n`);
@@ -44,7 +44,10 @@ function machine(vars = {}) {
   }
   const envFile = join(dir, 'openclaw.env');
   writeFileSync(envFile, 'LLM_MODEL=qwen3:8b\nLLM_BASE_URL=http://localhost:11434\nOTHER=kept\n');
-  const env = { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, STUB_OS: 'Darwin', ...vars };
+  // The installers refuse any root but $HOME/.openclaw, so dir is reached through it.
+  const home = tmpDir('llm-host-home-');
+  symlinkSync(dir, join(home, '.openclaw'));
+  const env = { PATH: `${dir}:/usr/bin:/bin`, HOME: home, STUB_OS: 'Darwin', ...vars };
   return { dir, envFile, env };
 }
 
@@ -145,7 +148,7 @@ test('--dry-run reports the bridge and writes nothing', () => {
 test('wave 2 in a VM uses the host and downloads nothing, without ollama installed', () => {
   const m = machine(UTM_VM);
   const r = spawnSync('bash', [LLM_SETUP, '--check'], {
-    env: { ...m.env, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    env: { ...m.env, ENV_FILE: m.envFile, REPO_DIR: ROOT, NODE_BIN: process.execPath },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -158,11 +161,59 @@ test('wave 2 treats an already-recorded remote endpoint the same way', () => {
   const m = machine({ STUB_VMM: '0' });
   writeFileSync(m.envFile, 'LLM_MODEL=qwen3:8b\nLLM_BASE_URL=http://192.168.64.1:11434\n');
   const r = spawnSync('bash', [LLM_SETUP, '--check'], {
-    env: { ...m.env, ENV_FILE: m.envFile, OPENCLAW_ROOT: m.dir, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    env: { ...m.env, ENV_FILE: m.envFile, REPO_DIR: ROOT, NODE_BIN: process.execPath },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /LLM endpoint\s+: http:\/\/192\.168\.64\.1:11434/);
+});
+
+const wave2 = (m, args) => {
+  const r = spawnSync('bash', [LLM_SETUP, ...args], {
+    env: { ...m.env, ENV_FILE: m.envFile, REPO_DIR: ROOT, NODE_BIN: process.execPath },
+    encoding: 'utf8',
+  });
+  return { ...r, out: r.stdout.replace(/\x1b\[[0-9;]*m/g, '') };
+};
+
+test('wave 2 sizes the embedder from the transformers.js cache, not the Python HF cache', () => {
+  const cached = machine(UTM_VM);
+  const onnx = join(cached.dir, 'workspace/node_modules/@huggingface/transformers/.cache/Xenova/bge-m3/onnx');
+  mkdirSync(onnx, { recursive: true });
+  writeFileSync(join(onnx, 'model.onnx'), '');
+  const hit = wave2(cached, ['--check']);
+  assert.equal(hit.status, 0, hit.out + hit.stderr);
+  assert.match(hit.out, /Embedder\s+: already cached/);
+  assert.match(hit.out, /Total download : ~0 GB/);
+
+  const pythonOnly = machine(UTM_VM);
+  const hfHub = join(pythonOnly.env.HOME, '.cache/huggingface/hub');
+  mkdirSync(hfHub, { recursive: true });
+  writeFileSync(join(hfHub, 'config.json'), '{"_name_or_path": "BAAI/bge-m3"}');
+  const miss = wave2(pythonOnly, ['--check']);
+  assert.equal(miss.status, 0, miss.out + miss.stderr);
+  assert.match(miss.out, /Embedder\s+: Xenova\/bge-m3\s+\(~2 GB/);
+  assert.match(miss.out, /Total download : ~2 GB/);
+});
+
+test('wave 2 summary names the model once', () => {
+  const m = machine({ STUB_VMM: '0' });
+  const r = wave2(m, ['--endpoint', 'http://192.0.2.7:8000', '--model', 'm1']);
+  assert.equal(r.status, 0, r.out + r.stderr);
+  assert.match(r.out, /Wave 2 complete — model: endpoint http:\/\/192\.0\.2\.7:8000 \(m1\)$/m);
+  assert.match(readFileSync(m.envFile, 'utf8'), /^LLM_MODEL=m1$/m);
+  const retry = wave2(machine({ STUB_VMM: '0' }), ['--embedder-only']);
+  assert.equal(retry.status, 0, retry.out + retry.stderr);
+  assert.match(retry.out, /Wave 2 complete — model: unchanged$/m);
+});
+
+// record_endpoint rewrote the key through sed, where '&' expands to the matched line.
+test('wave 2 records an endpoint URL with & literally', () => {
+  const m = machine({ STUB_VMM: '0' });
+  writeFileSync(m.envFile, 'LLM_BASE_URL=http://old\nLLM_MODEL=qwen3:8b\n');
+  const r = wave2(m, ['--endpoint', 'https://gw.example/v1?key=a&org=b', '--model', 'm1']);
+  assert.equal(r.status, 0, r.out + r.stderr);
+  assert.equal(readFileSync(m.envFile, 'utf8'), 'LLM_BASE_URL=https://gw.example/v1?key=a&org=b\nLLM_MODEL=m1\n');
 });
 
 test('the install wiring: config.sh bridges before rendering; only a local URL starts or pulls ollama', () => {

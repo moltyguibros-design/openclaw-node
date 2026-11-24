@@ -80,15 +80,7 @@ For AI agents, this is critical because we don't have continuous awareness. We w
 
 ## Installation
 
-Via ClawdHub:
-```
-clawdhub install agentic-compass
-```
-
-Or clone from source:
-```bash
-git clone https://github.com/orosha-ai/agentic-compass
-```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Version History
 

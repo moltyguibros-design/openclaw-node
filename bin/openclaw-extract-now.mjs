@@ -2,7 +2,7 @@
 /**
  * openclaw-extract-now.mjs — Manual extraction trigger CLI.
  *
- * Connects to NATS, publishes `mesh.memory.extract_request`, exits.
+ * Connects to NATS, publishes `mesh.memory.extract_request.<nodeId>`, exits.
  * Used by Tier 1 hooks (shell scripts) and as Tier 3 manual fallback.
  *
  * Usage:
@@ -10,14 +10,13 @@
  *
  * Env:
  *   NATS_URL                 — NATS server (default: nats://localhost:4222)
- *   OPENCLAW_NODE_ID         — Node identifier (default: os.hostname())
+ *   OPENCLAW_NODE_ID         — Node identifier (default: ~/.openclaw/openclaw.env, then the hostname)
  */
 
-import os from 'node:os';
 import { parseArgs } from 'node:util';
 import { createRequire } from 'node:module';
 import { connect } from 'nats';
-import { EXTRACT_SUBJECT, publishExtractDirect } from '../lib/publishers/publish-helper.mjs';
+import { publishExtractDirect, resolvePublisherNodeId } from '../lib/publishers/publish-helper.mjs';
 
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
 
@@ -32,7 +31,7 @@ const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.
  */
 export async function runExtractNow(opts = {}) {
   const natsUrl = opts.natsUrl || process.env.NATS_URL || undefined;
-  const nodeId = opts.nodeId || process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = opts.nodeId || resolvePublisherNodeId();
   const triggeredBy = opts.triggeredBy || 'manual';
 
   try {

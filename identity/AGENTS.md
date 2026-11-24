@@ -22,14 +22,14 @@ Before doing anything else, read in this order (static identity first, dynamic s
 3. Read `AGENTS.md` — operational rules (you're reading it now)
 
 **Tier 2 — Session state (changes per session, read last):**
-4. Read `.companion-state.md` — **MANDATORY. ALWAYS. NO EXCEPTIONS.** Immediate context from last turn.
-   - If `status: active` but no session is running → previous session crashed. Run crash recovery (see Crash Recovery section in companion state).
+4. Read `.daemon-state-<node>.md` (find it with `ls .daemon-state-*.md`) — **MANDATORY. ALWAYS. NO EXCEPTIONS.** The memory daemon's view of the last session.
+   - If `status: active` or `status: idle` but no session is live → the previous session crashed before its end-of-session flush. Run crash recovery (see the file's Crash Recovery section).
 5. Read `memory/active-tasks.md` — current work state (running/done/blocked only, ~12KB)
 6. Read `.learnings/lessons.md` — accumulated corrections and preferences (behavior loop)
-7. Read `memory/YYYY-MM-DD.md` (today) for recent context
-8. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
-9. Run `clawvault-local wake` (if available) to recover active context and handoffs.
-10. **Check Mission Control is running** — curl -s localhost:3000/api/tasks. If down, start it (`cd projects/mission-control && npm run dev` in background). If still fails, flag immediately.
+7. Read `memory/last-session-recap.md` — rolling digest of prior sessions (continuity across crashes), kept current by the memory daemon
+8. Read `memory/YYYY-MM-DD.md` (today) for recent context
+9. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
+10. **Check Mission Control is healthy** — `node bin/mc-health.mjs`. If it is unhealthy or unreachable, run `node bin/mc-health.mjs --restart` once (a managed launchd/systemd restart with a 15-minute cooldown). If that does not restore health (exit 3), flag immediately. Never start a development server: Mission Control is a supervised service and a second copy would fight it for :3000. Call any other Mission Control `/api` route through `bin/mc-api` (e.g. `bin/mc-api /api/tasks`), which sends the session token.
 
 **Lazy-loaded (read only when relevant):**
 - `TOOLS.md` — environment-specific notes (TTS voices, SSH hosts, etc.)
@@ -48,11 +48,11 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 
 ### Memory Automation (Principle 11)
 
-All memory ops are fully automated by `bin/memory-daemon` (launchd, every 30s). No manual calls needed.
-- `bin/memory-maintenance` every 30min: archival, stale tasks, ClawVault checkpoint, daily file, MC sync
+All memory ops are fully automated by `bin/memory-daemon.mjs` (the memory-daemon service — launchd `ai.openclaw.memory-daemon` / systemd `openclaw-memory-daemon` — every 30s). No manual calls needed.
+- `bin/memory-maintenance.mjs` every 30min: predictions, stale tasks, ClawVault checkpoint, MC sync
 - `bin/session-recap` every 10min: rolling 3-session digest
 - ClawVault: `clawvault-local` — `remember`, `search`, `vsearch` on-demand. Auto wake/checkpoint/sleep.
-- Heartbeat: runs `bin/memory-maintenance --force --verbose` first. See HEARTBEAT.md.
+- Heartbeat: runs `bin/memory-maintenance.mjs --verbose` first. See HEARTBEAT.md.
 
 ### Memory Rules
 
@@ -62,7 +62,7 @@ All memory ops are fully automated by `bin/memory-daemon` (launchd, every 30s). 
 - "Remember this" → write to `memory/YYYY-MM-DD.md` immediately. Mental notes don't survive restarts.
 - Structure: Active Context (this week) → Recent (this month) → Stable (long-term) → Archive Reference
 - Conflicts: recent entry wins unless older one is marked core preference
-- Decay: dailies archived after 30 days, MEMORY.md pruned of stale entries during maintenance
+- Decay: MEMORY.md pruned of stale entries during maintenance
 
 ## Task Completion — HARD RULE (INTERRUPT PRIORITY)
 
@@ -86,7 +86,6 @@ The kanban board auto-reads `memory/active-tasks.md` every 3 seconds. **Do NOT P
 
 - **START non-trivial work:** Add/update entry in `memory/active-tasks.md` with `status: running`
 - **FINISH work:** Update entry to `status: waiting-user` (NEVER `done` — only Gui marks done)
-- **Keep `.companion-state.md` current** — it feeds the Live Session banner
 
 The kanban is reactive to the file. The file is the source of truth. No API calls needed from Daedalus.
 
@@ -100,28 +99,6 @@ The kanban is reactive to the file. The file is the source of truth. No API call
 
 **Post-completion check:** After moving a task to `waiting-user`, ALWAYS re-query for the next dispatched auto-start task. The daemon may have already pushed one. Never declare "no more tasks" without re-checking.
 
-### Task-Start Protocol (required before executing any task)
-
-1. Read task spec. Identify domain + subdomain.
-2. Check `memory/strategies/` for a matching strategy file.
-3. If found: use as starting approach. Set `strategy_used` and `strategy_source: "archive"` in telemetry.
-4. If not found: use best judgment. Set `strategy_source: "heuristic"`.
-5. Assess `session_position`:
-   - position 1–3: ambitious approaches acceptable
-   - position 6+: prefer conservative, high-confidence approaches
-6. Begin execution.
-
-### Task Close Protocol (required after every task, before moving to next)
-
-After completing or escalating a task:
-
-1. Append one JSON line to `memory/performance.jsonl` (see `memory/performance-schema.md`).
-2. Assess and set any applicable `pattern_flags`. Be honest — flags are diagnostic, not punitive.
-3. Write `meta_notes`: what approach, why, key moment, one forward hypothesis. Min 20 words.
-4. If this task is inside a proposal eval window, set `eval_window_for` to the proposal ID.
-5. If `session_position == session_total_planned`, queue a `[meta] reflection` task.
-6. If tasks completed since last reflection >= 5, queue a `[meta] reflection` task.
-
 ### Auto-Start Tasks — HARD RULE (Kanban Daemon)
 
 When a task has `needs_approval: false` (auto-start enabled), the kanban daemon owns dispatch. **This is autonomous execution — Daedalus does the actual work, not just status bookkeeping.**
@@ -131,8 +108,8 @@ When a task has `needs_approval: false` (auto-start enabled), the kanban daemon 
    - **ALWAYS read the full task first.** Title alone is NOT enough. Read description, success criteria, artifacts, next_action — understand the full spec before writing a single line of code. Never assume from the title. If the description references documents (TECH_ARCHITECTURE.md, lore specs, design docs, etc.), READ THOSE TOO before starting. No excuses.
 3. **If blocked → contact Gui.** Move to `status: blocked` with clear explanation of what's stopping you. The daemon will push the next task.
 4. **When finished → ALWAYS `status: waiting-user`.** Daedalus NEVER marks a task `done`. Every completed task goes to review. Only Gui moves it to `done`. The daemon sees the slot is free and dispatches the next queued auto-start task.
-6. **Priority order.** Higher `auto_priority` tasks dispatch first. Dependencies respected (predecessors must be done).
-7. **Backlog visibility.** Queued auto-start tasks are visible in the kanban backlog. They get pushed one-by-one as Daedalus completes work.
+5. **Priority order.** Higher `auto_priority` tasks dispatch first. Dependencies respected (predecessors must be done).
+6. **Backlog visibility.** Queued auto-start tasks are visible in the kanban backlog. They get pushed one-by-one as Daedalus completes work.
 
 **Flow:** Queued → [daemon dispatches 1] → Running (Daedalus **executes**) → Review/Blocked → [Gui approves → Done] → [daemon dispatches next]
 

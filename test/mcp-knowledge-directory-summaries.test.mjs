@@ -19,7 +19,6 @@ import {
   buildDirectorySummaries,
   deterministicSummary,
   titleOf,
-  ancestorsOf,
   listDirectoryTree,
   getDirectorySummary,
   searchDirectories,
@@ -115,10 +114,6 @@ describe('pure helpers', () => {
   it('titleOf prefers the first heading, else the basename', () => {
     assert.equal(titleOf('a/b/File Name.md', '# Real Title'), 'Real Title');
     assert.equal(titleOf('a/b/File Name.md', '(top)'), 'File Name');
-  });
-  it('ancestorsOf walks to the root', () => {
-    assert.deepEqual(ancestorsOf('a/b/c.md'), ['a/b', 'a', '']);
-    assert.deepEqual(ancestorsOf('c.md'), ['']);
   });
   it('normalizeDir strips ./ and slashes, refuses ..', () => {
     assert.equal(normalizeDir('./memory/'), 'memory');
@@ -222,7 +217,7 @@ describe('buildDirectorySummaries', () => {
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM directory_summaries WHERE generator='llm'").get().n, 6);
   });
 
-  it('falls back to deterministic when the LLM fails or answers garbage, and stops calling a dead model', async () => {
+  it('falls back to deterministic when the LLM fails or answers garbage, stops calling a dead model, and does not re-ask a rejected directory until it changes', async () => {
     const dead = realLlm((body, send) => send(500, 'model requires more system memory than is available'));
     const r = await buildDirectorySummaries(db, { llmClient: dead, log: () => {} });
     assert.equal(dead.asked.length, 1, 'one failure stops LLM attempts for the pass');
@@ -232,8 +227,15 @@ describe('buildDirectorySummaries', () => {
     seedDocs(db, [{ path: 'memory/2026-09-03.md', title: 'Daily 3', text: 'x' }]);
     const r2 = await buildDirectorySummaries(db, { llmClient: garbage });
     assert.equal(r2.llm, 0);
-    assert.equal(getDirectorySummary(db, 'memory').generator, 'deterministic');
+    assert.equal(getDirectorySummary(db, 'memory').generator, 'llm-rejected');
     assert.match(getDirectorySummary(db, 'memory').abstract, /Daily 3/);
+    const asked = garbage.asked.length;
+    const r3 = await buildDirectorySummaries(db, { llmClient: garbage });
+    assert.equal(garbage.asked.length, asked, 'a rejected answer is not re-asked while the directory is unchanged');
+    assert.equal(r3.unchanged, r3.total);
+    seedDocs(db, [{ path: 'memory/2026-09-04.md', title: 'Daily 4', text: 'x' }]);
+    await buildDirectorySummaries(db, { llmClient: garbage });
+    assert.equal(garbage.asked.length, asked + 2, 'a changed directory and its parent are asked again');
   });
 
   it('treats a queue fallback as no model: deterministic for the rest of the pass', async () => {
@@ -269,6 +271,32 @@ describe('buildDirectorySummaries', () => {
     let embeds = 0;
     await buildDirectorySummaries(db, { embed: async (t) => { embeds++; return stubEmbed(t); } });
     assert.equal(embeds, 0);
+  });
+
+  const vectorCounts = () => ({
+    summaries: db.prepare('SELECT COUNT(*) AS n FROM directory_summaries').get().n,
+    vectors: db.prepare('SELECT COUNT(*) AS n FROM directory_vectors').get().n,
+  });
+
+  it('an embed failure does not leave a directory without a vector', async () => {
+    let calls = 0;
+    const flaky = async (t) => {
+      if (++calls === 1) throw new Error('embedder offline');
+      return stubEmbed(t);
+    };
+    await assert.rejects(buildDirectorySummaries(db, { embed: flaky }), /embedder offline/);
+    await buildDirectorySummaries(db, { embed: flaky });
+    assert.deepEqual(vectorCounts(), { summaries: 6, vectors: 6 });
+  });
+
+  it('heals an unchanged summary that has no vector', async () => {
+    await buildDirectorySummaries(db, { embed: stubEmbed });
+    db.prepare('DELETE FROM directory_vectors WHERE rowid = (SELECT id FROM directory_summaries WHERE dir_path = ?)')
+      .run('projects/arcane/lore');
+    const r = await buildDirectorySummaries(db, { embed: stubEmbed });
+    assert.deepEqual(vectorCounts(), { summaries: 6, vectors: 6 });
+    assert.equal(r.unchanged, 6);
+    assert.equal(r.built, 0);
   });
 
   it('listDirectoryTree respects prefix and depth', async () => {

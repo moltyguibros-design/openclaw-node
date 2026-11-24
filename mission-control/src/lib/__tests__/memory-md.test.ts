@@ -29,34 +29,6 @@ describe("parseMemoryMd", () => {
     expect(result.title).toBe("MEMORY.md");
   });
 
-  it("parses ## sections", () => {
-    const filePath = path.join(tmpDir, "MEMORY.md");
-    fs.writeFileSync(filePath, [
-      "# Memory",
-      "",
-      "## User Context",
-      "- Senior dev",
-      "- Likes concise code",
-      "",
-      "## Project Notes",
-      "- Building mesh network",
-    ].join("\n"));
-    const result = parseMemoryMd(filePath);
-    expect(result.sections).toHaveLength(2);
-    expect(result.sections[0].heading).toBe("User Context");
-    expect(result.sections[0].content).toContain("Senior dev");
-    expect(result.sections[1].heading).toBe("Project Notes");
-  });
-
-  it("handles empty sections", () => {
-    const filePath = path.join(tmpDir, "MEMORY.md");
-    fs.writeFileSync(filePath, "# Memory\n## Empty\n## Next\nContent\n");
-    const result = parseMemoryMd(filePath);
-    expect(result.sections).toHaveLength(2);
-    expect(result.sections[0].content).toBe("");
-    expect(result.sections[1].content).toBe("Content");
-  });
-
   it("preserves full content", () => {
     const filePath = path.join(tmpDir, "MEMORY.md");
     const content = "# Memory\n\nRaw content here\n";
@@ -75,13 +47,5 @@ describe("parseMemoryMd", () => {
 
   it("throws for missing file", () => {
     expect(() => parseMemoryMd("/nonexistent/MEMORY.md")).toThrow("not found");
-  });
-
-  it("handles file with no sections", () => {
-    const filePath = path.join(tmpDir, "MEMORY.md");
-    fs.writeFileSync(filePath, "# Memory\nJust a title and text\n");
-    const result = parseMemoryMd(filePath);
-    expect(result.sections).toHaveLength(0);
-    expect(result.title).toBe("Memory");
   });
 });

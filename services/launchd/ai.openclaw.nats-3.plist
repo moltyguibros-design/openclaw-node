@@ -8,18 +8,18 @@
     <string>OpenClaw NATS Node 3 — client 4224, cluster 6224, monitor 8224 (R=3 cluster)</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/opt/homebrew/bin/nats-server</string>
+      <string>${NATS_SERVER_BIN}</string>
       <string>--config</string>
-      <string>${HOME}/.openclaw/config/nats-3.conf</string>
+      <string>${OPENCLAW_ROOT}/config/nats-3.conf</string>
     </array>
     <key>RunAtLoad</key>
     <false/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${HOME}/.openclaw/logs/nats-3.log</string>
+    <string>${OPENCLAW_ROOT}/logs/nats-3.log</string>
     <key>StandardErrorPath</key>
-    <string>${HOME}/.openclaw/logs/nats-3.err</string>
+    <string>${OPENCLAW_ROOT}/logs/nats-3.err</string>
     <key>EnvironmentVariables</key>
     <dict>
       <key>HOME</key>

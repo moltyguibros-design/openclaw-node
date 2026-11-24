@@ -20,7 +20,8 @@ esac
 # Force push is REFUSED here (exit 2), whatever position the flag sits in.
 # settings.json carries a matching deny list, but permission rules are prefix
 # matches and cannot see `git push origin main --force`; this hook can. The
-# same script runs as the git pre-push hook, so it holds outside Claude Code too.
+# git pre-push hook (config/git-hooks/pre-push) refuses non-fast-forward updates
+# itself, so the refusal holds outside Claude Code too.
 case "$COMMAND" in
   *"--force"*|*"-f "*|*" -f"*|*" +"*)
     echo "BLOCKED by validate-push.sh: force push refused ($COMMAND)." >&2

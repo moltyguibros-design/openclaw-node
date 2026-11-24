@@ -11,7 +11,14 @@
 #   ./workspace-bin/plan-tick.sh <id>               # run one real tick (invokes headless claude)
 #   DRY_RUN=1 ./workspace-bin/plan-tick.sh <id>     # full pre-flight then stop before claude
 #
-# Exit codes: 0 ran/short-circuit/blocked-already · 1 wrapper failure · 2 tick wrote BLOCKED.md
+# Exit codes: 0 ran/short-circuit/blocked-already · 1 wrapper failure, or the agent run
+# failed below WORKPLAN_FAIL_LIMIT in a row · 2 BLOCKED.md written (by the tick, a gate,
+# or the wrapper after WORKPLAN_FAIL_LIMIT failed agent runs in a row)
+#
+# Agent-run limits (any agent CLI):
+#   WORKPLAN_TICK_TIMEOUT  wall-clock seconds before the agent's process group is killed
+#                          (default 2700; must stay below the 3600 s stale-lock reap)
+#   WORKPLAN_FAIL_LIMIT    consecutive failed runs that block the plan (default 3)
 
 set -euo pipefail
 
@@ -26,7 +33,9 @@ PROMPT_FILE="${PLAN_DIR}/TICK_PROMPT.md"
 BLOCK_FILE="${PLAN_DIR}/BLOCKED.md"
 VERSION_FILE="${PLAN_DIR}/VERSION"
 INVENTORY_FILE="${PLAN_DIR}/INVENTORY.md"
-LOCK_DIR="${PLAN_DIR}/.tick.lock"
+# One lock for every plan: all ticks share this working tree and git index, so a
+# per-plan lock let two chains commit each other's staged files.
+LOCK_DIR="${REPO}/memory-plan/.tick.lock"
 DIGEST_FILE="${HOME}/.openclaw/workspace/memory/${PLAN_ID}-progress.md"
 
 MODE="run"
@@ -38,6 +47,38 @@ esac
 
 ts() { date '+%Y-%m-%dT%H:%M:%S%z'; }
 log() { printf '[%s] [%s] %s\n' "$(ts)" "${PLAN_ID}" "$*"; }
+
+# The plan's agent CLI: automation.json `agent_provider`, which the viewer exports as
+# WORKPLAN_AGENT_PROVIDER. Each profile reads TICK_PROMPT.md on stdin and must be able to
+# edit files and run git/npm/node unattended; any other CLI is refused, never run read-only.
+AGENT_PROVIDER="${WORKPLAN_AGENT_PROVIDER:-claude}"
+case "${AGENT_PROVIDER}" in
+  claude|codex|gemini) AGENT_BIN="${AGENT_PROVIDER}" ;;
+  *) AGENT_BIN="" ;;
+esac
+run_agent() {
+  case "${AGENT_PROVIDER}" in
+    claude)
+      claude \
+        --print \
+        --permission-mode acceptEdits \
+        --allowedTools "Bash(node:*),Bash(nats:*),Bash(/opt/homebrew/bin/nats:*),Bash(curl:*),Bash(lsof:*),Bash(npm:*),Bash(git:*),Bash(jq:*),Bash(launchctl:*)" \
+        --add-dir "${HOME}/.openclaw/workspace" \
+        --add-dir "${HOME}/.openclaw" \
+        --output-format stream-json \
+        --verbose ;;
+    # codex's workspace-write sandbox keeps .git read-only, so a sandboxed tick could
+    # never commit its step; claude's Bash(node:*) grant is no narrower in practice.
+    codex)
+      codex exec --dangerously-bypass-approvals-and-sandbox --json - ;;
+    gemini)
+      gemini \
+        --approval-mode yolo \
+        --include-directories "${HOME}/.openclaw/workspace" \
+        --include-directories "${HOME}/.openclaw" \
+        --output-format stream-json ;;
+  esac
+}
 
 # Find the first [ ] or [A] inventory row → "next step". Echoes "version|step|desc" or empty.
 # Whitespace-tolerant (same tolerance as the viewer and plan-lint — one row format,
@@ -78,7 +119,9 @@ if [ "${MODE}" = "preflight" ]; then
   else
     log "next step:   NONE — all steps closed (plan complete)"
   fi
-  command -v claude >/dev/null 2>&1 && log "claude CLI:  present" || log "claude CLI:  MISSING (real tick would FATAL)"
+  if [ -z "${AGENT_BIN}" ]; then log "agent CLI:   '${AGENT_PROVIDER}' is not a known agent_provider (real tick would FATAL)"
+  elif command -v "${AGENT_BIN}" >/dev/null 2>&1; then log "${AGENT_BIN} CLI:  present"
+  else log "${AGENT_BIN} CLI:  MISSING (a real tick would fail with rc=127)"; fi
   LINT="${REPO}/workspace-bin/plan-lint.sh"
   LINT_RC=0
   LINT_LINE="$(bash "${LINT}" "${PLAN_ID}" --summary 2>/dev/null)" || LINT_RC=$?
@@ -92,20 +135,74 @@ fi
 
 # ── Real tick ─────────────────────────────────────────────────────────────────
 
-command -v claude >/dev/null 2>&1 || { log "FATAL: claude CLI not on PATH"; exit 1; }
+[ -n "${AGENT_BIN}" ] || { log "FATAL: unknown agent_provider '${AGENT_PROVIDER}' (claude, codex or gemini)"; exit 1; }
+# A missing agent CLI is not a FATAL here: the run below exits 127 and counts as a
+# failed run, so a chain whose CLI vanished blocks after WORKPLAN_FAIL_LIMIT tries
+# instead of relaunching forever.
 [ -f "${PROMPT_FILE}" ] || { log "FATAL: ${PROMPT_FILE} missing"; exit 1; }
 mkdir -p "${TICK_LOG_DIR}"
+FAIL_FILE="${TICK_LOG_DIR}/.agent-failures"
+
+TICK_TIMEOUT_DEFAULT=2700
+TICK_TIMEOUT="${WORKPLAN_TICK_TIMEOUT:-${TICK_TIMEOUT_DEFAULT}}"
+case "${TICK_TIMEOUT}" in
+  ''|*[!0-9]*|0) TICK_TIMEOUT=0 ;;
+esac
+# At or past 3600 s the next launch would reap this tick's lock and run beside it.
+if [ "${TICK_TIMEOUT}" -le 0 ] || [ "${TICK_TIMEOUT}" -ge 3600 ]; then
+  log "warn: WORKPLAN_TICK_TIMEOUT=${WORKPLAN_TICK_TIMEOUT:-} must be 1..3599 s — using ${TICK_TIMEOUT_DEFAULT}"
+  TICK_TIMEOUT=${TICK_TIMEOUT_DEFAULT}
+fi
+FAIL_LIMIT="${WORKPLAN_FAIL_LIMIT:-3}"
+case "${FAIL_LIMIT}" in
+  ''|*[!0-9]*|0) log "warn: WORKPLAN_FAIL_LIMIT=${FAIL_LIMIT} is not a positive integer — using 3"; FAIL_LIMIT=3 ;;
+esac
 
 # Single-tick lock (mkdir atomicity; macOS has no flock). Reap stale >60min.
+# The `plan` file names the holder so the viewer can show which plan is ticking;
+# `owner` holds this tick's token, so a tick whose lock was reaped as stale never
+# deletes the lock the next holder took.
 if [ -d "${LOCK_DIR}" ]; then
-  LOCK_AGE=$(( $(date +%s) - $(stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0) ))
+  # GNU first: GNU `stat -f` prints filesystem info to stdout before failing; BSD rejects -c silently.
+  LOCK_MTIME=$(stat -c %Y "${LOCK_DIR}" 2>/dev/null || stat -f %m "${LOCK_DIR}" 2>/dev/null || echo 0)
+  LOCK_AGE=$(( $(date +%s) - LOCK_MTIME ))
   if [ "${LOCK_AGE}" -lt 3600 ]; then
-    log "skip: another tick is already running (lock age=${LOCK_AGE}s)"; exit 0
+    log "skip: another tick is already running ($(cat "${LOCK_DIR}/plan" 2>/dev/null || echo '?'), lock age=${LOCK_AGE}s)"; exit 0
   fi
-  log "info: reaping stale lock (age=${LOCK_AGE}s)"; rmdir "${LOCK_DIR}" 2>/dev/null || rm -rf "${LOCK_DIR}"
+  log "info: reaping stale lock (age=${LOCK_AGE}s)"; rm -rf "${LOCK_DIR}"
 fi
 mkdir "${LOCK_DIR}" 2>/dev/null || { log "skip: lock race lost"; exit 0; }
-trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true' EXIT
+TICK_TOKEN="$$-$(date +%s)-${RANDOM}"
+printf '%s\n' "${TICK_TOKEN}" > "${LOCK_DIR}/owner"
+owns_lock() { [ "$(cat "${LOCK_DIR}/owner" 2>/dev/null)" = "${TICK_TOKEN}" ]; }
+# The agent runs in its own process group (so a timeout can kill all of it), which
+# also takes it out of the group launchd kills when it stops this job: sweep it here.
+AGENT_PGID=""
+cleanup() {
+  if [ -n "${AGENT_PGID}" ]; then kill -TERM -- "-${AGENT_PGID}" 2>/dev/null || true; fi
+  if owns_lock; then rm -rf "${LOCK_DIR}" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s\n' "${PLAN_ID}" > "${LOCK_DIR}/plan"
+
+# Every tick leaves a <ts>.log/<ts>.jsonl pair and launchd appends to its two logs, all
+# forever. Keep the newest 200 pairs (never current.log's target) and cap launchd's at 10 MB.
+prune_tick_logs() {
+  local current logs i f
+  current=$(readlink "${TICK_LOG_DIR}/current.log" 2>/dev/null || true)
+  logs=( "${TICK_LOG_DIR}"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].log )
+  for (( i = 0; i < ${#logs[@]} - 200; i++ )); do
+    [ "$(basename "${logs[i]}")" = "${current}" ] && continue
+    rm -f "${logs[i]}" "${logs[i]%.log}.jsonl"
+  done
+  for f in "${TICK_LOG_DIR}/launchd.stdout.log" "${TICK_LOG_DIR}/launchd.stderr.log"; do
+    if [ -f "${f}" ] && [ "$(( $(wc -c < "${f}") ))" -gt 10485760 ]; then : > "${f}"; fi
+  done
+}
+prune_tick_logs
 
 maybe_autopause() {
   local reason="$1"
@@ -145,16 +242,31 @@ fi
 cd "${REPO}"
 # Untracked files are NOT dirt: a stray scratch dir or a concurrent session's new
 # files must not trip the stall-block for a chain that never touched them.
+# Only dirt inside this plan's own silo is this plan's stall. Tracked edits
+# elsewhere (the operator's, or another plan's) skip the tick without blocking
+# or pausing it, so a chain re-polls until the tree is clean again.
 DIRTY=$(git status --porcelain | grep -v '^??' || true)
 if [ -n "${DIRTY}" ]; then
+  OWN_DIRTY=$(git status --porcelain -- "memory-plan/plans/${PLAN_ID}/" | grep -v '^??' || true)
   case "${VERSION}" in
     *-pre|*-mid) log "info: tree dirty but VERSION=${VERSION} (in-flight); proceeding" ;;
-    *) log "skip: tree dirty on clean VERSION=${VERSION} — unexpected; not invoking claude"
+    *) if [ -z "${OWN_DIRTY}" ]; then
+         log "skip: tracked changes outside memory-plan/plans/${PLAN_ID}/ — not this plan's stall; not invoking claude"
+         # A waiting chain re-polls every throttle gap: list the dirt only when it changed.
+         DIRT_SUM=$(printf '%s\n' "${DIRTY}" | cksum)
+         if [ "${DIRT_SUM}" != "$(cat "${TICK_LOG_DIR}/.outside-dirt" 2>/dev/null)" ]; then
+           printf '%s\n' "${DIRTY}" | sed 's/^/        /'
+           printf '%s\n' "${DIRT_SUM}" > "${TICK_LOG_DIR}/.outside-dirt"
+         fi
+         exit 0
+       fi
+       log "skip: tree dirty on clean VERSION=${VERSION} — unexpected; not invoking claude"
        printf '%s\n' "${DIRTY}" | sed 's/^/        /'
        write_stall_block "${VERSION}" "${DIRTY}"
        maybe_autopause "dirty tree on clean VERSION"; exit 0 ;;
   esac
 fi
+rm -f "${TICK_LOG_DIR}/.outside-dirt"
 
 # ── Conformance gate (plan-lint) ─────────────────────────────────────────────
 # A nonconformant silo is never driven headless. Before, plan-lint ran only in
@@ -215,41 +327,64 @@ PRETTY="${REPO}/workspace-bin/memory-plan-pretty-stream.sh"
 TICK_START_EPOCH=$(date +%s)
 CURRENT_LINK="${TICK_LOG_DIR}/current.log"
 ln -sfn "$(basename "${TICK_LOG}")" "${CURRENT_LINK}"
+PRE_HEAD=$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)
+# Tracked content, not just clean/dirty: an in-flight -pre/-mid tick starts on a dirty tree.
+tree_fingerprint() { { git -C "${REPO}" diff --binary HEAD 2>/dev/null || true; } | cksum; }
+PRE_TREE=$(tree_fingerprint)
 
 {
   printf '## Tick started (%s): %s\n' "${PLAN_ID}" "$(ts)"
   printf '## VERSION at start: %s\n' "${VERSION:-<unset>}"
   printf '## Next step: %s\n' "${NEXT}"
-  printf '## ─── live claude work ───\n'
+  printf '## ─── live %s work ───\n' "${AGENT_PROVIDER}"
   set +e
-  cat "${PROMPT_FILE}" | claude \
-    --print \
-    --permission-mode acceptEdits \
-    --allowedTools "Bash(node:*),Bash(nats:*),Bash(/opt/homebrew/bin/nats:*),Bash(curl:*),Bash(lsof:*),Bash(npm:*),Bash(git:*),Bash(jq:*),Bash(launchctl:*)" \
-    --add-dir "${HOME}/.openclaw/workspace" \
-    --add-dir "${HOME}/.openclaw" \
-    --output-format stream-json \
-    --verbose \
-    | tee "${TICK_RAW}" \
-    | { [ -x "${PRETTY}" ] && "${PRETTY}" || cat; }
-  CLAUDE_RC=${PIPESTATUS[0]}
+  # set -m gives the background run its own process group (pgid = its pid), so the
+  # wall-clock limit can kill the agent and every tool process it spawned.
+  set -m
+  (
+    run_agent \
+      < "${PROMPT_FILE}" \
+      | tee "${TICK_RAW}" \
+      | { [ -x "${PRETTY}" ] && "${PRETTY}" || cat; }
+    exit "${PIPESTATUS[0]}"
+  ) &
+  AGENT_PGID=$!
+  set +m
+  AGENT_TIMED_OUT=0
+  while kill -0 "${AGENT_PGID}" 2>/dev/null; do
+    if [ $(( $(date +%s) - TICK_START_EPOCH )) -ge "${TICK_TIMEOUT}" ]; then
+      AGENT_TIMED_OUT=1
+      printf '\n## ─── wall-clock limit %ss reached — stopping the agent process group ───\n' "${TICK_TIMEOUT}"
+      kill -TERM -- "-${AGENT_PGID}" 2>/dev/null
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 -- "-${AGENT_PGID}" 2>/dev/null || break
+        sleep 1
+      done
+      kill -KILL -- "-${AGENT_PGID}" 2>/dev/null
+      break
+    fi
+    sleep 1
+  done
+  wait "${AGENT_PGID}"
+  AGENT_RC=$?
+  [ "${AGENT_TIMED_OUT}" = "1" ] && AGENT_RC=124
   set -e
-  printf '\n## ─── end claude (rc=%d) ───\n' "${CLAUDE_RC}"
+  printf '\n## ─── end %s (rc=%d) ───\n' "${AGENT_PROVIDER}" "${AGENT_RC}"
   printf '## Tick ended: %s\n' "$(ts)"
 } >>"${TICK_LOG}" 2>&1
 
 TICK_DURATION=$(( $(date +%s) - ${TICK_START_EPOCH:-0} ))
-log "claude exited rc=${CLAUDE_RC:-?} after ${TICK_DURATION}s"
+log "${AGENT_PROVIDER} exited rc=${AGENT_RC:-?} after ${TICK_DURATION}s"
 
 mkdir -p "$(dirname "${DIGEST_FILE}")"
 [ -f "${DIGEST_FILE}" ] || printf '# %s plan — Progress digest\n\nOne line per autonomous tick. Newest at bottom.\n\n' "${PLAN_ID}" > "${DIGEST_FILE}"
 POST_VERSION=$(cat "${VERSION_FILE}" 2>/dev/null || echo "?")
 LATEST_COMMIT=$(git -C "${REPO}" log -1 --format='%h %s' 2>/dev/null || echo "?")
 
-if [ -f "${BLOCK_FILE}" ]; then
-  TRIG=$(grep -m1 '^\*\*Trigger\*\*:' "${BLOCK_FILE}" 2>/dev/null | sed 's/^\*\*Trigger\*\*: //' | cut -c1-120)
-  printf -- '- `%s` BLOCKED at `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${TRIG:-see BLOCKED.md}" >> "${DIGEST_FILE}"
-  log "tick blocked — see ${BLOCK_FILE}"; exit 2
+# The tick's own verdict outranks its exit status: a run that wrote BLOCKED.md or moved
+# VERSION is a good run, whatever the agent CLI returned.
+if [ -f "${BLOCK_FILE}" ] || [ "${POST_VERSION}" != "${VERSION:-}" ]; then
+  rm -f "${FAIL_FILE}"
 fi
 
 # ── Close gate (mechanical done-contract, MASTER_PLAN §5) ────────────────────
@@ -257,13 +392,20 @@ fi
 # to something without -pre/-mid — a self-written string, no tests, no evidence
 # (review: the tick was judge of its own done-ness). Now a close is accepted only
 # if the closing commit carries a Runtime-Evidence: trailer AND the close check
-# (default `npm test`; WORKPLAN_CLOSE_CHECK overrides, `none` disables loudly)
+# (default `npm test`; WORKPLAN_CLOSE_CHECK overrides, `none` disables loudly;
+# the viewer exports it from the plan's automation.json `close_check`)
 # is green. A refused close writes BLOCKED.md so the chain stops and the operator
 # decides; nothing is auto-reverted.
 close_gate() {
-  local reasons=() cmd
-  if ! git -C "${REPO}" log -1 --format='%B' 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
-    reasons+=("closing commit (${LATEST_COMMIT}) carries no Runtime-Evidence: trailer")
+  local reasons=() cmd close_sha
+  # The closing commit is the one that last touched VERSION (as plan-lint grades it),
+  # not HEAD: HEAD may be an earlier close, or a later commit from elsewhere.
+  if ! git -C "${REPO}" diff --quiet HEAD -- "${VERSION_FILE}" 2>/dev/null; then
+    reasons+=("VERSION ${POST_VERSION} is not committed")
+  fi
+  close_sha=$(git -C "${REPO}" log -1 --format='%H' -- "${VERSION_FILE}" 2>/dev/null || true)
+  if [ -z "${close_sha}" ] || ! git -C "${REPO}" log -1 --format='%B' "${close_sha}" 2>/dev/null | grep -qE '^Runtime-Evidence:'; then
+    reasons+=("closing commit (${close_sha:0:7}) carries no Runtime-Evidence: trailer")
   fi
   cmd="${WORKPLAN_CLOSE_CHECK:-npm test}"
   if [ "${cmd}" = "none" ]; then
@@ -275,7 +417,15 @@ close_gate() {
     fi
   fi
   [ "${#reasons[@]}" -eq 0 ] && return 0
-  if [ ! -f "${BLOCK_FILE}" ]; then
+  # A run can close its step and then block in the macro re-orient: keep the agent's
+  # block (its External action stays the headline) and add the refusal below it.
+  if [ -f "${BLOCK_FILE}" ]; then
+    {
+      printf '\n## Close gate refused (post-tick wrapper gate, %s)\n\n' "$(ts)"
+      printf -- '- %s\n' "${reasons[@]}"
+      printf '\nThe tick advanced VERSION %s → %s but the done-contract does not hold: supply the evidence or revert the close before resuming.\n' "${VERSION:-?}" "${POST_VERSION}"
+    } >> "${BLOCK_FILE}"
+  else
     {
       printf '# CONTINUATION_BLOCKED — %s\n\n' "$(ts)"
       printf '**Step**: %s\n' "$(printf '%s' "${NEXT}" | awk -F'|' '{print $2": "$3}')"
@@ -289,16 +439,99 @@ close_gate() {
   return 1
 }
 
+# Ahead of the BLOCKED.md exit, so a run that closed and then blocked is graded too.
+CLOSED=0
 if [ "${POST_VERSION}" != "${VERSION:-}" ] && printf '%s' "${POST_VERSION}" | grep -qvE -- '-pre$|-mid$'; then
+  # The close check runs after the agent's whole budget: give it its own stale-lock
+  # window. Never a bare touch: on a reaped lock it would create a file, not the dir.
+  if owns_lock; then touch "${LOCK_DIR}"; fi
   if close_gate; then
-    printf -- '- `%s` closed `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${LATEST_COMMIT}" >> "${DIGEST_FILE}"
+    CLOSED=1
   else
     printf -- '- `%s` CLOSE REFUSED at `%s` — see BLOCKED.md\n' "$(ts)" "${POST_VERSION}" >> "${DIGEST_FILE}"
     log "close gate refused — see ${BLOCK_FILE}"; exit 2
   fi
+fi
+
+if [ -f "${BLOCK_FILE}" ]; then
+  TRIG=$(grep -m1 '^\*\*Trigger\*\*:' "${BLOCK_FILE}" 2>/dev/null | sed 's/^\*\*Trigger\*\*: //' | cut -c1-120)
+  printf -- '- `%s` BLOCKED at `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${TRIG:-see BLOCKED.md}" >> "${DIGEST_FILE}"
+  log "tick blocked — see ${BLOCK_FILE}"; exit 2
+fi
+
+if [ "${CLOSED}" = 1 ]; then
+  printf -- '- `%s` closed `%s` — %s\n' "$(ts)" "${POST_VERSION}" "${LATEST_COMMIT}" >> "${DIGEST_FILE}"
 elif [ "${POST_VERSION}" != "${VERSION:-}" ]; then
   printf -- '- `%s` progress: `%s` → `%s`\n' "$(ts)" "${VERSION:-?}" "${POST_VERSION}" >> "${DIGEST_FILE}"
 fi
 
-log "tick done (rc=${CLAUDE_RC:-?})"
+# ── Failed agent runs (any agent CLI) ────────────────────────────────────────
+# Before: the exit status was only logged and the wrapper exited 0, so under chain
+# mode (launchd KeepAlive, 30 s throttle) a CLI that failed at once — signed out,
+# out of quota, crashed, missing — relaunched ~2,880 times a day. A failed run is a
+# non-zero exit (124 = wall-clock limit, 127 = could not be started), or exit 0
+# that left VERSION, HEAD and the tracked tree as they were without answering.
+# "Answering" is the provider's own answer read from its stream (lib/agent-stream.js),
+# not any output: init, usage and empty result records counted as output, so a CLI
+# that answered nothing reset the count every time. Failures in a row are counted
+# in FAIL_FILE; any good run resets it. Below FAIL_LIMIT the wrapper exits 1 so
+# launchd's LastExitStatus shows it; at FAIL_LIMIT it blocks and pauses the chain.
+AGENT_FAILURE=""
+if [ "${POST_VERSION}" = "${VERSION:-}" ]; then
+  case "${AGENT_RC}" in
+    0)
+      if [ "$(git -C "${REPO}" rev-parse -q --verify HEAD 2>/dev/null || true)" = "${PRE_HEAD}" ] \
+        && [ "$(tree_fingerprint)" = "${PRE_TREE}" ]; then
+        ANSWER_RC=0
+        ANSWER_WHY=$(node "${REPO}/lib/agent-stream.js" "${AGENT_PROVIDER}" "${TICK_RAW}" 2>&1) || ANSWER_RC=$?
+        ANSWER_WHY=${ANSWER_WHY%%$'\n'*}
+        case "${ANSWER_RC}" in
+          0) ;;
+          1) AGENT_FAILURE="exited 0 without an answer (${ANSWER_WHY}) and changed nothing" ;;
+          *) AGENT_FAILURE="exited 0 and changed nothing, and its answer could not be checked (rc=${ANSWER_RC}: ${ANSWER_WHY:-no output})" ;;
+        esac
+      fi ;;
+    124) AGENT_FAILURE="ran past the ${TICK_TIMEOUT}s wall-clock limit and was stopped (rc=124)" ;;
+    126|127) AGENT_FAILURE="could not be started (rc=${AGENT_RC})" ;;
+    *) AGENT_FAILURE="exited rc=${AGENT_RC}" ;;
+  esac
+fi
+
+agent_fix_hint() {
+  case "${AGENT_RC}" in
+    126|127) printf 'the agent CLI `%s` is not installed, not executable, or not on the PATH this job runs with (launchd units get a minimal PATH): install it or add its directory to the unit PATH' "${AGENT_BIN}" ;;
+    124) printf 'the run hung past the %ss limit: read the last log for where it stalled, review any uncommitted work it left, and raise WORKPLAN_TICK_TIMEOUT (max 3599) only if the step genuinely needs longer' "${TICK_TIMEOUT}" ;;
+    0) printf 'the agent CLI `%s` gave no answer and changed nothing: read its stream (%s), then run it by hand on this plan TICK_PROMPT.md to see what it does' "${AGENT_BIN}" "${TICK_RAW}" ;;
+    *) printf 'sign the agent CLI `%s` in again (run it interactively), check the account quota or billing, or read the last log for a crash' "${AGENT_BIN}" ;;
+  esac
+}
+
+if [ -n "${AGENT_FAILURE}" ]; then
+  FAILS=$(cat "${FAIL_FILE}" 2>/dev/null || true)
+  case "${FAILS}" in ''|*[!0-9]*) FAILS=0 ;; esac
+  FAILS=$(( FAILS + 1 ))
+  printf '%s\n' "${FAILS}" > "${FAIL_FILE}"
+  if [ "${FAILS}" -lt "${FAIL_LIMIT}" ]; then
+    printf -- '- `%s` agent run failed (%s/%s): %s %s\n' "$(ts)" "${FAILS}" "${FAIL_LIMIT}" "${AGENT_BIN}" "${AGENT_FAILURE}" >> "${DIGEST_FILE}"
+    log "agent run failed (${FAILS}/${FAIL_LIMIT} in a row): ${AGENT_BIN} ${AGENT_FAILURE} — see ${TICK_LOG}"
+    exit 1
+  fi
+  {
+    printf '# CONTINUATION_BLOCKED — %s\n\n' "$(ts)"
+    printf '**Step**: %s\n' "$(printf '%s' "${NEXT}" | awk -F'|' '{print $2": "$3}')"
+    printf '**Phase you were in**: agent run (post-tick wrapper check)\n'
+    printf '**Trigger**: agent CLI %s failed %s runs in a row — last: %s\n\n' "${AGENT_BIN}" "${FAILS}" "${AGENT_FAILURE}"
+    printf '## What failed\n\n'
+    printf -- '- Agent CLI: `%s`\n- Last exit code: %s\n- Last log: %s\n- Failures in a row: %s (WORKPLAN_FAIL_LIMIT=%s)\n\n' \
+      "${AGENT_BIN}" "${AGENT_RC}" "${TICK_LOG}" "${FAILS}" "${FAIL_LIMIT}"
+    printf '**External action:** %s, then delete this file to resume.\n' "$(agent_fix_hint)"
+  } > "${BLOCK_FILE}"
+  rm -f "${FAIL_FILE}"
+  printf -- '- `%s` BLOCKED at `%s` — agent CLI %s failed %s runs in a row\n' "$(ts)" "${POST_VERSION}" "${AGENT_BIN}" "${FAILS}" >> "${DIGEST_FILE}"
+  log "wrote ${BLOCK_FILE} — agent CLI ${AGENT_BIN} failed ${FAILS} runs in a row (operator action required)"
+  maybe_autopause "agent CLI failed ${FAILS} runs in a row"; exit 2
+fi
+rm -f "${FAIL_FILE}"
+
+log "tick done (rc=${AGENT_RC:-?})"
 exit 0

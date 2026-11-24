@@ -80,7 +80,7 @@
     "scope": [
       "local"
     ],
-    "content": "HARD RULE: At session start, BEFORE your first reply, silently read memory/last-session-recap.md, memory/active-tasks.md (first 50 lines), and .companion-state.md. Lead your first message with a brief status of where we left off. Never make the user re-orient you.",
+    "content": "HARD RULE: At session start, BEFORE your first reply, silently read memory/last-session-recap.md, memory/active-tasks.md (first 50 lines), and the memory daemon's .daemon-state-<node>.md (ls .daemon-state-*.md). Lead your first message with a brief status of where we left off. Never make the user re-orient you.",
     "pattern": null,
     "activateOn": null,
     "active": true,
@@ -112,7 +112,7 @@
       "commits"
     ],
     "mesh_enforcement": "post_validate",
-    "mesh_validate_command": "git log -1 --format=%s | grep -qE '^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\\(.+\\))?: .+'"
+    "mesh_validate_command": "git log -1 --format=%s | grep -qE -e '^feat(\\(.+\\))?: .+' -e '^fix(\\(.+\\))?: .+' -e '^docs(\\(.+\\))?: .+' -e '^style(\\(.+\\))?: .+' -e '^refactor(\\(.+\\))?: .+' -e '^test(\\(.+\\))?: .+' -e '^chore(\\(.+\\))?: .+' -e '^build(\\(.+\\))?: .+' -e '^ci(\\(.+\\))?: .+' -e '^perf(\\(.+\\))?: .+' -e '^revert(\\(.+\\))?: .+' -e '^mesh(\\(.+\\))?: .+'"
   },
   {
     "id": "no-hardcoded-secrets",

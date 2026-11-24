@@ -1,29 +1,32 @@
 /**
  * Self-Improvement Hook for OpenClaw
- * 
+ *
  * Injects a reminder to evaluate learnings during agent bootstrap.
  * Fires on agent:bootstrap event before workspace files are injected.
+ * handler.js is the CommonJS build of this file; keep the two in step.
  */
 
 import type { HookHandler } from 'openclaw/hooks';
 
 const REMINDER_CONTENT = `## Self-Improvement Reminder
 
-After completing tasks, evaluate if any learnings should be captured:
+After completing tasks, evaluate if any learnings should be captured.
+Append one line to \`.learnings/lessons.md\`: \`[tag] Lesson text (YYYY-MM-DD)\`
 
 **Log when:**
-- User corrects you → \`.learnings/LEARNINGS.md\`
-- Command/operation fails → \`.learnings/ERRORS.md\`
-- User wants missing capability → \`.learnings/FEATURE_REQUESTS.md\`
-- You discover your knowledge was wrong → \`.learnings/LEARNINGS.md\`
-- You find a better approach → \`.learnings/LEARNINGS.md\`
+- User corrects you → \`[correction]\`
+- You discover your knowledge was wrong → \`[correction]\`
+- Command/operation fails → \`[error]\`
+- You find a better approach → \`[pattern]\`
+- User states how they want things done → \`[preference]\`
+- User wants a missing capability or a process change → \`[workflow]\`
 
 **Promote when pattern is proven:**
 - Behavioral patterns → \`SOUL.md\`
 - Workflow improvements → \`AGENTS.md\`
 - Tool gotchas → \`TOOLS.md\`
 
-Keep entries simple: date, title, what happened, what to do differently.`;
+Keep entries to one line: what happened and what to do differently.`;
 
 const handler: HookHandler = async (event) => {
   // Safety checks for event structure

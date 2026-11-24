@@ -20,26 +20,26 @@ default `~/.openclaw/workspace/`). They are **not** committed to any git repo.
 - **Lifetime:** Overwritten every daemon tick (~30s) while a session is ACTIVE or IDLE. Persists across sessions as crash-recovery state.
 - **Consumers:**
   - `session-start.sh` — reads at session start, injects into Claude context
-  - `daily-log-writer.mjs` — reads to detect active session
   - `mission-control/src/app/api/tasks/route.ts` — reads for `__LIVE_SESSION__` card synthesis
-- **NODE_ID source:** `$OPENCLAW_NODE_ID` env var, fallback `os.hostname()`
+- **NODE_ID source:** `lib/node-id.js` `resolveNodeId()`: `$OPENCLAW_NODE_ID` (rendered into the daemon unit from `~/.openclaw/openclaw.env`), else `$MESH_NODE_ID`, else the short hostname lowercased with `[^a-z0-9-]` removed. Readers without the daemon's env (Mission Control, `session-start.sh`) read `OPENCLAW_NODE_ID` from `openclaw.env` first.
 - **History:** Renamed from `.companion-state.md` in Step 0.2 to avoid collision with companion-bridge.
 
 ### `MEMORY.md`
 
-- **Owner:** `pre-compression-flush.mjs` → `runFlush()` (writes); `memory-budget.mjs` → `MemoryBudget` (manages budget, snapshots)
+- **Owner:** `pre-compression-flush.mjs` → `runFlush()` (writes, under the `memory-budget.mjs` character cap the daemon passes as `charBudget`)
 - **Format:** Markdown. Extracted facts as bullet points, optionally with `[user]`/`[assistant]` speaker tags and `<!-- supersedes: <hash> -->` comments.
-- **Lifetime:** Persistent. Content accumulates across sessions; trimmed under character budget pressure (~2200 chars). Frozen (snapshotted) at session start, reloaded after flushes.
+- **Lifetime:** Persistent. Content accumulates across sessions; trimmed under character budget pressure (~2200 chars).
 - **Consumers:**
-  - `memory-budget.mjs` — freezes snapshot for prompt injection at session start
+  - `memory-budget.mjs` — reports its size against the budget (usage meter in the daemon log)
   - `memory-daemon.mjs` — triggers flush writes on ACTIVE→IDLE and IDLE→ENDED transitions
   - Claude session hooks — read at session start via `session-start.sh` (indirectly, via the bootstrap chain)
 
 ### `memory/YYYY-MM-DD.md`
 
-- **Owner:** `daily-log-writer.mjs` (hourly appends); `memory-daemon.mjs` → `runPhase0Bootstrap()` (creates empty file for today)
-- **Format:** Markdown. Timestamped hourly blocks with session recap excerpts, active task state, and git diff summaries.
+- **Owner:** created by whichever writer runs first that day: `memory-daemon.mjs` → `runPhase0Bootstrap()` (`# YYYY-MM-DD — Daily Log` header), or on install day `scripts/install/components.sh` Step 15 (`# YYYY-MM-DD` + a "Node initialized on <host>" line). Appended by the Claude Code SessionEnd hook `session-stop.sh` (installed into the workspace's `.claude/hooks/` and wired by `config/claude-settings.json`) and by agent sessions writing notes (workspace `AGENTS.md`, "Daily notes").
+- **Format:** Markdown: a date header, `### Session ended HH:MM:SS UTC` blocks from the SessionEnd hook (commits in the last hour, uncommitted file count), and free-form notes.
 - **Lifetime:** Persistent. One file per day, append-only within the day.
+- **History:** Until redesign step 4.9 (2026-06-01) the hourly daily-log writer also appended timestamped blocks (session recap excerpts, active task state, git diff summaries); that writer was deleted then.
 - **Consumers:**
   - Bootstrap chain reads today's file
   - `session-start.sh` — not directly, but daily logs feed the broader memory context
@@ -51,7 +51,6 @@ default `~/.openclaw/workspace/`). They are **not** committed to any git repo.
 - **Lifetime:** Overwritten on each recap run. Keeps last 2 digests.
 - **Consumers:**
   - `session-start.sh` — reads first 15 lines at session start
-  - `daily-log-writer.mjs` — reads for hourly log entry content
 
 ### `memory/active-tasks.md`
 
@@ -61,7 +60,6 @@ default `~/.openclaw/workspace/`). They are **not** committed to any git repo.
 - **Consumers:**
   - `memory-daemon.mjs` → `runPhase1StatusSync()` — reads to build daemon state
   - `session-start.sh` — reads first 20 lines at session start
-  - `daily-log-writer.mjs` — reads for hourly log entry
 
 ---
 
@@ -74,13 +72,13 @@ recreates what it needs on next tick.
 
 - **Owner:** `memory-daemon.mjs` → `log()` function
 - **Format:** Plain text. Timestamped log lines, one per event.
-- **Lifetime:** Append-only. Grows indefinitely (no rotation). Recreated if missing.
-- **Consumers:** Operator debugging only. No in-repo code reads this file.
+- **Lifetime:** Append-only; rotated by `bin/log-rotate` (weekly timer) when above 10 MB, 5 gzip copies kept. Recreated if missing.
+- **Consumers:** Operator debugging; `lib/observer.mjs` reads it (`DEFAULT_DAEMON_LOG`).
 
 ### `.tmp/daemon-throttle.json`
 
 - **Owner:** `memory-daemon.mjs` → Phase 2 throttle state
-- **Format:** JSON. Tracks last-run timestamps for throttled jobs (recap, maintenance, obsidian-sync, trust-health, session-import, clawvault, hyperagent).
+- **Format:** JSON. Tracks last-run timestamps for throttled jobs (recap, maintenance, obsidian-sync, session-import, synthesis, knowledge-index, graph-cache, hyperagent).
 - **Lifetime:** Overwritten on each Phase 2 tick. Persists across daemon restarts for throttle continuity.
 - **Consumers:** `memory-daemon.mjs` — reads to determine which Phase 2 jobs are due.
 
@@ -91,12 +89,10 @@ recreates what it needs on next tick.
 - **Lifetime:** Overwritten on each main tick and on graceful shutdown. Used for crash recovery on restart.
 - **Consumers:** `memory-daemon.mjs` → `loadDaemonState()` at startup.
 
-### `.tmp/daily-log-state.json`
+### `.tmp/daily-log-state.json` (retired)
 
-- **Owner:** `daily-log-writer.mjs` → `saveState()`
-- **Format:** JSON. Tracks last recap hash, last task hash, last write hour for dedup.
-- **Lifetime:** Overwritten on each daily-log write. Prevents duplicate hourly entries.
-- **Consumers:** `daily-log-writer.mjs` → `loadState()`.
+- **Owner:** none (retired).
+- **History:** Written by the hourly daily-log writer, which was deleted at redesign step 4.9 (2026-06-01). A copy left on an older node is inert and safe to delete.
 
 ### `.tmp/active-sessions/claude-code`
 
@@ -107,14 +103,14 @@ recreates what it needs on next tick.
 
 ### `.tmp/mc-kanban-notify.txt`
 
-- **Owner:** Mission Control API (external writer)
+- **Owner:** none. Nothing in this repo (Mission Control included) writes it; only the `auto-checkpoint` reader remains.
 - **Format:** Plain text. Notification message from kanban system.
-- **Lifetime:** Ephemeral. Created by MC API, read and deleted by `auto-checkpoint` on next hook invocation.
+- **Lifetime:** Ephemeral. If anything writes it, `auto-checkpoint` reads and deletes it on its next hook invocation.
 - **Consumers:** `auto-checkpoint` — reads, echoes to stdout (visible in Claude context), then deletes.
 
-### `.tmp/daedalus-dispatch.json`
+### `.tmp/<agent>-dispatch.json` (`daedalus-dispatch.json` by default)
 
-- **Owner:** Scheduler (external writer)
+- **Owner:** Scheduler (Mission Control). `<agent>` is the lowercased agent name: `OPENCLAW_AGENT_NAME` from the environment, else from `~/.openclaw/openclaw.env`, else `Daedalus`. Mission Control and `auto-checkpoint` resolve it the same way.
 - **Format:** JSON. Contains `taskId` and `title` for auto-dispatched tasks.
 - **Lifetime:** Ephemeral. Created by scheduler, read and deleted by `auto-checkpoint` on next hook invocation.
 - **Consumers:** `auto-checkpoint` — reads, echoes task info to stdout, then deletes.
@@ -125,28 +121,47 @@ recreates what it needs on next tick.
 
 ### `state.db`
 
-- **Owner:** `session-store.mjs` (sessions + messages tables); `hyperagent-store.mjs` (ha_* tables). Shared database, WAL mode.
+- **Owner:** `session-store.mjs` (sessions + messages tables); `extraction-store.mjs` (extracted memory tables); `memory-archive.mjs` (`*_archived` tables); `hyperagent-store.mjs` (ha_* tables). Shared database, WAL mode.
 - **Format:** SQLite with WAL. Tables:
   - `sessions` — session metadata (id, source, start_time, end_time, summary, message_count)
   - `messages` — per-message content with turn index
   - `messages_fts` — FTS5 virtual table for full-text search over messages
+  - `session_store_meta` — session-store schema version
+  - `session_import_markers` — source markers of transcripts that parsed to no messages, so the importer skips them until they change
+  - `entities` — named things (people, projects, technologies, etc.)
+  - `entity_aliases` — alternate names that resolve to an entity
+  - `themes` — hierarchical topic labels
+  - `theme_mentions` — which sessions touched which theme
+  - `mentions` — per-session entity occurrences with salience
+  - `decisions` — explicit decisions with rationale and confidence (`superseded_by` links a replacement)
+  - `decisions_fts` — FTS5 virtual table over decisions
+  - `concept_edges` — typed links between concepts
+  - `published_items` — entities/decisions already promoted, so consolidation does not re-emit them
+  - `entities_archived`, `decisions_archived`, `mentions_archived`, `entity_aliases_archived` — rows archived by consolidation, resurrected on re-mention
   - `ha_telemetry` — per-task performance data
   - `ha_strategies` — reusable approaches indexed by domain
   - `ha_reflections` — periodic structured analysis
   - `ha_proposals` — self-modification proposals
   - `ha_telemetry_proposals` — junction table
+  - `ha_notify_outbox` — reflection/proposal notifications awaiting delivery
 - **Lifetime:** Persistent. Grows with session history. WAL mode enables concurrent reads.
 - **Consumers:**
-  - `memory-daemon.mjs` — imports sessions on IDLE→ENDED transition
-  - `session-search.mjs` — CLI search tool
+  - `memory-daemon.mjs` — imports sessions on IDLE→ENDED transition; extraction writes through `createExtractionStore` on this file
+  - `workspace-bin/session-search.mjs` — CLI search tool (state.db FTS, `--import`/`--stats`)
   - `hyperagent-store.mjs` — HyperAgent protocol reads/writes
 
 ### `.knowledge.db`
 
-- **Owner:** `lib/mcp-knowledge/core.mjs` (MCP knowledge server)
-- **Format:** SQLite with WAL + sqlite-vec extension. Stores document chunks with 384-dim embeddings (Xenova/all-MiniLM-L6-v2 via `@huggingface/transformers`).
-- **Lifetime:** Persistent. Rebuilt on reindex. Stores embedded workspace documents for semantic search.
-- **Consumers:** MCP knowledge server (registered in `.mcp.json`). Accessed via MCP tool calls from Claude sessions.
+- **Owner:** `lib/mcp-knowledge/core.mjs` (schema, embedding, search)
+- **Format:** SQLite with WAL + sqlite-vec extension. Stores chunks with 1024-dim embeddings (Xenova/bge-m3 via `@huggingface/transformers`): workspace document chunks, and session turn chunks (`session_chunks`, `session_chunks_fts`, `session_chunk_vectors`).
+- **Lifetime:** Persistent. Rebuilt on reindex.
+- **Writers:**
+  - MCP knowledge server — workspace documents.
+  - `workspace-bin/knowledge-index-job.mjs` (memory daemon) and the one-time `bin/embed-existing-sessions.mjs` — session turns.
+- **Consumers:**
+  - MCP knowledge server (registered in `.mcp.json`). Accessed via MCP tool calls from Claude sessions.
+  - `lib/memory-inject-server.mjs` — retrieval channels 1 (FTS) and 2 (vector) over the session turns.
+  - `bin/knowledge-session-search.mjs` (installed to `~/openclaw/bin/`) — CLI semantic / hybrid / FTS search over the indexed session turns (`session_chunks`). `--fts` input is reduced to AND-joined keywords, so a natural-language question still matches.
 
 ---
 
@@ -167,10 +182,12 @@ install scripts).
 - **Owner:** `openclaw-register-source` script / operator
 - **Format:** JSON. Registry of transcript source directories with `name`, `path`, `format`, `enabled` fields.
 - **Lifetime:** Persistent. Updated when new frontends are registered.
-- **Consumers:**
-  - `memory-daemon.mjs` → `loadTranscriptSources()` — scans for active JSONL sessions
-  - `session-recap` → `loadTranscriptDirs()` — discovers JSONL files for digest generation
-  - `session-search.mjs` — discovers sources for search
+- **Reader:** `lib/transcript-sources.mjs` → `loadTranscriptSources(root)`, the one loader. A readable registry is authoritative (its enabled sources only, so disabling every source stops ingest everywhere); the default folders (the workspace's Claude Code project folder, `~/.claude/projects/-<home>`, `<root>/agents/main/sessions`) apply only when the file is missing or unparseable. `<root>` is `$OPENCLAW_HOME`, default `~/.openclaw`.
+- **Consumers (all through that loader):**
+  - `memory-daemon.mjs` — scans for active JSONL sessions
+  - `session-recap` — discovers JSONL files for digest generation
+  - `session-search.mjs --import` — discovers sources to import
+  - `lib/heartbeat-detect.mjs` — finds the newest gateway session (Mission Control heartbeat status)
 
 ---
 
@@ -181,7 +198,7 @@ They were deleted in Step 0.6.
 
 | File | Former owner | Removed in | Notes |
 |------|-------------|------------|-------|
-| `~/.openclaw/workspace/.pre-compact-state.md` | `pre-compact.sh` | Step 0.6 | Hook retained as no-op stub for Block 4 rewiring |
+| `~/.openclaw/workspace/.pre-compact-state.md` | `pre-compact.sh` | Step 0.6 | The hook now publishes an extraction request instead; it writes no state file |
 | `~/.openclaw/workspace/.tmp/session-fingerprint.json` | `session-recap` | Step 0.6 | ~80 lines of dead code removed (extractFingerprint, writeFingerprint) |
 | `~/.openclaw/workspace/.tmp/frontend-activity` | `auto-checkpoint` | Step 0.6 | Touch-based activity signal; daemon uses JSONL mtime instead |
 | `confidence` field on `extractFacts` return | `pre-compression-flush.mjs` | Step 0.6 | Computed but never consumed; return shape is now `{ fact, category, speaker }` |
@@ -190,6 +207,6 @@ They were deleted in Step 0.6.
 
 ## Notes
 
-- **NODE_ID** is derived consistently as `process.env.OPENCLAW_NODE_ID || os.hostname()` (JS/TS) and `${OPENCLAW_NODE_ID:-$(hostname)}` (shell).
+- **NODE_ID**: see **NODE_ID source** under `.daemon-state-${NODE_ID}.md` above (`lib/node-id.js` `resolveNodeId()`: `OPENCLAW_NODE_ID`, then `MESH_NODE_ID`, then the sanitized short hostname).
 - **Workspace files are not git-tracked.** They exist only at runtime in the operator's home directory.
 - **`docs/ARCHITECTURE.md`** contains some stale references to removed files (`frontend-activity`, `session-fingerprint.json`). Cleanup is deferred to a later block.

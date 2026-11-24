@@ -113,6 +113,16 @@ describe('parseTasks — mesh routing fields', () => {
     ));
     assert.equal(tasks[0].collab_result, null);
   });
+
+  it('circling_* display lines end an array and are not returned', () => {
+    const tasks = parseTasks(mkContent(
+      '- task_id: t13\n  title: Test\n  status: running\n  scope:\n    - a.js\n    - b.js\n' +
+      '  circling_phase: circling\n    - stray\n  circling_nodes: ["a"]\n  budget_minutes: 45\n  updated_at: 2026-01-01'
+    ));
+    assert.deepEqual(tasks[0].scope, ['a.js', 'b.js']);
+    assert.equal(tasks[0].budget_minutes, 45);
+    assert.deepEqual(Object.keys(tasks[0]).filter(k => k.startsWith('circling_')), []);
+  });
 });
 
 describe('updateTaskInPlace — object serialization', () => {
@@ -134,6 +144,161 @@ describe('updateTaskInPlace — object serialization', () => {
       assert.ok(updated.includes('"rounds_taken":2'), 'must contain JSON-serialized object');
     } finally {
       try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  });
+
+  it('keeps multi-line values on one line so the task block stays parseable', async () => {
+    const tmpFile = path.join(os.tmpdir(), `kanban-test-nl-${process.pid}.md`);
+    fs.writeFileSync(tmpFile, `## Live Tasks\n- task_id: nl1\n  title: Newline test\n  status: running\n  updated_at: 2026-01-01\n`);
+    try {
+      await updateTaskInPlace(tmpFile, 'nl1', {
+        next_action: 'Collab completed:\n- first finding\n- status: done',
+        description: 'line one\nline two',
+      });
+      await updateTaskInPlace(tmpFile, 'nl1', { next_action: 'second update' });
+      const [task] = parseTasks(fs.readFileSync(tmpFile, 'utf8'));
+      assert.equal(task.status, 'running', 'a "status:" inside the summary must not become a field');
+      assert.equal(task.next_action, 'second update');
+      assert.equal(task.description, 'line one\nline two');
+      assert.ok(!fs.readFileSync(tmpFile, 'utf8').includes('first finding'), 'no orphaned continuation lines');
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  });
+});
+
+describe('appendTaskBlock', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { appendTaskBlock } = require('../lib/kanban-io');
+  const block = (id) => `- task_id: ${id}\n  title: B\n  status: queued\n  next_action: Plan subtask (local)\n  description: x\\ny\n  updated_at: t`;
+
+  it('appends under the lock, once per task id, and never while the lock is held', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-append-'));
+    const tmpFile = path.join(dir, 'active-tasks.md');
+    fs.writeFileSync(tmpFile, '## Live Tasks\n- task_id: a1\n  title: A\n  status: queued\n');
+    try {
+      assert.equal(await appendTaskBlock(tmpFile, 'b1', block('b1')), true);
+      const tasks = parseTasks(fs.readFileSync(tmpFile, 'utf8'));
+      assert.deepEqual(tasks.map(t => t.task_id), ['a1', 'b1']);
+      assert.equal(tasks[1].next_action, 'Plan subtask (local)');
+      assert.equal(tasks[1].description, 'x\ny');
+
+      const before = fs.readFileSync(tmpFile, 'utf8');
+      assert.equal(await appendTaskBlock(tmpFile, 'b1', block('b1')), false);
+      assert.equal(fs.readFileSync(tmpFile, 'utf8'), before);
+
+      fs.mkdirSync(tmpFile + '.lk');
+      await assert.rejects(appendTaskBlock(tmpFile, 'c1', block('c1')), /lock acquisition timeout/);
+      assert.equal(fs.readFileSync(tmpFile, 'utf8'), before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('stale lock recovery', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { updateTaskInPlace } = require('../lib/kanban-io');
+
+  it('breaks a lock left behind longer than 30s ago, and still waits on a fresh one', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-stale-'));
+    const tmpFile = path.join(dir, 'active-tasks.md');
+    const lockDir = tmpFile + '.lk';
+    fs.writeFileSync(tmpFile, '## Live Tasks\n- task_id: a1\n  title: A\n  status: queued\n');
+    try {
+      fs.mkdirSync(lockDir);
+      await assert.rejects(updateTaskInPlace(tmpFile, 'a1', { status: 'running' }), /lock acquisition timeout/);
+
+      const old = (Date.now() - 60_000) / 1000;
+      fs.utimesSync(lockDir, old, old);
+      await updateTaskInPlace(tmpFile, 'a1', { status: 'running' });
+      assert.equal(parseTasks(fs.readFileSync(tmpFile, 'utf8'))[0].status, 'running');
+      assert.equal(fs.existsSync(lockDir), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('lock holder record', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { updateTaskInPlace } = require('../lib/kanban-io');
+
+  it('records pid + node + time while held, names the holder on contention, and cleans up', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-owner-'));
+    const tmpFile = path.join(dir, 'active-tasks.md');
+    const lockDir = tmpFile + '.lk';
+    fs.writeFileSync(tmpFile, '## Live Tasks\n- task_id: a1\n  title: A\n  status: queued\n');
+    const realRead = fs.readFileSync;
+    let seen = null;
+    fs.readFileSync = function (file, ...rest) {
+      if (file === tmpFile && !seen) seen = JSON.parse(realRead.call(fs, path.join(lockDir, 'owner'), 'utf8'));
+      return realRead.call(fs, file, ...rest);
+    };
+    try {
+      await updateTaskInPlace(tmpFile, 'a1', { status: 'running' });
+      fs.readFileSync = realRead;
+      assert.equal(seen.pid, process.pid);
+      assert.equal(seen.node, require('../lib/node-id').resolveNodeId());
+      assert.ok(Math.abs(Date.now() - seen.acquiredAt) < 10_000);
+      assert.equal(fs.existsSync(lockDir), false, 'release removes the dir and its owner record');
+
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'owner'), JSON.stringify({ pid: 4242, node: 'other-host', acquiredAt: Date.now() }));
+      await assert.rejects(updateTaskInPlace(tmpFile, 'a1', { status: 'done' }), /pid 4242 on other-host/);
+
+      const old = (Date.now() - 60_000) / 1000;
+      fs.utimesSync(lockDir, old, old);
+      await updateTaskInPlace(tmpFile, 'a1', { status: 'done' });
+      assert.equal(parseTasks(fs.readFileSync(tmpFile, 'utf8'))[0].status, 'done');
+      assert.equal(fs.existsSync(lockDir), false, 'a stale lock with an owner record is still broken');
+    } finally {
+      fs.readFileSync = realRead;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('workspace resolution follows OPENCLAW_WORKSPACE', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const root = path.join(__dirname, '..');
+
+  it('kanban-io and the bridge use the installer workspace, not ~/.openclaw/workspace', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-ws-'));
+    const env = { PATH: process.env.PATH, HOME: path.join(dir, 'home'), OPENCLAW_WORKSPACE: path.join(dir, 'ws') };
+    if (process.env.NODE_PATH) env.NODE_PATH = process.env.NODE_PATH;
+    try {
+      const io = spawnSync(process.execPath, ['-e',
+        "const k = require('./lib/kanban-io'); console.log(JSON.stringify([k.WORKSPACE, k.ACTIVE_TASKS_PATH]))"],
+      { cwd: root, env, encoding: 'utf8' });
+      assert.equal(io.status, 0, io.stderr);
+      assert.deepEqual(JSON.parse(io.stdout), [env.OPENCLAW_WORKSPACE, path.join(env.OPENCLAW_WORKSPACE, 'memory', 'active-tasks.md')]);
+
+      // Nothing listens on port 1: the bridge logs its paths, then exits on the refused connect.
+      const bridge = spawnSync(process.execPath, [path.join(root, 'bin', 'mesh-bridge.js')],
+        { cwd: dir, env: { ...env, OPENCLAW_NATS: 'nats://127.0.0.1:1' }, encoding: 'utf8', timeout: 30_000 });
+      const out = bridge.stdout + bridge.stderr;
+      assert.ok(out.includes(`Active Tasks:     ${path.join(env.OPENCLAW_WORKSPACE, 'memory', 'active-tasks.md')}`), out);
+      assert.ok(out.includes(`Log Dir:          ${path.join(env.OPENCLAW_WORKSPACE, 'memory', 'mesh-logs')}`), out);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the launchd bridge and deploy-listener units pass OPENCLAW_WORKSPACE', () => {
+    for (const unit of ['ai.openclaw.mesh-bridge.plist', 'ai.openclaw.mesh-deploy-listener.plist']) {
+      const plist = fs.readFileSync(path.join(root, 'services', 'launchd', unit), 'utf8');
+      const env = plist.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/)[1];
+      assert.match(env, /<key>OPENCLAW_WORKSPACE<\/key>\s*<string>\$\{OPENCLAW_WORKSPACE\}<\/string>/, unit);
     }
   });
 });

@@ -5,6 +5,9 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 export NODE_BIN
+# Leads the PATH of units whose children find node by name (Mission Control's
+# npm start → next), so they run the node their native modules were built for.
+export NODE_BIN_DIR="$(dirname "$NODE_BIN")"
 
 # ── Resolve nats-server binary (service templates exec ${NATS_SERVER_BIN}) ──
 NATS_SERVER_BIN="$(command -v nats-server 2>/dev/null || echo "")"
@@ -21,34 +24,12 @@ fi
 export NATS_SERVER_BIN
 info "nats-server: $NATS_SERVER_BIN"
 
-# ── Repo runtime dependencies ──
-# The mesh daemons exec from the repo tree and require the repo's node_modules
-# (`nats` above all). The npx path ships them; the git-clone path does not.
-if [ ! -d "$REPO_DIR/node_modules/nats" ]; then
-  info "Installing repo runtime dependencies (npm install --omit=dev)..."
-  (cd "$REPO_DIR" && run npm install --omit=dev) || { error "repo npm install failed — mesh daemons cannot run"; exit 1; }
-else
-  info "Repo node_modules present"
-fi
-
-# The memory daemon imports packages/event-schemas/dist and exits at startup
-# without it. dist/ is gitignored, the release tarball ships only the .ts
-# sources, and --omit=dev leaves no compiler behind — so on the first virgin-Mac
-# run the daemon died silently and the acceptance gate failed five rows
-# downstream (no DBs, no inject token, no event stream). Build it here.
-SCHEMAS_DIST="$REPO_DIR/packages/event-schemas/dist/index.js"
-if [ ! -f "$SCHEMAS_DIST" ]; then
-  info "Building event-schemas (memory daemon refuses to start without its dist)..."
-  (cd "$REPO_DIR" && run npx --yes --package typescript@5 tsc -p packages/event-schemas/tsconfig.json) \
-    || { error "event-schemas build failed — the memory daemon cannot start"; exit 1; }
-  if ! $DRY_RUN && [ ! -f "$SCHEMAS_DIST" ]; then
-    error "event-schemas build produced no dist/index.js — the memory daemon cannot start"
-    exit 1
-  fi
-  info "event-schemas built"
-else
-  info "event-schemas dist present"
-fi
+# ── Repo runtime dependencies + the event-schemas dist ──
+# Reinstalled / rebuilt when what they came from changed (deps.sh); the mesh
+# deploy 'deps' component runs the same script on every node.
+source "$REPO_DIR/scripts/install/deps.sh"
+install_repo_deps "$REPO_DIR" || { error "repo npm install failed — mesh daemons cannot run"; exit 1; }
+build_event_schemas "$REPO_DIR" || exit 1
 
 # ── Resolve the agent provider (the node's mind) ──
 # The runtime is provider-agnostic (lib/llm-providers.js): the mind is whatever
@@ -58,9 +39,10 @@ fi
 KNOWN_PROVIDERS="claude openai gemini deepseek kimi minimax aider ollama shell"
 provider_binary() {
   case "$1" in
-    openai) echo codex ;;
-    shell)  echo sh ;;
-    *)      echo "$1" ;;
+    openai)   echo codex ;;
+    deepseek) echo dsh ;;
+    shell)    echo sh ;;
+    *)        echo "$1" ;;
   esac
 }
 PROVIDER="${PROVIDER:-${OPENCLAW_PROVIDER:-}}"
@@ -94,12 +76,14 @@ export KNOWN_PROVIDERS
 if [ -z "$NODE_ROLE" ]; then
   NODE_ROLE="${OPENCLAW_NODE_ROLE:-}"
 fi
+if [ -z "$NODE_ROLE" ] && [ -f "$ENV_FILE" ]; then
+  NODE_ROLE="$(grep -m1 '^OPENCLAW_NODE_ROLE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d "\"'" | xargs || true)"
+fi
+# Never guessed from the OS: a Mac is not necessarily the lead. A node's first
+# install names it; config.sh saves it for every later run.
 if [ -z "$NODE_ROLE" ]; then
-  if [ "$OS" = "macos" ]; then
-    NODE_ROLE="lead"
-  else
-    NODE_ROLE="worker"
-  fi
+  error "No node role: pass --role=lead or --role=worker (saved to $ENV_FILE for later runs)"
+  exit 1
 fi
 if [ "$NODE_ROLE" != "lead" ] && [ "$NODE_ROLE" != "worker" ]; then
   error "Invalid role: $NODE_ROLE (must be 'lead' or 'worker')"
@@ -121,13 +105,14 @@ export OPENCLAW_NATS="${OPENCLAW_NATS:-nats://127.0.0.1:4222}"
 export OPENCLAW_NATS_TOKEN="${OPENCLAW_NATS_TOKEN:-}"
 
 # ── Claude Code project path encoding (for transcript-sources.json) ──
-# Claude encodes a project path by replacing / and . with - INCLUDING the leading
-# slash: /Users/x/repo → -Users-x-repo (leading dash kept). An earlier version
-# stripped the leading / first, so every rendered source path matched nothing on
-# disk and _detectActivity silently skipped them — memory ingest ran dark for 39h
-# after the 2026-07-14 re-render (memory_ingest_remediation audit).
+# Claude Code replaces every non-alphanumeric character of its real (symlink-
+# resolved) cwd with -, INCLUDING the leading slash: /Users/x/my_repo →
+# -Users-x-my-repo, as lib/agent-activity.js does. A path that does not exist yet
+# is encoded as given. A wrong encoding matches nothing on disk and _detectActivity
+# skips it silently: memory ingest ran dark for 39h after the 2026-07-14 re-render
+# (memory_ingest_remediation audit).
 claude_project_path() {
-  echo "$1" | sed 's|[/.]|-|g'
+  { (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"; } | sed 's|[^A-Za-z0-9]|-|g'
 }
 export CLAUDE_PROJECT_WORKSPACE="$(claude_project_path "$WORKSPACE")"
 export CLAUDE_PROJECT_HOME="$(claude_project_path "$HOME")"
@@ -137,3 +122,7 @@ export CLAUDE_PROJECT_REPO="$(claude_project_path "$REPO_DIR")"
 export OPENCLAW_WORKSPACE="$WORKSPACE"
 export OPENCLAW_REPO_DIR="$REPO_DIR"
 export NPM_BIN="$(command -v npm 2>/dev/null || echo "$HOME/.openclaw/workspace/.npm-global/bin/npm")"
+# The gateway unit runs the global openclaw package (`npm i -g openclaw`). npm -g
+# lands in /opt/homebrew/lib on Apple-Silicon Homebrew and /usr/lib on NodeSource,
+# so ask this npm instead of assuming /usr/local/lib (no debug log: --dry-run writes nothing).
+export OPENCLAW_GATEWAY_JS="$("$NPM_BIN" root -g --logs-max=0 2>/dev/null || echo /usr/local/lib/node_modules)/openclaw/dist/index.js"

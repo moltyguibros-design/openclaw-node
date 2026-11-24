@@ -59,13 +59,82 @@ test('bin/mesh-join-token.js emits a v4 payload carrying the lead pubkey and aut
   const { payload } = decodeJoinToken(token);
   assert.equal(payload.v, CURRENT_VERSION);
   assert.equal(payload.nats, 'nats://10.9.9.9:4222');
+  assert.doesNotMatch(r.stderr, /loopback/);
   assert.equal(payload.lead_node_id, 'lead-x');
   assert.equal(payload.nats_auth, 'nkey');
+  assert.equal(payload.role, 'worker', 'a join provisions a worker');
   const pub = fs.readFileSync(path.join(home, '.openclaw', 'identity.pub'), 'utf8');
   assert.ok(pub.includes('BEGIN PUBLIC KEY'));
   assert.equal(payload.lead_identity_pubkey.length, 44, 'raw base64 ed25519 pubkey, not PEM');
   assert.doesNotMatch(JSON.stringify(payload), /shared-secret-token/, 'the bus token never rides in the join token');
   const secret = fs.readFileSync(path.join(home, '.openclaw', '.mesh-secret'), 'utf8').trim();
   assert.equal(verifyJoinTokenHmac(token, secret), true);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('bin/mesh-join-token.js warns on stderr when the token would carry a loopback NATS URL', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_NATS=nats://127.0.0.1:4222\nOPENCLAW_NODE_ID=lead-x\n');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/mesh-join-token.js'), '--no-ssh', '--one-liner'], {
+    encoding: 'utf8', env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('OPENCLAW_'))), HOME: home, OPENCLAW_IDENTITY_DIR: path.join(home, '.openclaw'), OPENCLAW_NODE_ID: 'lead-x' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const token = r.stdout.match(/MESH_JOIN_TOKEN=([A-Za-z0-9_.-]+)/)[1];
+  assert.equal(decodeJoinToken(token).payload.nats, 'nats://127.0.0.1:4222');
+  assert.match(r.stderr, /loopback/);
+  assert.doesNotMatch(r.stdout, /loopback/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('bin/mesh-join-token.js refuses --role: a join token can only provision a worker', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.openclaw', 'openclaw.env'), 'OPENCLAW_NATS=nats://10.9.9.9:4222\nOPENCLAW_NODE_ID=lead-x\n');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'bin/mesh-join-token.js'), '--no-ssh', '--role', 'lead'], {
+    encoding: 'utf8', env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('OPENCLAW_'))), HOME: home, OPENCLAW_IDENTITY_DIR: path.join(home, '.openclaw'), OPENCLAW_NODE_ID: 'lead-x' },
+  });
+  assert.equal(r.status, 2, r.stdout);
+  assert.match(r.stderr, /always provision a worker/);
+  assert.doesNotMatch(r.stdout, /Token:/);
+  assert.equal(fs.existsSync(path.join(home, '.openclaw', '.mesh-secret')), false, 'refused before any secret is created');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+function verifyCli(home, token) {
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('OPENCLAW_'))), HOME: home };
+  return spawnSync(process.execPath, [path.join(ROOT, 'bin/mesh-join-token.js'), '--verify', token], { encoding: 'utf8', env });
+}
+
+test('mesh-join-token --verify accepts only a live token this lead signed', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.openclaw', '.mesh-secret'), 'lead-key-material\n');
+  const payload = { v: CURRENT_VERSION, nats: 'nats://10.0.0.1:4222', role: 'worker', lead_node_id: 'lead-x', expires: Date.now() + 60_000 };
+
+  const good = verifyCli(home, encodeJoinToken(payload, 'lead-key-material').token);
+  assert.equal(good.status, 0, good.stderr);
+  assert.match(good.stdout, /VALID: v4 worker token for nats:\/\/10\.0\.0\.1:4222, issued by lead-x/);
+
+  const foreign = verifyCli(home, encodeJoinToken(payload, 'other-lead').token);
+  assert.equal(foreign.status, 1);
+  assert.match(foreign.stderr, /signature does not match/);
+
+  const expired = verifyCli(home, encodeJoinToken({ ...payload, expires: Date.now() - 1 }, 'lead-key-material').token);
+  assert.equal(expired.status, 1);
+  assert.match(expired.stderr, /INVALID: expired/);
+
+  const garbage = verifyCli(home, 'not-a-token');
+  assert.equal(garbage.status, 1);
+  assert.match(garbage.stderr, /base64url JSON/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('mesh-join-token --verify on a node with no mesh secret refuses and creates none', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-jt-'));
+  const r = verifyCli(home, encodeJoinToken({ v: 4, nats: 'x', expires: Date.now() + 1000 }, 's').token);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /no mesh secret/);
+  assert.equal(fs.existsSync(path.join(home, '.openclaw', '.mesh-secret')), false);
   fs.rmSync(home, { recursive: true, force: true });
 });

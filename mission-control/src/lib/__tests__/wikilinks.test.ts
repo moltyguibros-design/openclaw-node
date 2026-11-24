@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   extractWikilinks,
   extractTaskIds,
@@ -6,6 +9,7 @@ import {
   buildResolutionMaps,
   resolveWikilink,
   extractAllReferences,
+  toGraphId,
 } from "../memory/wikilinks";
 
 describe("extractWikilinks", () => {
@@ -171,5 +175,56 @@ describe("extractAllReferences", () => {
     const refs = extractAllReferences(content, maps, "self.md");
     const alphaCount = refs.filter((r) => r === "projects/alpha.md").length;
     expect(alphaCount).toBe(1);
+  });
+});
+
+// The file tree selects workspace-relative paths; graph ids must use the same form.
+describe("toGraphId", () => {
+  it("makes a path under the workspace relative to it", () => {
+    expect(toGraphId("/w/memory/2026-01-01.md", "/w")).toBe("memory/2026-01-01.md");
+    expect(toGraphId("/w/MEMORY.md", "/w")).toBe("MEMORY.md");
+  });
+
+  it("leaves a path outside the workspace, or one already relative, as it is", () => {
+    expect(toGraphId("/elsewhere/x.md", "/w")).toBe("/elsewhere/x.md");
+    expect(toGraphId("/w-other/x.md", "/w")).toBe("/w-other/x.md");
+    expect(toGraphId("memory-vault/a.md", "/w")).toBe("memory-vault/a.md");
+  });
+});
+
+describe("GET /api/memory/wikilinks", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-wikilinks-route-"));
+    vi.stubEnv("DB_PATH", path.join(root, "mission-control.db"));
+    vi.stubEnv("WORKSPACE_ROOT", root);
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    const { getRawDb } = await import("@/lib/db");
+    getRawDb().close();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("emits workspace-relative node ids and link endpoints", async () => {
+    const { getDb } = await import("@/lib/db");
+    const { memoryDocs } = await import("@/lib/db/schema");
+    getDb().insert(memoryDocs).values([
+      { source: "daily_log", filePath: path.join(root, "memory", "2026-01-01.md"), title: "Jan 1", content: "See [[MEMORY]]" },
+      { source: "long_term_memory", filePath: path.join(root, "MEMORY.md"), title: "Memory", content: "# Memory" },
+    ]).run();
+    const { GET } = await import("@/app/api/memory/wikilinks/route");
+
+    const body = await (await GET()).json();
+
+    expect(body.nodes.map((n: { id: string; linkCount: number }) => [n.id, n.linkCount])).toEqual([
+      ["memory/2026-01-01.md", 1],
+      ["MEMORY.md", 1],
+    ]);
+    expect(body.links).toEqual([{ source: "memory/2026-01-01.md", target: "MEMORY.md" }]);
   });
 });

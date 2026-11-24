@@ -18,6 +18,7 @@ import path from 'path';
 import crypto from 'crypto';
 import https from 'https';
 import os from 'os';
+import yaml from 'js-yaml';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,8 @@ const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(__dirname);
 const CONFIG_PATH = process.env.OPENCLAW_OBSIDIAN_SYNC_CONFIG
   || path.join(os.homedir(), '.openclaw/config/obsidian-sync.json');
 const SYNC_STATE_PATH = path.join(WORKSPACE, '.tmp/obsidian-sync-state.json');
+// Sync-state marker: the flattened notes written before `**` routes kept subdirectories are gone.
+const FLATTENED_CLEANUP_KEY = '__flattenedNotesRemoved';
 
 // ============================================================
 // CONFIG
@@ -60,11 +63,26 @@ function loadConfig() {
 // GLOB MATCHING — minimal, zero dependencies
 // ============================================================
 
+const globCache = new Map();
+
+function globToRegex(pattern) {
+  let cached = globCache.get(pattern);
+  if (!cached) {
+    cached = compileGlob(pattern);
+    globCache.set(pattern, cached);
+  }
+  return cached;
+}
+
+function isLiteralPattern(pattern) {
+  return !/[*?{]/.test(pattern);
+}
+
 /**
  * Convert a glob pattern to a regex.
  * Supports: *, **, ?, {a,b}
  */
-function globToRegex(pattern) {
+function compileGlob(pattern) {
   let re = '';
   let i = 0;
   while (i < pattern.length) {
@@ -144,94 +162,66 @@ function fileHash(filePath) {
 }
 
 // ============================================================
-// FRONTMATTER — YAML-lite parser/injector
+// FRONTMATTER — js-yaml parse, object-level merge
 // ============================================================
 
 const FM_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
-/**
- * Parse YAML frontmatter (simple key: value, arrays, strings).
- * Not a full YAML parser — handles the subset Obsidian actually uses.
- */
-function parseFrontmatter(content) {
-  const match = content.match(FM_REGEX);
-  if (!match) return { meta: {}, body: content };
+// JSON_SCHEMA keeps dates as strings instead of coercing them to Date objects.
+const YAML_OPTS = { schema: yaml.JSON_SCHEMA };
 
-  const yaml = match[1];
-  const body = content.slice(match[0].length);
-  const meta = {};
-
-  for (const line of yaml.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const colonIdx = trimmed.indexOf(':');
-    if (colonIdx < 0) continue;
-
-    const key = trimmed.slice(0, colonIdx).trim();
-    let value = trimmed.slice(colonIdx + 1).trim();
-
-    // Inline array: [a, b, c]
-    if (value.startsWith('[') && value.endsWith(']')) {
-      meta[key] = value.slice(1, -1).split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
-    } else if (value.startsWith('"') && value.endsWith('"')) {
-      meta[key] = value.slice(1, -1);
-    } else if (value.startsWith("'") && value.endsWith("'")) {
-      meta[key] = value.slice(1, -1);
-    } else if (value === 'true') {
-      meta[key] = true;
-    } else if (value === 'false') {
-      meta[key] = false;
-    } else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      meta[key] = value; // keep dates as strings
-    } else if (value === '') {
-      meta[key] = '';
-    } else {
-      meta[key] = value;
-    }
-  }
-
-  return { meta, body };
+function dumpFrontmatter(meta) {
+  return yaml.dump(meta, { ...YAML_OPTS, lineWidth: -1 }).replace(/\n$/, '');
 }
 
-/**
- * Serialize frontmatter back to YAML string.
- */
-function serializeFrontmatter(meta) {
-  const lines = [];
-  for (const [key, value] of Object.entries(meta)) {
-    if (Array.isArray(value)) {
-      lines.push(`${key}: [${value.join(', ')}]`);
-    } else if (typeof value === 'boolean') {
-      lines.push(`${key}: ${value}`);
-    } else if (typeof value === 'string' && value.includes(':')) {
-      lines.push(`${key}: "${value}"`);
-    } else {
-      lines.push(`${key}: ${value}`);
-    }
-  }
-  return lines.join('\n');
+function today() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: process.env.OPENCLAW_TIMEZONE || process.env.TZ || 'America/Montreal' });
 }
 
 /**
  * Inject/merge frontmatter into file content.
- * Preserves existing fields, adds missing defaults.
+ * Existing fields win, injected fields fill gaps, injected tags are unioned in.
+ * Frontmatter that does not parse as a YAML map is kept verbatim and only the
+ * missing injected keys are appended.
  */
-function injectFrontmatter(content, injected) {
-  const { meta: existing, body } = parseFrontmatter(content);
+export function injectFrontmatter(content, injected) {
+  const match = content.match(FM_REGEX);
+  const body = match ? content.slice(match[0].length) : content;
 
-  // Merge: existing wins for fields already set, injected fills gaps
-  const merged = { ...injected, ...existing };
-
-  // Always update 'updated' timestamp
-  merged.updated = new Date().toISOString().split('T')[0];
-
-  // Set created if missing
-  if (!merged.created) {
-    merged.created = merged.updated;
+  let existing = {};
+  if (match) {
+    let parsed;
+    try {
+      parsed = yaml.load(match[1], YAML_OPTS);
+    } catch {
+      parsed = undefined;
+    }
+    if (!match[1].trim()) {
+      existing = {};
+    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      existing = parsed;
+    } else {
+      const present = new Set(
+        [...match[1].matchAll(/^([^\s#:][^:]*):/gm)].map(m => m[1].trim().replace(/^["']|["']$/g, '')),
+      );
+      const missing = { ...injected, updated: today(), created: today() };
+      for (const key of Object.keys(missing)) if (present.has(key)) delete missing[key];
+      const appended = Object.keys(missing).length ? `\n${dumpFrontmatter(missing)}` : '';
+      return `---\n${match[1]}${appended}\n---\n${body}`;
+    }
   }
 
-  return `---\n${serializeFrontmatter(merged)}\n---\n${body}`;
+  const merged = { ...injected, ...existing };
+  if (Array.isArray(injected.tags)) {
+    const own = Array.isArray(existing.tags) ? existing.tags
+      : typeof existing.tags === 'string' && existing.tags ? [existing.tags] : [];
+    merged.tags = [...own, ...injected.tags.filter(t => !own.includes(t))];
+  }
+
+  merged.updated = today();
+  if (!merged.created) merged.created = merged.updated;
+
+  return `---\n${dumpFrontmatter(merged)}\n---\n${body}`;
 }
 
 // ============================================================
@@ -262,37 +252,49 @@ function toKebabCase(filename) {
 }
 
 /**
+ * Under a `**` pattern, keep the path below the pattern's static prefix so
+ * same-named files in different subdirectories (ledger/observations/2026/01/05.md
+ * and .../2026/02/05.md) land on different notes. `legacyDest` is the flattened
+ * path earlier versions wrote, for the one-time cleanup in syncToObsidian.
+ */
+function placeUnder(destDir, relPath, pattern, fields) {
+  const filename = toKebabCase(path.basename(relPath));
+  const flat = path.join(destDir, filename);
+  if (!pattern.includes('**')) return { dest: flat, ...fields };
+  const staticLen = pattern.split('/').findIndex(seg => !isLiteralPattern(seg));
+  const subdir = path.posix.dirname(relPath.split('/').slice(staticLen).join('/'));
+  if (subdir === '.') return { dest: flat, ...fields };
+  return { dest: path.join(destDir, subdir, filename), legacyDest: flat, ...fields };
+}
+
+/**
  * Route a workspace-relative file path to its vault destination.
  * Returns { dest, domain, type: 'private'|'shared' } or null if excluded.
  */
-function routeFile(relPath, config) {
-  // Check excludes
-  if (matchesAnyGlob(relPath, config.excludePatterns)) return null;
+export function routeFile(relPath, config) {
+  // A route naming one exact file is an explicit opt-in that outranks the broad
+  // excludes: .tmp/trust-registry.json lives under the `**/.tmp/**` exclude.
+  const namedExactly = [...config.nodePrivateRoutes, ...config.sharedRoutes]
+    .some(r => isLiteralPattern(r.pattern) && r.pattern === relPath);
+  if (!namedExactly && matchesAnyGlob(relPath, config.excludePatterns)) return null;
 
   // Check node-private routes first (more specific)
   for (const route of config.nodePrivateRoutes) {
     if (matchesGlob(relPath, route.pattern)) {
-      const destDir = route.dest.replace('{nodeId}', config.nodeId);
-      const filename = toKebabCase(path.basename(relPath));
-      return {
-        dest: path.join(destDir, filename),
+      return placeUnder(route.dest.replace('{nodeId}', config.nodeId), relPath, route.pattern, {
         domain: null,
         type: 'private',
-      };
+      });
     }
   }
 
   // Check shared routes
   for (const route of config.sharedRoutes) {
     if (matchesGlob(relPath, route.pattern)) {
-      const domainDir = route.domain;
-      const subfolder = route.subfolder || '';
-      const filename = toKebabCase(path.basename(relPath));
-      return {
-        dest: path.join(domainDir, subfolder, filename),
-        domain: domainDir.replace(/^\d+-/, ''), // strip number prefix for frontmatter
+      return placeUnder(path.join(route.domain, route.subfolder || ''), relPath, route.pattern, {
+        domain: route.domain.replace(/^\d+-/, ''), // strip number prefix for frontmatter
         type: 'shared',
-      };
+      });
     }
   }
 
@@ -365,7 +367,15 @@ function discoverFiles(config) {
 
   // Extract top-level directories to scan from patterns
   const dirsToScan = new Set();
+  const allFiles = [];
   for (const pattern of allPatterns) {
+    // Exact-file routes are read directly so their directory (e.g. .tmp) is never walked.
+    if (isLiteralPattern(pattern)) {
+      try {
+        if (fs.statSync(path.join(WORKSPACE, pattern)).isFile()) allFiles.push(pattern);
+      } catch { /* absent */ }
+      continue;
+    }
     const firstSeg = pattern.split('/')[0];
     if (firstSeg.startsWith('.')) {
       // Dotfiles at workspace root
@@ -386,9 +396,8 @@ function discoverFiles(config) {
   // Also add 'memory' which is at workspace root
   dirsToScan.add('memory');
   dirsToScan.add('.learnings');
-  dirsToScan.add('.'); // for root-level files like ARCHITECTURE.md, .companion-state.md
+  dirsToScan.add('.'); // for root-level files like ARCHITECTURE.md, .daemon-state-<node>.md
 
-  const allFiles = [];
   for (const dir of dirsToScan) {
     if (dir === '.') {
       // Only root-level files, not recursive
@@ -518,8 +527,8 @@ title: "${nodeId} — ${sub}"
 domain: ${domain}
 type: index
 status: living
-created: ${new Date().toISOString().split('T')[0]}
-updated: ${new Date().toISOString().split('T')[0]}
+created: ${today()}
+updated: ${today()}
 source_node: ${nodeId}
 tags: [auto-synced, node-private]
 ---
@@ -546,8 +555,8 @@ title: "Node: ${nodeId}"
 domain: meta
 type: index
 status: living
-created: ${new Date().toISOString().split('T')[0]}
-updated: ${new Date().toISOString().split('T')[0]}
+created: ${today()}
+updated: ${today()}
 source_node: ${nodeId}
 tags: [auto-synced, node-private]
 ---
@@ -577,8 +586,8 @@ title: "Agent Nodes"
 domain: meta
 type: index
 status: living
-created: ${new Date().toISOString().split('T')[0]}
-updated: ${new Date().toISOString().split('T')[0]}
+created: ${today()}
+updated: ${today()}
 tags: [auto-synced, infrastructure]
 ---
 
@@ -655,6 +664,8 @@ export async function syncToObsidian(opts = {}) {
     }
   }
   let synced = 0, skipped = 0, errors = 0;
+  const currentDests = new Set();
+  const legacyDests = new Set();
 
   for (const { root, relPath, extra } of entries) {
     const absPath = path.join(root, relPath);
@@ -668,7 +679,14 @@ export async function syncToObsidian(opts = {}) {
       ? routeExtraFile(relPath, extra.routes || [], config.excludePatterns)
       : routeFile(relPath, config);
     if (!route) continue;
-    const stateKey = extra ? `${extra.root}:${relPath}` : relPath;
+    currentDests.add(route.dest);
+    let stateKey = extra ? `${extra.root}:${relPath}` : relPath;
+    if (route.legacyDest) {
+      // The dest in the key re-syncs sources whose hash was recorded under the flattened layout.
+      legacyDests.add(route.legacyDest);
+      delete newState[stateKey];
+      stateKey = `${relPath}=>${route.dest}`;
+    }
 
     // Check if file has changed since last sync
     let currentHash;
@@ -750,6 +768,19 @@ export async function syncToObsidian(opts = {}) {
     }
   }
 
+  if (!dryRun && !syncState[FLATTENED_CLEANUP_KEY]) {
+    for (const legacy of legacyDests) {
+      if (currentDests.has(legacy)) continue;
+      try {
+        fs.rmSync(path.join(vaultRoot, legacy), { force: true });
+        if (verbose) console.log(`  [removed flattened] ${legacy}`);
+      } catch (e) {
+        if (verbose) console.log(`  [error] removing ${legacy}: ${e.message}`);
+      }
+    }
+    newState[FLATTENED_CLEANUP_KEY] = true;
+  }
+
   // Save sync state
   if (!dryRun) {
     saveSyncState(newState);
@@ -780,9 +811,10 @@ const SHAREABLE_TAGS = new Set(['error', 'pattern', 'correction']);
  * Parse lesson entries from a lessons.md file.
  * Returns [{tag, text, date, sourceNode}].
  */
-function parseLessons(content, sourceNode) {
+export function parseLessons(content, sourceNode) {
   const lessons = [];
-  const lineRegex = /^\[(\w+)\]\s+(.+?)(?:\s+\((\d{4}-\d{2}-\d{2})\))?$/;
+  // subagent-audit wrote "(auto-extracted, YYYY-MM-DD)" before it matched MEMORY_SPEC §2.5; those lines stay on nodes.
+  const lineRegex = /^\[(\w+)\]\s+(.+?)(?:\s+\((?:auto-extracted,\s*)?(\d{4}-\d{2}-\d{2})\))?$/;
 
   for (const line of content.split('\n')) {
     const match = line.trim().match(lineRegex);
@@ -872,21 +904,21 @@ function propagateSharedLessons(vaultRoot, config, verbose = false) {
   unique.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   // Generate shared lessons file
-  const today = new Date().toISOString().split('T')[0];
+  const date = today();
   const lines = [
     '---',
     'title: Shared Lessons (Cross-Soul)',
     'domain: meta',
     'type: reference',
     'status: living',
-    `updated: ${today}`,
+    `updated: ${date}`,
     'tags: [auto-synced, cross-soul, lessons]',
     '---',
     '',
     '# Shared Lessons',
     '',
     '> Auto-generated by obsidian-sync. Shareable lessons extracted from all agent nodes.',
-    `> Last updated: ${today} | ${unique.length} lessons from ${new Set(unique.map(l => l.sourceNode)).size} node(s)`,
+    `> Last updated: ${date} | ${unique.length} lessons from ${new Set(unique.map(l => l.sourceNode)).size} node(s)`,
     '',
   ];
 

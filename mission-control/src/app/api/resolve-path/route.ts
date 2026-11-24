@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { WORKSPACE_ROOT } from "@/lib/config";
 
-const HOME = process.env.HOME || "/Users/moltymac";
+const HOME = os.homedir();
 
 const SEARCH_DIRS = [
   WORKSPACE_ROOT,
@@ -29,13 +30,15 @@ function normalizeForMatch(s: string): string {
 
 /**
  * Recursively search for a file by basename using Node fs (preserves Unicode normalization).
+ * Async: a miss walks every search tree in full, and a sync walk would stall every other
+ * request and SSE stream on the server meanwhile.
  */
-function findFile(dir: string, target: string, depth: number): string | null {
+async function findFile(dir: string, target: string, depth: number): Promise<string | null> {
   if (depth <= 0) return null;
   const normTarget = normalizeForMatch(target);
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
   } catch {
     return null;
   }
@@ -49,7 +52,7 @@ function findFile(dir: string, target: string, depth: number): string | null {
   // Recurse into subdirectories
   for (const entry of entries) {
     if (entry.isDirectory() && !entry.name.startsWith(".")) {
-      const found = findFile(path.join(dir, entry.name), target, depth - 1);
+      const found = await findFile(path.join(dir, entry.name), target, depth - 1);
       if (found) return found;
     }
   }
@@ -78,7 +81,7 @@ export async function POST(request: NextRequest) {
     }
 
     for (const dir of SEARCH_DIRS) {
-      const found = findFile(dir, basename, MAX_DEPTH);
+      const found = await findFile(dir, basename, MAX_DEPTH);
       if (found) {
         return NextResponse.json({ path: found });
       }

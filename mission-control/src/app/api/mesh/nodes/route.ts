@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import type { KV } from "nats";
 import { getHealthKv, sc } from "@/lib/nats";
+import { resolveEnvKey } from "@/lib/nats-auth";
 import { getDb, getRawDb } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { withTrace } from "@/lib/tracer";
-import { NODE_ID, NODE_PLATFORM, NODE_ROLE } from "@/lib/config";
-import { execSync } from "child_process";
+import { AGENT_NAME, NODE_ID, NODE_PLATFORM, NODE_ROLE, OPENCLAW_ROOT } from "@/lib/config";
+import { exec } from "child_process";
+import { promisify } from "util";
 import os from "os";
 import path from "path";
 import fs from "fs";
+
+const execAsync = promisify(exec);
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +25,7 @@ interface TailscalePeer {
   online: boolean;
   latencyMs: number | null;
   relay: boolean;
+  idle?: boolean;
 }
 
 // Shape of a peer entry in `tailscale status --json` output
@@ -28,6 +33,7 @@ interface TailscaleStatusPeer {
   HostName?: string;
   TailscaleIPs?: string[];
   Online?: boolean;
+  Active?: boolean;
   OS?: string;
   LastSeen?: string;
   CurAddr?: string;
@@ -43,7 +49,8 @@ interface NodeHealth {
   mem: { total: number; free: number };
   uptimeSeconds: number;
   cpuLoadPercent?: number;
-  services: Array<{ name: string; status: string; pid?: number }>;
+  // autostart comes from services/service-manifest.json (absent in older publishers' records).
+  services: Array<{ name: string; status: string; pid?: number; autostart?: boolean }>;
   agent: {
     status: string;
     currentTask: string | null;
@@ -52,11 +59,6 @@ interface NodeHealth {
     budgetRemainingSeconds?: number;
   };
   capabilities: string[];
-  stats: {
-    tasksToday: number;
-    successRate: number;
-    tokenSpendTodayUsd: number;
-  };
   tailscale?: {
     peers: TailscalePeer[];
     selfIp: string;
@@ -75,6 +77,7 @@ interface NodeHealth {
 
 interface MeshNode {
   nodeId: string;
+  isLocal: boolean;
   status: "online" | "degraded" | "offline";
   health: NodeHealth | null;
   activeTasks: Array<{
@@ -90,7 +93,7 @@ interface MeshNode {
   nats: NodeHealth["nats"] | null;
   cpuLoadPercent: number | null;
   isNatsHost: boolean;
-  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "unknown";
+  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "idle" | "unknown";
 }
 
 // ── Local Cache ──────────────────────────────────────────────────────────
@@ -111,14 +114,16 @@ const STALE_OFFLINE = 120; // >120s → offline (matches KV TTL)
 /** Derive peer connectivity summary from tailscale peer data */
 function derivePeerConnectivity(
   health: NodeHealth | null
-): "all_direct" | "some_relay" | "degraded" | "unknown" {
+): "all_direct" | "some_relay" | "degraded" | "idle" | "unknown" {
   const peers = health?.tailscale?.peers;
   if (!peers || peers.length === 0) return "unknown";
   const onlinePeers = peers.filter((p) => p.online);
   if (onlinePeers.length === 0) return "degraded";
-  const relayCount = onlinePeers.filter((p) => p.relay).length;
+  const activePeers = onlinePeers.filter((p) => !p.idle);
+  if (activePeers.length === 0) return "idle";
+  const relayCount = activePeers.filter((p) => p.relay).length;
   if (relayCount === 0) return "all_direct";
-  if (relayCount < onlinePeers.length) return "some_relay";
+  if (relayCount < activePeers.length) return "some_relay";
   return "degraded";
 }
 
@@ -140,7 +145,8 @@ function normalizeNodeId(id: string): string {
     .replace(/^-|-$/g, "");      // trim leading/trailing dashes
 }
 
-const localNormalized = normalizeNodeId(NODE_ID);
+// Exact ids only: the fleet has prefix-sharing names (moltymac / moltymacs-virtual-machine).
+const localIds = new Set([normalizeNodeId(NODE_ID), normalizeNodeId(NODE_ID.split(".")[0])]);
 
 /** Discover all node IDs from available sources */
 async function discoverNodes(kv: KV | null): Promise<string[]> {
@@ -160,7 +166,7 @@ async function discoverNodes(kv: KV | null): Promise<string[]> {
 
   // Source 2: Tailscale peers
   try {
-    const raw = execSafe("tailscale status --json");
+    const raw = await execSafe("tailscale status --json");
     if (raw) {
       const status = JSON.parse(raw);
       // Add self
@@ -176,7 +182,7 @@ async function discoverNodes(kv: KV | null): Promise<string[]> {
 
   // Source 3: mesh-aliases.json (maps shortnames → full IDs)
   try {
-    const aliasPath = path.join(os.homedir(), ".openclaw", "mesh-aliases.json");
+    const aliasPath = path.join(OPENCLAW_ROOT, "mesh-aliases.json");
     if (fs.existsSync(aliasPath)) {
       const aliases = JSON.parse(fs.readFileSync(aliasPath, "utf-8"));
       for (const fullId of Object.values(aliases) as string[]) {
@@ -222,17 +228,18 @@ async function discoverNodes(kv: KV | null): Promise<string[]> {
 // When NATS is down, gather local system info directly so the THIS node
 // still shows real data instead of "offline".
 
-function execSafe(cmd: string): string {
-  try { return execSync(cmd, { timeout: 5000, encoding: "utf-8" }).trim(); } catch { return ""; }
+async function execSafe(cmd: string): Promise<string> {
+  try { return (await execAsync(cmd, { timeout: 5000 })).stdout.trim(); } catch { return ""; }
 }
 
-function gatherLocalHealth(): NodeHealth {
+async function gatherLocalHealth(): Promise<NodeHealth> {
+  const repoDir = process.env.OPENCLAW_REPO_DIR || path.join(os.homedir(), "openclaw");
   const mem = { total: Math.round(os.totalmem() / 1024 / 1024), free: Math.round(os.freemem() / 1024 / 1024) };
   const cpuLoad = Math.round((os.loadavg()[0] / os.cpus().length) * 100);
 
   let diskPercent = 0;
   try {
-    const df = execSafe("df -h /");
+    const df = await execSafe("df -h /");
     const match = df.match(/(\d+)%/);
     if (match) diskPercent = parseInt(match[1], 10);
   } catch (err) { console.warn(`[mesh/nodes] disk usage check failed: ${(err as Error).message}`); }
@@ -243,6 +250,7 @@ function gatherLocalHealth(): NodeHealth {
     online: boolean;
     os: string;
     lastSeen: string | null;
+    idle: boolean;
     direct: boolean;
     relay: string | null;
     latency: null;
@@ -256,8 +264,8 @@ function gatherLocalHealth(): NodeHealth {
     dnsName: string;
   } | null = null;
   try {
-    tailscaleIp = execSafe("tailscale ip -4") || "unknown";
-    const raw = execSafe("tailscale status --json");
+    tailscaleIp = (await execSafe("tailscale ip -4")) || "unknown";
+    const raw = await execSafe("tailscale status --json");
     if (raw) {
       const status = JSON.parse(raw);
       const peers: LocalTailscalePeer[] = [];
@@ -273,8 +281,9 @@ function gatherLocalHealth(): NodeHealth {
             online: peer.Online || false,
             os: peer.OS || "unknown",
             lastSeen: peer.LastSeen || null,
-            direct: !!peer.CurAddr && !peer.Relay,
-            relay: peer.Relay || null,
+            idle: !peer.Active,
+            direct: !!peer.CurAddr,
+            relay: peer.Active && !peer.CurAddr ? (peer.Relay || null) : null,
             latency: null,
           });
         }
@@ -288,7 +297,7 @@ function gatherLocalHealth(): NodeHealth {
   const services: Array<{ name: string; status: string; pid?: number }> = [];
   if (process.platform === "darwin") {
     try {
-      const raw = execSafe("launchctl list");
+      const raw = await execSafe("launchctl list");
       for (const line of raw.split("\n")) {
         if (!line.includes("openclaw")) continue;
         const parts = line.split("\t");
@@ -301,19 +310,18 @@ function gatherLocalHealth(): NodeHealth {
         }
       }
     } catch (err) { console.warn(`[mesh/nodes] launchctl service check failed: ${(err as Error).message}`); }
+  } else {
+    // mesh-deploy installs the Linux units as systemd user units (~/.config/systemd/user).
+    const raw = await execSafe("systemctl --user list-units 'openclaw-*' --type=service --all --no-legend --plain");
+    for (const line of raw.split("\n")) {
+      const [unit, , active] = line.trim().split(/\s+/);
+      if (!unit?.endsWith(".service")) continue;
+      const name = unit.replace(/^openclaw-/, "").replace(/\.service$/, "");
+      services.push({ name, status: active === "active" ? "active" : active === "failed" ? "error" : "stopped" });
+    }
   }
 
-  const natsUrl = process.env.OPENCLAW_NATS || (() => {
-    try {
-      const envPath = path.join(os.homedir(), ".openclaw", "openclaw.env");
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, "utf-8");
-        const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-        if (match) return match[1].trim().replace(/^["']|["']$/g, "");
-      }
-    } catch (err) { console.warn(`[mesh/nodes] openclaw.env read failed: ${(err as Error).message}`); }
-    return "unknown";
-  })();
+  const natsUrl = resolveEnvKey("OPENCLAW_NATS") ?? "unknown";
 
   return {
     nodeId: NODE_ID,
@@ -328,35 +336,32 @@ function gatherLocalHealth(): NodeHealth {
     agent: (() => {
       // Read runtime state if agent is active
       try {
-        const statePath = path.join(os.homedir(), ".openclaw", ".tmp", "agent-state.json");
+        const statePath = path.join(OPENCLAW_ROOT, ".tmp", "agent-state.json");
         if (fs.existsSync(statePath)) {
           const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
           return {
             status: state.status || "idle",
             currentTask: state.taskId || null,
-            llm: state.llm || process.env.LLM_PROVIDER || "anthropic",
+            llm: state.llm || null,
             model: state.model || null,
           };
         }
       } catch (err) { console.warn(`[mesh/nodes] agent-state.json read failed: ${(err as Error).message}`); }
       // No runtime state — derive from config + service status
       const agentSvc = services.find((s) => s.name.includes("agent") && !s.name.includes("audit"));
-      // Read configured agent name and LLM from env/defaults
-      const agentName = process.env.OPENCLAW_AGENT_NAME || "Daedalus";
-      const llmProvider = process.env.LLM_PROVIDER || "anthropic";
       return {
         status: agentSvc?.status === "active" ? "idle" : agentSvc ? "stopped" : "not installed",
         currentTask: null,
-        llm: llmProvider,
+        llm: null,
         model: null,
-        name: agentName,
+        name: AGENT_NAME,
       };
     })(),
     capabilities: [],
-    stats: { tasksToday: 0, successRate: 1.0, tokenSpendTodayUsd: 0 },
     tailscale: tailscaleData,
     nats: { serverUrl: natsUrl, connected: false, serverVersion: "unknown", isHost: false },
-    deployVersion: execSafe("cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null") || "unknown",
+    deployVersion:
+      (await execSafe(`git -C '${repoDir.replace(/'/g, "'\\''")}' rev-parse --short HEAD 2>/dev/null`)) || "unknown",
     reportedAt: new Date().toISOString(),
     // Local fallback blob drifts from the mesh NodeHealth contract
     // (peer field names, extra dnsName/agent.name) — cast, don't reshape.
@@ -419,10 +424,10 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
     // When NATS is completely down, at least show real data for the local node.
     // Always regenerate for local node if data is stale (>30s) or missing.
     const nn = normalizeNodeId(nodeId);
-    const isLocal = nn === localNormalized || nn.startsWith(localNormalized) || localNormalized.startsWith(nn);
+    const isLocal = localIds.has(nn);
     const localCacheAge = nodeCache.has(nodeId) ? (now - nodeCache.get(nodeId)!.fetchedAt) / 1000 : Infinity;
     if (isLocal && (!health || localCacheAge > 30)) {
-      health = gatherLocalHealth();
+      health = await gatherLocalHealth();
       nodeCache.set(nodeId, { health, fetchedAt: now });
     }
 
@@ -441,9 +446,10 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
       lastSeen = new Date(reportedAt).toISOString();
 
       if (staleSeconds < STALE_DEGRADED) {
-        // Fresh data — check for service-level degradation
+        // Fresh data — check for service-level degradation. A stopped
+        // on-demand service (worker agent, gateway) is not an outage.
         const hasDownService = health.services.some(
-          (s) => s.status === "down" || s.status === "error"
+          (s) => (s.status === "down" && s.autostart !== false) || s.status === "error"
         );
         const highDisk = health.diskPercent > 85;
         status = hasDownService || highDisk ? "degraded" : "online";
@@ -482,6 +488,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
 
     nodes.push({
       nodeId,
+      isLocal,
       status,
       health,
       activeTasks,
@@ -512,7 +519,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
       GROUP BY node_id
     `
       )
-      .all(`${today}T00:00:00`) as Array<{
+      .all(`${today} 00:00:00`) as Array<{
       node_id: string;
       task_count: number;
       total_cost: number;
@@ -531,17 +538,7 @@ export const GET = withTrace("mesh", "GET /api/mesh/nodes", async () => {
 
   // Add mesh-wide status
   const natsConnected = kv !== null;
-  const natsUrl = process.env.OPENCLAW_NATS || (() => {
-    try {
-      const envPath = path.join(os.homedir(), ".openclaw", "openclaw.env");
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, "utf-8");
-        const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-        if (match) return match[1].trim().replace(/^["']|["']$/g, "");
-      }
-    } catch (err) { console.warn(`[mesh/nodes] NATS URL env read failed: ${(err as Error).message}`); }
-    return "unknown";
-  })();
+  const natsUrl = resolveEnvKey("OPENCLAW_NATS") ?? "unknown";
   const meshStatus = {
     natsConnected,
     natsUrl,

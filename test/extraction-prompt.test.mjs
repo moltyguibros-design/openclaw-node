@@ -20,7 +20,7 @@ import {
   buildExtractionPrompt,
   extractStructured,
 } from '../lib/extraction-prompt.mjs';
-import { validateExtractionResult } from '../lib/extraction-schema.mjs';
+import { validateExtractionResult, FIELD_CAPS } from '../lib/extraction-schema.mjs';
 
 describe('coerceExtractionResult', () => {
   it('returns raw object passthrough for null / non-object input', () => {
@@ -128,6 +128,25 @@ describe('coerceExtractionResult', () => {
     assert.equal(out.relationships[2].type, 'depends_on');
   });
 
+  it('maps camelCase aliases and swaps endpoints for inverse relationship aliases', () => {
+    const out = coerceExtractionResult({
+      relationships: [
+        { source: 'crash', target: 'oom', type: 'caused_by' },
+        { source: 'a', target: 'b', type: 'Caused By' },
+        { source: 'deploy', target: 'test', type: 'precedes' },
+        { source: 'x', target: 'y', type: 'instanceOf' },
+        { source: 'p', target: 'q', type: 'leads_to' },
+      ],
+    });
+    assert.deepEqual(out.relationships, [
+      { source: 'oom', target: 'crash', type: 'causes' },
+      { source: 'b', target: 'a', type: 'causes' },
+      { source: 'test', target: 'deploy', type: 'follows' },
+      { source: 'x', target: 'y', type: 'instance_of' },
+      { source: 'p', target: 'q', type: 'causes' },
+    ]);
+  });
+
   it('drops relationships missing source/target/type', () => {
     const out = coerceExtractionResult({
       relationships: [
@@ -201,6 +220,59 @@ describe('coerceExtractionResult', () => {
   });
 });
 
+describe('coerceExtractionResult strips credentials before anything is stored', () => {
+  const ANT = 'sk-ant-api03-' + 'Q'.repeat(40);
+  const GH = 'ghp_' + 'z'.repeat(36);
+
+  it('redacts keys in prose fields and drops names that are keys', () => {
+    const out = coerceExtractionResult({
+      entities: [
+        { name: ANT, type: 'technology', salience: 0.9 },
+        { name: 'Staging gateway', type: 'project', salience: 0.8, aliases: ['stg-gw', GH] },
+      ],
+      themes: [{ label: `rotating ${GH}`, hierarchy: ['ops', `key ${ANT}`] }],
+      decisions: [{ decision: `Use ${ANT} for the staging gateway`, rationale: `the old ${GH} token expired`, confidence: 0.9 }],
+      friction_signals: [{ signal: `pasted ${GH} in chat`, severity: 'high' }],
+      relationships: [
+        { source: 'Staging gateway', target: ANT, type: 'depends_on' },
+        { source: 'Staging gateway', target: 'NATS', type: 'depends_on' },
+      ],
+    });
+    const wire = JSON.stringify(out);
+    assert.ok(!wire.includes('sk-ant') && !wire.includes('ghp_'), wire);
+    assert.deepEqual(out.entities.map((e) => e.name), ['Staging gateway']);
+    assert.deepEqual(out.entities[0].aliases, ['stg-gw']);
+    assert.equal(out.decisions[0].decision, 'Use [REDACTED] for the staging gateway');
+    assert.equal(out.decisions[0].rationale, 'the old [REDACTED] token expired');
+    assert.equal(out.themes[0].label, 'rotating [REDACTED]');
+    assert.deepEqual(out.relationships, [{ source: 'Staging gateway', target: 'NATS', type: 'depends_on' }]);
+    assert.doesNotThrow(() => validateExtractionResult(out));
+  });
+
+  it('scrubs before clipping, so a key cut at the field cap leaves no prefix behind', () => {
+    const decision = 'x'.repeat(FIELD_CAPS.decision - 15) + ' ' + ANT;
+    const out = coerceExtractionResult({ decisions: [{ decision, rationale: 'r', confidence: 0.5 }] });
+    assert.ok(!out.decisions[0].decision.includes('sk-'), out.decisions[0].decision.slice(-30));
+  });
+
+  it('extractStructured returns the redacted form whatever the model echoes', async () => {
+    const mockClient = {
+      generate: async () => ({
+        content: JSON.stringify({
+          entities: [], themes: [], actions: [], friction_signals: [], relationships: [],
+          decisions: [{ decision: `Deploy with ${GH}`, rationale: 'CI needs it', confidence: 0.8 }],
+        }),
+      }),
+    };
+    const result = await extractStructured(mockClient, [{ role: 'user', content: `use ${GH}` }]);
+    assert.equal(result.decisions[0].decision, 'Deploy with [REDACTED]');
+  });
+
+  it('the extraction rules tell the model not to copy credentials', () => {
+    assert.match(buildExtractionPrompt([])[0].content, /Never copy API keys, tokens or passwords into any field/);
+  });
+});
+
 describe('extractJsonFromText', () => {
   it('passes through non-string input', () => {
     assert.equal(extractJsonFromText(null), null);
@@ -266,10 +338,13 @@ describe('buildExtractionPrompt', () => {
     const out = buildExtractionPrompt([]);
     assert.match(out[0].content, /entities/);
     assert.match(out[0].content, /themes/);
-    assert.match(out[0].content, /actions/);
     assert.match(out[0].content, /decisions/);
-    assert.match(out[0].content, /friction_signals/);
     assert.match(out[0].content, /relationships/);
+  });
+
+  it('asks for nothing the store never keeps (no actions, no friction signals)', () => {
+    const sys = buildExtractionPrompt([])[0].content;
+    assert.doesNotMatch(sys, /"actions"|\*\*actions\*\*|friction/i);
   });
 
   it('user message includes the conversation messages', () => {
@@ -340,15 +415,59 @@ describe('extractStructured', () => {
     );
   });
 
-  it('throws ZodError on schema-invalid result that coercer cannot save', async () => {
+  it('scrubs a key out of the raw excerpt in its errors', async () => {
+    // Built at runtime so the committed file holds no secret-shaped line.
+    const key = 'sk-' + 'Ab1'.repeat(15);
+    const scrubbed = (pattern) => (err) => pattern.test(err.message) && !err.message.includes(key) && err.message.includes('[REDACTED]');
+    await assert.rejects(
+      () => extractStructured({ generate: async () => ({ content: `not json ${key}` }) }, []),
+      scrubbed(/LLM response is not valid JSON/),
+    );
+    await assert.rejects(
+      () => extractStructured({ model: 'llama3.1:8b', generate: async () => ({ content: JSON.stringify({ name: key }) }) }, []),
+      scrubbed(/no extraction fields/),
+    );
+  });
+
+  it('an empty JSON object is stored as an empty extraction', async () => {
     const mockClient = {
       generate: async () => ({
-        content: JSON.stringify({ /* missing required fields */ }),
+        content: JSON.stringify({}),
       }),
     };
-    // Coercer produces empty-array defaults → validates OK actually
     const result = await extractStructured(mockClient, []);
     assert.equal(result.entities.length, 0);
+  });
+
+  it('a primed (qwen3) continuation with nested objects keeps every entity', async () => {
+    const mockClient = {
+      model: 'qwen3:8b',
+      generate: async () => ({
+        content: '"entities": [{"name": "NATS", "type": "technology", "salience": 0.9}, '
+          + '{"name": "OpenClaw Gateway", "type": "project", "salience": 0.7}], '
+          + '"themes": [], "actions": [], "decisions": [], "friction_signals": [], "relationships": []}',
+      }),
+    };
+    const result = await extractStructured(mockClient, []);
+    assert.deepEqual(result.entities.map(e => e.name), ['NATS', 'OpenClaw Gateway']);
+  });
+
+  it('rejects a reply whose top level carries no extraction field', async () => {
+    const mockClient = {
+      model: 'llama3.1:8b',
+      generate: async () => ({ content: '{"name": "X", "type": "project"}' }),
+    };
+    await assert.rejects(() => extractStructured(mockClient, []), /no extraction fields/);
+  });
+
+  it('rejects a truncated primed continuation instead of storing one inner object as empty', async () => {
+    const mockClient = {
+      model: 'qwen3:8b',
+      generate: async () => ({
+        content: '"entities": [{"name": "NATS", "type": "technology", "salience": 0.9}], "themes": [',
+      }),
+    };
+    await assert.rejects(() => extractStructured(mockClient, []), /not valid JSON/);
   });
 });
 

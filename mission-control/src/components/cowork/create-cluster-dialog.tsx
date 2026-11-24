@@ -2,11 +2,8 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { createCluster } from "@/lib/hooks";
-import { RolePicker } from "./role-picker";
+import { createCluster, fetcher } from "@/lib/hooks";
 import useSWR from "swr";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const PRESET_COLORS = [
   "#6366f1", "#8b5cf6", "#06b6d4", "#10b981",
@@ -28,9 +25,7 @@ export function CreateClusterDialog({ open, onClose }: Props) {
   const [mode, setMode] = useState<string>("parallel");
   const [convergence, setConvergence] = useState<string>("unanimous");
   const [maxRounds, setMaxRounds] = useState(5);
-  const [selectedNodes, setSelectedNodes] = useState<
-    Array<{ nodeId: string; role: string }>
-  >([]);
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   const { data } = useSWR<{ nodes: Array<{ nodeId: string; status: string }> }>(
@@ -40,16 +35,8 @@ export function CreateClusterDialog({ open, onClose }: Props) {
   const meshNodes = data?.nodes ?? [];
 
   const toggleNode = (nodeId: string) => {
-    setSelectedNodes((prev) => {
-      const exists = prev.find((n) => n.nodeId === nodeId);
-      if (exists) return prev.filter((n) => n.nodeId !== nodeId);
-      return [...prev, { nodeId, role: "worker" }];
-    });
-  };
-
-  const updateNodeRole = (nodeId: string, role: string) => {
     setSelectedNodes((prev) =>
-      prev.map((n) => (n.nodeId === nodeId ? { ...n, role } : n))
+      prev.includes(nodeId) ? prev.filter((n) => n !== nodeId) : [...prev, nodeId]
     );
   };
 
@@ -64,12 +51,14 @@ export function CreateClusterDialog({ open, onClose }: Props) {
         defaultMode: mode,
         defaultConvergence: convergence,
         maxRounds,
-        members: selectedNodes,
+        members: selectedNodes.map((nodeId) => ({ nodeId })),
       });
       onClose();
       setName("");
       setDescription("");
       setSelectedNodes([]);
+    } catch (err) {
+      alert(`Create failed: ${(err as Error).message}`);
     } finally {
       setSaving(false);
     }
@@ -182,13 +171,11 @@ export function CreateClusterDialog({ open, onClose }: Props) {
             <span className="text-xs text-muted-foreground">Nodes</span>
             <div className="mt-1 space-y-1 max-h-40 overflow-y-auto">
               {meshNodes.map((node) => {
-                const selected = selectedNodes.find(
-                  (n) => n.nodeId === node.nodeId
-                );
+                const selected = selectedNodes.includes(node.nodeId);
                 return (
                   <div
                     key={node.nodeId}
-                    className={`flex items-center justify-between rounded px-3 py-2 text-xs cursor-pointer transition-colors ${
+                    className={`flex items-center rounded px-3 py-2 text-xs cursor-pointer transition-colors ${
                       selected
                         ? "bg-accent/40 border border-accent-foreground/20"
                         : "bg-accent/10 hover:bg-accent/20"
@@ -207,16 +194,6 @@ export function CreateClusterDialog({ open, onClose }: Props) {
                       />
                       <span className="font-mono">{node.nodeId}</span>
                     </div>
-                    {selected && (
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <RolePicker
-                          value={selected.role}
-                          onChange={(role) =>
-                            updateNodeRole(node.nodeId, role)
-                          }
-                        />
-                      </div>
-                    )}
                   </div>
                 );
               })}

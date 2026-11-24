@@ -9,7 +9,9 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   createMetricEntry,
@@ -205,6 +207,63 @@ describe('emptyStats', () => {
 
 // ─── createMetricCollector (processMessage) ──────────────────────────────────
 
+describe('round trip on live-shaped events (accepted answers an offer, not the broadcast)', () => {
+  it('resolves accepted → offer → broadcast', () => {
+    const lines = [
+      JSON.stringify({ ts: '2026-05-26T14:00:00.000Z', type: 'broadcast', node_id: 'a', data: { event_id: 'b1' } }),
+      JSON.stringify({ ts: '2026-05-26T14:00:01.000Z', type: 'offer', node_id: 'b', data: { event_id: 'o1', responding_to: 'b1' } }),
+      JSON.stringify({ ts: '2026-05-26T14:00:04.000Z', type: 'accepted', node_id: 'a', data: { responding_to_broadcast: 'o1' } }),
+    ];
+    const stats = aggregateFromLines(lines);
+    assert.equal(stats.avg_round_trip_ms, 4000);
+    assert.equal(stats.round_trip_samples, 1);
+  });
+
+  it('through the collector, as the bus delivers them', async () => {
+    const nc = { subscribe: () => ({ [Symbol.asyncIterator]() { return { next() { return { done: true }; } }; } }) };
+    const collector = createMetricCollector(nc, { metricsPath: '/dev/null', nodeIds: [], log: () => {} });
+    await collector.processMessage('context.broadcast.a', { source_node_id: 'a', event_id: 'b1', data: {} });
+    await collector.processMessage('context.offer.b', { node_id: 'b', event_id: 'o1', data: { responding_to: 'b1', artifacts: [] } });
+    await collector.processMessage('context.accepted.a', { node_id: 'a', event_id: 'x1', data: { responding_to: 'o1', accepted_artifacts: [] } });
+    assert.equal(collector.getStats().round_trip_samples, 1);
+  });
+});
+
+describe('signature failures from acceptor counters', () => {
+  const nc = { subscribe: () => ({ [Symbol.asyncIterator]() { return { next() { return { done: true }; } }; } }) };
+  const later = (ms) => new Date(Date.now() + ms).toISOString();
+
+  it('the collector subscribes to the acceptor stats subject', () => {
+    assert.ok(MONITORED_SUBJECTS.includes('context.acceptor.stats.>'));
+  });
+
+  it('counts increases per acceptor instance, across restarts', async () => {
+    const collector = createMetricCollector(nc, { metricsPath: '/dev/null', nodeIds: [], log: () => {} });
+    const run1 = later(10);
+    const report = (node, started_at, signature_rejected) =>
+      collector.processMessage(`context.acceptor.stats.${node}`, { node_id: node, started_at, signature_rejected });
+
+    await report('bravo', run1, 2);
+    await report('bravo', run1, 3);
+    await report('bravo', run1, 3);
+    assert.equal(collector.getStats().signature_failures, 3);
+
+    await report('bravo', later(20), 1);
+    const stats = collector.getStats();
+    assert.equal(stats.signature_failures, 4);
+    assert.equal(stats.per_node.bravo.sig_failures, 4);
+  });
+
+  it('baselines an acceptor that was already running when the collector started', async () => {
+    const collector = createMetricCollector(nc, { metricsPath: '/dev/null', nodeIds: [], log: () => {} });
+    const before = new Date(Date.now() - 60_000).toISOString();
+    await collector.processMessage('context.acceptor.stats.charlie', { started_at: before, signature_rejected: 5 });
+    assert.equal(collector.getStats().signature_failures, 0);
+    await collector.processMessage('context.acceptor.stats.charlie', { started_at: before, signature_rejected: 7 });
+    assert.equal(collector.getStats().signature_failures, 2);
+  });
+});
+
 describe('createMetricCollector.processMessage', () => {
   it('classifies broadcast events from NATS subject', async () => {
     const nc = { subscribe: () => ({ [Symbol.asyncIterator]() { return { next() { return { done: true }; } }; } }) };
@@ -266,6 +325,30 @@ describe('createMetricCollector.processMessage', () => {
   });
 });
 
+// stop() set `stopped` before recording harness_stop, which recordMetric then
+// skipped, so --stats measured the run up to now instead of its duration.
+describe('createMetricCollector.stop', () => {
+  it('writes harness_stop last, and nothing after it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dogfood-stop-'));
+    try {
+      const metricsPath = join(dir, 'metrics.jsonl');
+      const nc = { subscribe: () => ({
+        unsubscribe() {},
+        [Symbol.asyncIterator]() { return { next() { return { done: true }; } }; },
+      }) };
+      const collector = createMetricCollector(nc, { metricsPath, nodeIds: [], log: () => {} });
+      await collector.start();
+      await collector.stop();
+      await collector.processMessage('context.broadcast.alpha', { source_node_id: 'alpha', event_id: 'late', data: {} });
+      const entries = (await readFile(metricsPath, 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+      assert.deepEqual(entries.map((e) => e.type), ['harness_start', 'harness_stop']);
+      assert.equal(entries[1].data.total_lines, 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── formatStatsReport ──────────────────────────────────────────────────────
 
 describe('formatStatsReport', () => {
@@ -307,6 +390,15 @@ describe('constants', () => {
     assert.ok(MONITORED_SUBJECTS.includes('context.offer.>'));
     assert.ok(MONITORED_SUBJECTS.includes('context.accepted.>'));
     assert.equal(Object.keys(METRIC_TYPES).length, 7);
+  });
+
+  it('--help names lib/nats-resolve as the harness NATS default, not a fixed localhost URL', () => {
+    const bin = fileURLToPath(new URL('../bin/dogfood-council.mjs', import.meta.url));
+    const { stdout, status } = spawnSync(process.execPath, [bin, '--help'], { encoding: 'utf8' });
+    assert.equal(status, 0);
+    const line = stdout.split('\n').find((l) => l.trim().startsWith('--nats-url'));
+    assert.match(line, /nats-resolve/);
+    assert.doesNotMatch(line, /\(default: nats:\/\/localhost:4222\)/);
   });
 });
 

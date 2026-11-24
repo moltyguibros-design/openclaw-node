@@ -4,19 +4,21 @@
  * LLM latency benchmark for the local extraction LLM (default: Qwen3-8B via Ollama).
  *
  * Generates a synthetic 40-turn session and measures structured-output extraction
- * latency. Target: total ≤30 seconds (per Block 3 frozen decisions).
+ * latency through production's extractStructured (its prompt, primer, parser and
+ * schema). Target: total ≤30 seconds (per Block 3 frozen decisions).
  *
  * Usage:
  *   node bin/llm-benchmark.mjs [--base-url URL] [--model NAME] [--turns N]
  *
  * Requires a local OpenAI-compatible LLM server running. Default is Ollama:
- *   brew install ollama && ollama pull qwen3:8b-instruct-q4_K_M
+ *   brew install ollama && ollama pull qwen3:8b
  *   ollama serve  # listens on http://localhost:11434
  * Operators may also use mlx-lm, llama-server, or vLLM by passing --base-url.
  */
 
 import { parseArgs } from 'node:util';
 import { createLlmClient, DEFAULT_BASE_URL, DEFAULT_MODEL } from '../lib/llm-client.mjs';
+import { extractStructured } from '../lib/extraction-prompt.mjs';
 
 // --- Synthetic session generator ---
 
@@ -42,7 +44,7 @@ const TURN_TEMPLATES = [
   { role: 'user', content: 'That confirms the Gulf 1 result. FTS5 is fundamentally broken for natural language. Semantic is the way forward.' },
   { role: 'assistant', content: 'Agreed. The FTS5 tokenizer treats spaces as AND operators, so multi-word queries become intersection searches. That\'s why "where did we discuss NATS" returns nothing — it needs all tokens present in one chunk.' },
   { role: 'user', content: 'Let\'s move on to the extraction schema. What fields do we need for the ExtractionResult?' },
-  { role: 'assistant', content: 'Based on the reference plan: entities (name, type, salience), themes (label, hierarchy), actions, decisions (decision, rationale, confidence), friction_signals (signal, severity), and relationships (source, target, type).' },
+  { role: 'assistant', content: 'Based on the reference plan: entities (name, type, salience), themes (label, hierarchy), decisions (decision, rationale, confidence), and relationships (source, target, type).' },
   { role: 'user', content: 'Add a "context" field to decisions — I want to know which part of the conversation led to each decision.' },
   { role: 'assistant', content: 'Good idea. I\'ll add a context field with the relevant turn indices. That also helps with provenance tracking when decisions are promoted to the shared stream.' },
   { role: 'user', content: 'The artifact store needs a cleanup job. Some of the .meta.json sidecars are orphaned.' },
@@ -73,45 +75,27 @@ export function generateSyntheticSession(turnCount = 40) {
 
 // --- Benchmark runner ---
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a structured data extraction assistant. Given a conversation transcript, extract the following as JSON:
-
-{
-  "entities": [{ "name": "string", "type": "person|project|technology|file|concept|company", "salience": 0.0-1.0 }],
-  "themes": [{ "label": "string", "hierarchy": ["parent", "child"] }],
-  "actions": ["debugging", "designing", "planning", "implementing", "reviewing", "researching"],
-  "decisions": [{ "decision": "string", "rationale": "string", "confidence": 0.0-1.0 }],
-  "friction_signals": [{ "signal": "string", "severity": "low|medium|high" }],
-  "relationships": [{ "source": "string", "target": "string", "type": "depends_on|contradicts|instance_of|causes|follows" }]
-}
-
-Return ONLY valid JSON. No markdown, no explanation.`;
-
 export async function runBenchmark(client, turns) {
-  const transcript = turns.map(t => `[${t.role}]: ${t.content}`).join('\n');
-
-  const messages = [
-    { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-    { role: 'user', content: `Extract structured data from this conversation:\n\n${transcript}` },
-  ];
-
-  const start = performance.now();
-  const result = await client.generate(messages, { jsonMode: true, maxTokens: 4096, temperature: 0.1 });
-  const elapsed = performance.now() - start;
+  // The raw reply is kept for the report: extractStructured returns only the validated result.
+  let raw = null;
+  const spy = { model: client.model, generate: async (...args) => (raw = await client.generate(...args)) };
 
   let parsed = null;
   let parseError = null;
+  const start = performance.now();
   try {
-    parsed = JSON.parse(result.content);
+    parsed = await extractStructured(spy, turns);
   } catch (e) {
     parseError = e.message;
   }
+  const elapsed = performance.now() - start;
 
   return {
     elapsed_ms: Math.round(elapsed),
     elapsed_s: (elapsed / 1000).toFixed(1),
-    content_length: result.content.length,
-    finish_reason: result.finishReason,
-    usage: result.usage,
+    content_length: raw?.content?.length ?? 0,
+    finish_reason: raw?.finishReason ?? null,
+    usage: raw?.usage ?? null,
     json_valid: parsed !== null,
     parse_error: parseError,
     has_entities: Array.isArray(parsed?.entities),
@@ -200,7 +184,14 @@ async function main() {
   process.exit(result.pass ? 0 : 1);
 }
 
-main().catch(err => {
-  console.error('Benchmark failed:', err.message);
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  process.argv[1].endsWith('llm-benchmark.mjs') ||
+  process.argv[1].endsWith('llm-benchmark')
+);
+
+if (isMain) {
+  main().catch(err => {
+    console.error('Benchmark failed:', err.message);
+    process.exit(1);
+  });
+}

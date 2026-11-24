@@ -32,6 +32,10 @@
       <string>${OPENCLAW_NATS}</string>
       <key>OPENCLAW_REPO_DIR</key>
       <string>${OPENCLAW_REPO_DIR}</string>
+      <key>OPENCLAW_WORKSPACE</key>
+      <string>${OPENCLAW_WORKSPACE}</string>
+      <key>OPENCLAW_NODE_ID</key>
+      <string>${OPENCLAW_NODE_ID}</string>
     </dict>
     <key>ThrottleInterval</key>
     <integer>10</integer>

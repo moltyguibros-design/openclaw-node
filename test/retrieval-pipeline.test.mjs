@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
 import {
   DEFAULT_CHANNEL_WEIGHTS,
   parseWeights,
@@ -10,11 +11,14 @@ import {
   entitySearch,
   themeEntitySearch,
   decisionFtsSearch,
+  sessionFtsSearch,
   toFtsQuery,
   buildSeeds,
+  activationSearch,
   weightedRRF,
   createRetrievalPipeline,
   setChannelErrorSink,
+  buildSeedMatchText,
 } from '../lib/retrieval-pipeline.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -185,6 +189,13 @@ describe('findMatchingEntities', () => {
     const results = findMatchingEntities(db, 'completely unrelated topic');
     assert.strictEqual(results.length, 0);
   });
+
+  it('matches a short name standing alone after an occurrence inside a word', () => {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO entities (name, type, first_seen, last_seen, mention_count) VALUES (?, ?, ?, ?, ?)`).run('Go', 'technology', now, now, 3);
+    assert.ok(findMatchingEntities(db, 'going to rewrite it in Go').some(r => r.name === 'Go'));
+    assert.ok(!findMatchingEntities(db, 'going to rewrite it').some(r => r.name === 'Go'));
+  });
 });
 
 describe('findMatchingThemes', () => {
@@ -201,6 +212,13 @@ describe('findMatchingThemes', () => {
   it('returns empty for no matches', () => {
     const results = findMatchingThemes(db, 'completely unrelated');
     assert.strictEqual(results.length, 0);
+  });
+
+  it('matches a short label only as a discrete token', () => {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO themes (label, first_seen, last_seen) VALUES (?, ?, ?)`).run('AI', now, now);
+    assert.ok(!findMatchingThemes(db, 'please maintain the build script').some(r => r.label === 'AI'));
+    assert.ok(findMatchingThemes(db, 'ask the AI about it').some(r => r.label === 'AI'));
   });
 });
 
@@ -286,6 +304,41 @@ describe('getChunksForSessions (D8: session-relevance ranking)', () => {
     for (let i = 0; i < 20; i++) insert.run('s1', i, 'user', 't' + i, 't' + i);
     assert.strictEqual(getChunksForSessions(kDb, ['s1'], 5).length, 5);
   });
+
+  it('reads only rows that can make the cut', () => {
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (const sid of ['a', 'b']) {
+      for (let i = 0; i < 200; i++) insert.run(sid, i, 'user', sid + i, sid + i);
+    }
+    let read = 0;
+    const counting = {
+      prepare: (sql) => {
+        const s = kDb.prepare(sql);
+        return { all: (...args) => { const rows = s.all(...args); read += rows.length; return rows; } };
+      },
+    };
+    const results = getChunksForSessions(counting, ['a', 'b'], 5);
+    assert.deepStrictEqual(results.map(r => r.turn_index), [199, 198, 197, 196, 195]);
+    assert.ok(results.every(r => r.session_id === 'a'));
+    assert.ok(read <= 5, `read ${read} rows for a limit of 5`);
+  });
+
+  it('spills over to the next session when the first runs out', () => {
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (let i = 0; i < 2; i++) insert.run('a', i, 'user', 'a' + i, 'a' + i);
+    for (let i = 0; i < 10; i++) insert.run('b', i, 'user', 'b' + i, 'b' + i);
+    const results = getChunksForSessions(kDb, ['a', 'b'], 5);
+    assert.deepStrictEqual(results.map(r => r.snippet), ['a1', 'a0', 'b9', 'b8', 'b7']);
+    assert.deepStrictEqual(results.map(r => r.score), [1, 1, 0.5, 0.5, 0.5]);
+  });
+
+  it('keeps insertion order for chunks sharing a turn_index', () => {
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    insert.run('s1', 3, 'user', 'first', 'first');
+    insert.run('s1', 3, 'assistant', 'second', 'second');
+    const results = getChunksForSessions(kDb, ['s1'], 10);
+    assert.deepStrictEqual(results.map(r => r.snippet), ['first', 'second']);
+  });
 });
 
 describe('entitySearch', () => {
@@ -300,10 +353,9 @@ describe('entitySearch', () => {
 
   it('returns chunks from sessions where matched entities appear', () => {
     const results = entitySearch(eDb, kDb, 'How does NATS work?', 10);
-    assert.ok(results.length > 0);
-    // NATS entity is mentioned in session-001 and session-002
-    const sessionIds = new Set(results.map(r => r.session_id));
-    assert.ok(sessionIds.has('session-001') || sessionIds.has('session-002'));
+    // NATS is mentioned in session-001 (salience 0.9) and session-002 (0.7)
+    assert.deepStrictEqual(results.map(r => `${r.session_id}:${r.turn_index}`),
+      ['session-001:1', 'session-001:0', 'session-002:1', 'session-002:0']);
     // Results have RRF-compatible shape
     assert.ok('chunk_id' in results[0]);
     assert.ok('snippet' in results[0]);
@@ -333,19 +385,104 @@ describe('themeEntitySearch', () => {
     assert.ok(sessionIds.has('session-004'));
   });
 
-  it('handles theme labels containing FTS operator characters', () => {
+  it('matches theme labels that are not valid FTS syntax on their own', () => {
     const now = new Date().toISOString();
     eDb.prepare(`INSERT INTO themes (label, first_seen, last_seen) VALUES (?, ?, ?)`)
-      .run('mesh AND "security"', now, now);
-    // Label is phrase-quoted into the MATCH — must not throw as FTS syntax
-    assert.doesNotThrow(() =>
-      themeEntitySearch(eDb, kDb, 'thoughts on mesh AND "security" hardening', 10));
+      .run('mesh AND', now, now);
+    eDb.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run('session-005', 'Harden the mesh and rotate keys', 'keys leak', 0.8, now);
+    const insert = kDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    insert.run('session-005', 0, 'user', 'Harden the mesh?', 'Harden the mesh?');
+    insert.run('session-005', 1, 'assistant', 'Rotating keys now.', 'Rotating keys now.');
+    const errors = [];
+    setChannelErrorSink((channel) => errors.push(channel));
+    try {
+      const results = themeEntitySearch(eDb, kDb, 'thoughts on mesh AND hardening', 10);
+      assert.deepEqual(errors, []);
+      assert.deepEqual(results.map(r => `${r.session_id}:${r.turn_index}`), ['session-005:1', 'session-005:0']);
+    } finally {
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
+  it('respects decision privacy on the theme path when respectPrivacy is set', () => {
+    eDb.exec('ALTER TABLE entities ADD COLUMN private INTEGER DEFAULT 1; ALTER TABLE themes ADD COLUMN private INTEGER DEFAULT 1;');
+    eDb.prepare(`UPDATE themes SET private = 0 WHERE label = 'memory infrastructure'`).run();
+    // The seeded session-004 decision is private (DEFAULT 1).
+    const hidden = themeEntitySearch(eDb, kDb, 'Tell me about memory infrastructure', 10, { respectPrivacy: true });
+    assert.ok(!hidden.some(r => r.session_id === 'session-004'), 'a private decision must not surface its session');
+
+    eDb.prepare(`UPDATE decisions SET private = 0 WHERE session_id = 'session-004'`).run();
+    const visible = themeEntitySearch(eDb, kDb, 'Tell me about memory infrastructure', 10, { respectPrivacy: true });
+    assert.ok(visible.some(r => r.session_id === 'session-004'));
+  });
+});
+
+// Channels 4 and 5 hand getChunksForSessions their sessions in rank order and
+// it fills the limit from the first one; an unordered DISTINCT came out in
+// mention insertion order, so a frequently mentioned entity gave its oldest chat.
+describe('channels 4 and 5 rank sessions, not mention insertion order', () => {
+  let extractionDb, knowledgeDb;
+  beforeEach(() => {
+    extractionDb = createExtractionDb();
+    knowledgeDb = createKnowledgeDb();
+    const now = new Date().toISOString();
+    const entity = extractionDb.prepare(`INSERT INTO entities (name, type, first_seen, last_seen) VALUES (?, ?, ?, ?)`);
+    entity.run('NATS', 'technology', now, now);
+    entity.run('SQLite', 'technology', now, now);
+    const mention = extractionDb.prepare(`INSERT INTO mentions (entity_id, session_id, salience, created_at) VALUES (?, ?, ?, ?)`);
+    const chunk = knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (let day = 0; day < 100; day++) {
+      const sid = `sess-${String(day).padStart(3, '0')}`;
+      const at = new Date(Date.UTC(2026, 0, 1) + day * 86400000).toISOString();
+      mention.run(1, sid, 0.5, at);
+      mention.run(2, sid, 0.5, at);
+      for (let t = 0; t < 40; t++) chunk.run(sid, t, 'user', `turn ${t}`, `turn ${t}`);
+    }
+  });
+  afterEach(() => { extractionDb.close(); knowledgeDb.close(); });
+
+  it('channel 4 entity path puts the newest mentioning session first', () => {
+    const results = themeEntitySearch(extractionDb, knowledgeDb, 'tell me about NATS', 30);
+    assert.equal(results[0].session_id, 'sess-099');
+    assert.ok(results.every(r => r.session_id === 'sess-099'), 'the newest session fills the limit first');
+  });
+
+  it('channel 5 puts the newest session of an activated entity first', () => {
+    const graphCache = {
+      queryNeighbors(id) {
+        const edges = [{ source_id: 'concepts/nats', target_id: 'concepts/sqlite', weight: 1 }];
+        return { edges: edges.filter(e => e.source_id === id || e.target_id === id), neighbors: [] };
+      },
+    };
+    const results = activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS', 20);
+    assert.equal(results[0].session_id, 'sess-099');
+  });
+
+  it('channel 4 theme path ranks sessions by their best decision match', () => {
+    const now = new Date().toISOString();
+    extractionDb.prepare(`INSERT INTO themes (label, first_seen, last_seen) VALUES (?, ?, ?)`).run('vault cadence', now, now);
+    const decision = extractionDb.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at) VALUES (?, ?, ?, ?, ?)`);
+    decision.run('weak-match', 'Ship the release notes with a vault cadence aside among many other unrelated words about the deploy pipeline and the review queue', 'misc', 0.5, now);
+    decision.run('strong-match', 'Vault cadence', 'vault cadence', 0.5, now);
+    const chunk = knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES (?, ?, ?, ?, ?)`);
+    for (const sid of ['weak-match', 'strong-match']) chunk.run(sid, 0, 'user', sid, sid);
+    const results = themeEntitySearch(extractionDb, knowledgeDb, 'what was the vault cadence', 10);
+    assert.deepEqual(results.map(r => r.session_id), ['strong-match', 'weak-match']);
   });
 });
 
 describe('toFtsQuery', () => {
-  it('quotes terms and ORs them, dropping sub-2-char terms', () => {
-    assert.equal(toFtsQuery('use NATS for x federation'), '"use" OR "NATS" OR "for" OR "federation"');
+  it('quotes terms and ORs them, dropping sub-2-char terms and stopwords', () => {
+    assert.equal(toFtsQuery('use NATS for x federation'), '"use" OR "NATS" OR "federation"');
+  });
+
+  it('drops stopwords in any case, with punctuation or a curly apostrophe', () => {
+    assert.equal(toFtsQuery('How is NATS configured?'), '"NATS" OR "configured?"');
+    assert.equal(toFtsQuery('What\u2019s the memory daemon doing'), '"memory" OR "daemon"');
+    assert.equal(toFtsQuery('the we about'), '');
   });
 
   it('strips embedded quotes so user text cannot inject FTS syntax', () => {
@@ -355,6 +492,32 @@ describe('toFtsQuery', () => {
   it('returns empty string when no usable terms', () => {
     assert.equal(toFtsQuery('a b'), '');
     assert.equal(toFtsQuery('   '), '');
+  });
+});
+
+describe('sessionFtsSearch (channel 1)', () => {
+  let kDb;
+  beforeEach(() => {
+    kDb = createKnowledgeDb();
+    kDb.exec(`
+      CREATE VIRTUAL TABLE session_chunks_fts USING fts5(text, content='session_chunks', content_rowid='id');
+      CREATE TRIGGER session_chunks_fts_ins AFTER INSERT ON session_chunks BEGIN
+        INSERT INTO session_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+    `);
+    seedKnowledgeDb(kDb);
+  });
+  afterEach(() => { kDb.close(); });
+
+  it('matches natural-language prompts (not an implicit AND, no syntax error)', async () => {
+    for (const prompt of ['how is SQLite configured', 'How is SQLite configured?', "what's the plan for spreading activation"]) {
+      const results = await sessionFtsSearch(kDb, prompt, 10);
+      assert.ok(results.length > 0, `no FTS hit for ${JSON.stringify(prompt)}`);
+    }
+  });
+
+  it('a stopword-only prompt matches nothing instead of everything', async () => {
+    assert.deepEqual(await sessionFtsSearch(kDb, 'what is the', 10), []);
   });
 });
 
@@ -412,13 +575,9 @@ describe('buildSeeds', () => {
   beforeEach(() => { db = createExtractionDb(); seedExtractionDb(db); });
   afterEach(() => { db.close(); });
 
-  it('returns slugified entity/theme names as seeds with activation 1.0', () => {
+  it('seeds each entity concept note and theme hub note with activation 1.0', () => {
     const seeds = buildSeeds(db, 'How does NATS handle memory infrastructure?');
-    // Should find NATS entity and memory infrastructure theme
-    assert.ok('nats' in seeds);
-    assert.ok('memory-infrastructure' in seeds);
-    assert.strictEqual(seeds['nats'], 1.0);
-    assert.strictEqual(seeds['memory-infrastructure'], 1.0);
+    assert.deepStrictEqual(seeds, { 'concepts/nats': 1.0, 'themes/memory-infrastructure': 1.0 });
   });
 
   it('returns empty object for no matches', () => {
@@ -459,6 +618,63 @@ describe('R19 (repair 5.2): channel failures are observable, never silent', () =
     }
   });
 
+  it('a failing FTS or vector channel reports through the sink', async () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const knowledgeDb = new Database(':memory:'); // no session_chunks tables
+    try {
+      const pipeline = createRetrievalPipeline({ knowledgeDb });
+      const result = await pipeline.retrieve('anything');
+      assert.deepStrictEqual(result, []);
+      assert.deepStrictEqual(reports.map(r => r.channel).sort(), ['fts', 'vec']);
+    } finally {
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
+  it('a knowledge DB without session_chunks_fts reports channel fts', async () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const knowledgeDb = createKnowledgeDb();
+    knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet) VALUES ('s', 0, 'user', 'nats config', 'nats config')`).run();
+    try {
+      const result = await createRetrievalPipeline({ knowledgeDb }).retrieve('nats config');
+      assert.deepStrictEqual(result, []);
+      const fts = reports.find(r => r.channel === 'fts');
+      assert.ok(fts, JSON.stringify(reports));
+      assert.match(fts.message, /no such table/);
+    } finally {
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
+  it('a broken mentions table reports theme-entity', () => {
+    const reports = [];
+    setChannelErrorSink((channel, err) => reports.push({ channel, message: err.message }));
+    const extractionDb = createExtractionDb();
+    const knowledgeDb = createKnowledgeDb();
+    seedExtractionDb(extractionDb);
+    try {
+      assert.equal(findMatchingEntities(extractionDb, 'NATS').length, 1);
+      extractionDb.exec('DROP TABLE mentions');
+      assert.deepStrictEqual(themeEntitySearch(extractionDb, knowledgeDb, 'NATS'), []);
+      assert.deepStrictEqual(reports.map(r => r.channel), ['theme-entity']);
+      assert.match(reports[0].message, /no such table: mentions/);
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+
   it('a throwing sink never breaks the channel', () => {
     setChannelErrorSink(() => { throw new Error('bad sink'); });
     try {
@@ -466,6 +682,205 @@ describe('R19 (repair 5.2): channel failures are observable, never silent', () =
       assert.deepStrictEqual(findMatchingEntities(broken, 'x'), []);
       broken.close();
     } finally {
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});
+
+describe('seedTerms: prompt-analysis entities/themes steer channels 3/4/5', () => {
+  it('buildSeedMatchText appends usable string terms and drops the rest', () => {
+    assert.equal(buildSeedMatchText('q', undefined), 'q');
+    assert.equal(buildSeedMatchText('q', []), 'q');
+    assert.equal(buildSeedMatchText('q', ['NATS', 7, '', 'x', 'a'.repeat(81), ' SQLite ']), 'q\nNATS\nSQLite');
+  });
+
+  it('an entity named only by the analysis surfaces its sessions', async () => {
+    const extractionDb = createExtractionDb();
+    const knowledgeDb = createKnowledgeDb();
+    seedExtractionDb(extractionDb);
+    seedKnowledgeDb(knowledgeDb);
+    setChannelErrorSink(() => {}); // test knowledge DB has no FTS/vector tables
+    try {
+      const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, respect_privacy: false });
+      const query = 'how does our message bus behave under load';
+      const without = await pipeline.retrieve(query);
+      assert.deepStrictEqual(without, []);
+      const withSeeds = await pipeline.retrieve(query, { seedTerms: ['NATS'] });
+      const sessions = new Set(withSeeds.map(r => r.session_id));
+      assert.ok(sessions.has('session-001'), 'NATS mention session must be retrieved');
+      assert.ok(sessions.has('session-002'), 'NATS mention session must be retrieved');
+    } finally {
+      extractionDb.close();
+      knowledgeDb.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
+  });
+});
+
+// ─── Offerer relevance gate on the real pipeline ─────────────────────────────
+// The offerer's 0.55 threshold is on a 0–1 scale; raw fused RRF scores top out
+// at Σw/61 (≈0.098 with six channels), so every peer broadcast used to end in
+// below_threshold. retrieve({ normalize: true }) puts the score on that scale.
+
+describe('normalized scores and the offerer gate', () => {
+  let knowledgeDb, extractionDb, savedWeights, savedSigned;
+  beforeEach(() => {
+    knowledgeDb = createKnowledgeDb();
+    extractionDb = createExtractionDb();
+    seedKnowledgeDb(knowledgeDb);
+    seedExtractionDb(extractionDb);
+    savedWeights = process.env.RETRIEVAL_WEIGHTS;
+    savedSigned = process.env.OPENCLAW_REQUIRE_SIGNED;
+    // The fixture has no session FTS/vector tables: those two channels are off
+    // here, so the three that can answer are the whole best-reachable score.
+    process.env.RETRIEVAL_WEIGHTS = 'fts:0,vec:0';
+    process.env.OPENCLAW_REQUIRE_SIGNED = '0';
+    setChannelErrorSink(() => {});
+  });
+  afterEach(() => {
+    knowledgeDb.close();
+    extractionDb.close();
+    for (const [k, v] of [['RETRIEVAL_WEIGHTS', savedWeights], ['OPENCLAW_REQUIRE_SIGNED', savedSigned]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    setChannelErrorSink((channel, err) => {
+      console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+    });
+  });
+
+  it('normalize divides by the best score the active channels can give', async () => {
+    const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, respect_privacy: false });
+    const raw = await pipeline.retrieve('NATS federation memory infrastructure');
+    const norm = await pipeline.retrieve('NATS federation memory infrastructure', { normalize: true });
+    assert.ok(raw.length > 0);
+    assert.deepEqual(norm.map(r => r.chunk_id), raw.map(r => r.chunk_id));
+    const best = 3 / 61;
+    for (let i = 0; i < raw.length; i++) {
+      assert.ok(Math.abs(norm[i].score - Math.min(1, raw[i].score / best)) < 1e-6);
+    }
+    assert.ok(raw[0].score < 0.1, 'raw fused scores are on the RRF scale');
+    assert.ok(norm[0].score > 0.55, 'a chunk ranked first by two of three channels clears 0.55');
+  });
+
+  it('an offerer on the real pipeline offers a strong match at the default threshold', async () => {
+    const { createOfferer, RELEVANCE_THRESHOLD } = await import('../lib/broadcast-offerer.mjs');
+    assert.equal(RELEVANCE_THRESHOLD, 0.55);
+    const published = [];
+    const nc = {
+      jetstream: () => ({
+        async publish(subject, data) {
+          published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) });
+          return { seq: published.length, stream: 'OPENCLAW_SHARED' };
+        },
+      }),
+    };
+    const offerer = createOfferer(nc, 'my-node', {
+      retrievalPipeline: createRetrievalPipeline({ knowledgeDb, extractionDb, respect_privacy: false }),
+    });
+    const eventId = crypto.randomUUID();
+    const result = await offerer._processBroadcast({
+      event_id: eventId,
+      event_type: 'context.broadcast',
+      event_version: 1,
+      entity_id: eventId,
+      entity_type: 'session',
+      timestamp: new Date().toISOString(),
+      causation_id: null,
+      correlation_id: null,
+      actor: { type: 'system', id: 'broadcaster-peer-node' },
+      node_id: 'peer-node',
+      idempotency_key: eventId,
+      data: { themes: ['federation', 'memory infrastructure'], entities: ['NATS'], intensity: 'interested', ttl_minutes: 60, dedup_key: 'abc123' },
+    });
+    assert.equal(result.action, 'offered', JSON.stringify({ result, stats: offerer.stats }));
+    assert.ok(published[0].data.data.artifacts.every(a => a.relevance_score >= 0.55 && a.relevance_score <= 1));
+  });
+});
+
+// Graph node ids are vault paths: channel 5 seeds the entity's concept note
+// and maps activated concept notes back to entities. A theme hub that shares
+// an entity's slug is a different node and never stands in for the entity.
+describe('activationSearch on path-keyed graph nodes', () => {
+  let knowledgeDb, extractionDb;
+  beforeEach(() => {
+    knowledgeDb = createKnowledgeDb();
+    extractionDb = createExtractionDb();
+    seedKnowledgeDb(knowledgeDb);
+    seedExtractionDb(extractionDb);
+  });
+  afterEach(() => { knowledgeDb.close(); extractionDb.close(); });
+
+  const cacheOf = (edges) => ({
+    queryNeighbors(id) {
+      return { edges: edges.filter(e => e.source_id === id || e.target_id === id), neighbors: [] };
+    },
+  });
+
+  it('spreads from concepts/nats to concepts/sqlite and returns SQLite sessions', () => {
+    const graphCache = cacheOf([{ source_id: 'concepts/nats', target_id: 'concepts/sqlite', weight: 1 }]);
+    const results = activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS');
+    assert.ok(results.length > 0);
+    assert.ok(results.every(r => r.session_id === 'session-002'), JSON.stringify(results));
+  });
+
+  it('a theme note named like an entity does not map to that entity', () => {
+    const graphCache = cacheOf([{ source_id: 'concepts/nats', target_id: 'themes/sqlite', weight: 1 }]);
+    assert.deepEqual(activationSearch(extractionDb, knowledgeDb, graphCache, 'NATS'), []);
+  });
+
+  it('session notes linking the seed do not use up the activation cut', () => {
+    const edges = Array.from({ length: 25 }, (_, i) => ({ source_id: `sessions/s${i}`, target_id: 'concepts/nats', weight: 1 }));
+    edges.push({ source_id: 'concepts/nats', target_id: 'concepts/sqlite', weight: 1 });
+    const results = activationSearch(extractionDb, knowledgeDb, cacheOf(edges), 'NATS');
+    assert.ok(results.length > 0);
+    assert.ok(results.every(r => r.session_id === 'session-002'), JSON.stringify(results));
+  });
+});
+
+// Channels 3, 4 and 5 match the same seed text against entities and themes;
+// each match scans the whole table, so retrieve() does it once per prompt.
+describe('one entity and theme match per retrieve', () => {
+  it('scans entities and themes once and fuses the same results as the channels alone', async () => {
+    const knowledgeDb = createKnowledgeDb();
+    const extractionDb = createExtractionDb();
+    seedKnowledgeDb(knowledgeDb);
+    seedExtractionDb(extractionDb);
+    const graphCache = {
+      queryNeighbors(id) {
+        const edges = [{ source_id: 'concepts/nats', target_id: 'concepts/spreading-activation', weight: 1 }];
+        return { edges: edges.filter(e => e.source_id === id || e.target_id === id), neighbors: [] };
+      },
+    };
+    const query = 'NATS memory infrastructure';
+    const chanOpts = { respectPrivacy: false };
+    const expected = weightedRRF([
+      entitySearch(extractionDb, knowledgeDb, query, 30, chanOpts),
+      themeEntitySearch(extractionDb, knowledgeDb, query, 30, chanOpts),
+      activationSearch(extractionDb, knowledgeDb, graphCache, query, 20, chanOpts),
+      decisionFtsSearch(extractionDb, knowledgeDb, query, 30, chanOpts),
+    ], [1, 1, 1, 1]).slice(0, 10);
+
+    const counts = { entities: 0, themes: 0 };
+    const realPrepare = extractionDb.prepare.bind(extractionDb);
+    extractionDb.prepare = (sql) => {
+      if (/FROM entities\s+WHERE length\(name\) >= 2/.test(sql)) counts.entities++;
+      if (/FROM themes\s+WHERE length\(label\) >= 2/.test(sql)) counts.themes++;
+      return realPrepare(sql);
+    };
+    setChannelErrorSink(() => {}); // the fixture has no session FTS/vector tables
+    try {
+      const pipeline = createRetrievalPipeline({ knowledgeDb, extractionDb, graphCache, respect_privacy: false });
+      const results = await pipeline.retrieve(query);
+      assert.deepEqual(counts, { entities: 1, themes: 1 });
+      assert.ok(expected.length > 0);
+      assert.deepEqual(results, expected);
+    } finally {
+      knowledgeDb.close();
+      extractionDb.close();
       setChannelErrorSink((channel, err) => {
         console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
       });

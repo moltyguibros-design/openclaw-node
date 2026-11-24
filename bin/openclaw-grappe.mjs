@@ -93,7 +93,7 @@ async function cmdStatus(nc, sc, opts) {
   // Open grappe registry (may not exist yet — surface a clear error)
   let kvGrappe;
   try {
-    kvGrappe = await openKv(js, GRAPPE_BUCKET, { history: 1 });
+    kvGrappe = await openKv(js, GRAPPE_BUCKET, { bindOnly: true });
   } catch (e) {
     return die(`GRAPPE_REGISTRY bucket not found — run \`openclaw-grappe form\` first (${e.message})`);
   }
@@ -101,7 +101,7 @@ async function cmdStatus(nc, sc, opts) {
   // Open health bucket for member freshness (non-fatal if absent)
   let kvHealth = null;
   try {
-    kvHealth = await openKv(js, HEALTH_BUCKET, { history: 1 });
+    kvHealth = await openKv(js, HEALTH_BUCKET, { bindOnly: true });
   } catch { /* no health data — show UNKNOWN */ }
 
   // Collect matching keys
@@ -143,7 +143,7 @@ async function cmdStatus(nc, sc, opts) {
           if (hEntry && hEntry.created) {
             const ageMs = now - hEntry.created.getTime();
             const ageSec = Math.floor(ageMs / 1000);
-            freshness = ageSec <= 60 ? `LIVE  ${ageSec}s ago` : `STALE ${ageSec}s ago`;
+            freshness = ageSec <= 90 ? `LIVE  ${ageSec}s ago` : `STALE ${ageSec}s ago`;
           }
         } catch { /* leave as UNKNOWN */ }
       }
@@ -160,7 +160,7 @@ async function cmdDissolve(nc, sc, opts) {
   const js = nc.jetstream();
   let kv;
   try {
-    kv = await openKv(js, GRAPPE_BUCKET, { history: 1 });
+    kv = await openKv(js, GRAPPE_BUCKET, { bindOnly: true });
   } catch (e) {
     return die(`GRAPPE_REGISTRY bucket not found: ${e.message}`);
   }
@@ -172,7 +172,7 @@ async function cmdDissolve(nc, sc, opts) {
 
   const manifest = decode(sc, entry);
   manifest.status = 'dissolved';
-  await kv.put(KEY_PREFIX + id, encode(sc, manifest));
+  await kv.update(KEY_PREFIX + id, encode(sc, manifest), entry.revision);
   console.log(`dissolved grappe ${id}`);
 }
 
@@ -188,7 +188,7 @@ async function cmdIssueToken(nc, sc, opts) {
   const js = nc.jetstream();
   let kv;
   try {
-    kv = await openKv(js, GRAPPE_BUCKET, { history: 1 });
+    kv = await openKv(js, GRAPPE_BUCKET, { bindOnly: true });
   } catch (e) {
     return die(`GRAPPE_REGISTRY bucket not found: ${e.message}`);
   }
@@ -201,7 +201,7 @@ async function cmdIssueToken(nc, sc, opts) {
   const manifest = decode(sc, entry);
   const token = randomBytes(32).toString('base64url');
   manifest.join_token_hash = tokenHash(token);
-  await kv.put(KEY_PREFIX + id, encode(sc, manifest));
+  await kv.update(KEY_PREFIX + id, encode(sc, manifest), entry.revision);
 
   console.log(`join token issued for grappe ${id}`);
   console.log(`token: ${token}`);
@@ -221,7 +221,7 @@ async function cmdJoin(nc, sc, opts) {
   const js = nc.jetstream();
   let kv;
   try {
-    kv = await openKv(js, GRAPPE_BUCKET, { history: 1 });
+    kv = await openKv(js, GRAPPE_BUCKET, { bindOnly: true });
   } catch (e) {
     return die(`GRAPPE_REGISTRY bucket not found: ${e.message}`);
   }
@@ -247,7 +247,7 @@ async function cmdJoin(nc, sc, opts) {
 
   if (!manifest.members.includes(node)) {
     manifest.members.push(node);
-    await kv.put(KEY_PREFIX + id, encode(sc, manifest));
+    await kv.update(KEY_PREFIX + id, encode(sc, manifest), entry.revision);
   }
 
   console.log(`join accepted: ${node} added to ${id}`);

@@ -10,7 +10,7 @@
   </array>
   <key>StartInterval</key><integer>3600</integer>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>${HOME}/.openclaw/transcript-archive/archive.err</string>
-  <key>StandardErrorPath</key><string>${HOME}/.openclaw/transcript-archive/archive.err</string>
+  <key>StandardOutPath</key><string>${OPENCLAW_ROOT}/transcript-archive/archive.err</string>
+  <key>StandardErrorPath</key><string>${OPENCLAW_ROOT}/transcript-archive/archive.err</string>
 </dict>
 </plist>

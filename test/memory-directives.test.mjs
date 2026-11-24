@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DIRECTIVE_REGEX,
-  DIRECTIVE_TYPES,
   parseMemoryDirective,
   replaceLastUserContent,
 } from '../lib/memory-directives.mjs';
@@ -25,16 +24,6 @@ describe('DIRECTIVE_REGEX', () => {
 
   it('matches @memory only:<theme>', () => {
     assert.ok(DIRECTIVE_REGEX.test('@memory only:nats'));
-  });
-});
-
-describe('DIRECTIVE_TYPES', () => {
-  it('contains all four directive types', () => {
-    assert.ok(DIRECTIVE_TYPES.has('off'));
-    assert.ok(DIRECTIVE_TYPES.has('deep'));
-    assert.ok(DIRECTIVE_TYPES.has('none'));
-    assert.ok(DIRECTIVE_TYPES.has('only'));
-    assert.equal(DIRECTIVE_TYPES.size, 4);
   });
 });
 
@@ -111,6 +100,20 @@ describe('parseMemoryDirective', () => {
     assert.equal(result.type, 'none');
     assert.equal(result.cleanedText, '');
   });
+
+  it('a directive word must end at a word boundary', () => {
+    assert.equal(parseMemoryDirective('set @memory offline mode').type, null);
+    assert.equal(parseMemoryDirective('@memory nonexistent').type, null);
+    assert.equal(parseMemoryDirective('a @memory deep-dive').type, null);
+    assert.equal(parseMemoryDirective('please @memory off.').type, 'off');
+    assert.equal(parseMemoryDirective('@memory offline, then @memory deep').type, 'deep');
+  });
+
+  it('keeps the prompt\'s line breaks and indentation', () => {
+    assert.equal(parseMemoryDirective('@memory deep\n\ndef f():\n    return 1').cleanedText, 'def f():\n    return 1');
+    assert.equal(parseMemoryDirective('a\n@memory off\nb').cleanedText, 'a\n\nb');
+    assert.equal(parseMemoryDirective('fix  this @memory off  now').cleanedText, 'fix  this now');
+  });
 });
 
 // ─── replaceLastUserContent ──────────────────────────────────────────────────
@@ -171,19 +174,6 @@ describe('wrapOpenAI with directives', () => {
 
   function createMockPublisher() {
     return { publish: async () => {} };
-  }
-
-  function createMockInjector(returnData = null) {
-    const data = returnData || {
-      concepts: [{ name: 'NATS', type: 'tool' }],
-      decisions: [],
-      snippets: [],
-    };
-    return {
-      retrieve: async (query, opts) => {
-        return { ...data, _query: query, _opts: opts };
-      },
-    };
   }
 
   it('skips injection when @memory off is present', async () => {
@@ -327,6 +317,49 @@ describe('wrapGemini with directives', () => {
     assert.equal(retrieveCalled, false);
     // Directive stripped from content
     assert.equal(result._content, 'test');
+  });
+
+  it('keys directives on the LAST user turn of a multi-turn request', async () => {
+    const { wrapGemini } = await import('../lib/publishers/gemini-wrapper.mjs');
+    let retrieveCalled = false;
+    const injector = {
+      retrieve: async () => { retrieveCalled = true; return { concepts: [{ name: 'NATS', type: 'tool' }], decisions: [], snippets: [] }; },
+    };
+    const model = {
+      generateContent: async (content) => ({ response: { text: () => 'ok' }, _content: content }),
+    };
+    wrapGemini(model, { publish: async () => {} }, { injector });
+    const result = await model.generateContent({
+      contents: [
+        { role: 'user', parts: [{ text: 'first question about NATS' }] },
+        { role: 'model', parts: [{ text: 'answer' }] },
+        { role: 'user', parts: [{ text: '@memory off latest question' }] },
+      ],
+    });
+    assert.equal(retrieveCalled, false);
+    assert.equal(result._content.contents.length, 3);
+    assert.equal(result._content.contents[2].parts[0].text, 'latest question');
+    assert.equal(result._content.contents[0].parts[0].text, 'first question about NATS');
+  });
+
+  it('retrieves on the LAST user turn of a multi-turn request', async () => {
+    const { wrapGemini } = await import('../lib/publishers/gemini-wrapper.mjs');
+    let capturedQuery = null;
+    const injector = {
+      retrieve: async (query) => { capturedQuery = query; return { concepts: [], decisions: [], snippets: [] }; },
+    };
+    const model = {
+      generateContent: async (content) => ({ response: { text: () => 'ok' }, _content: content }),
+    };
+    wrapGemini(model, { publish: async () => {} }, { injector });
+    await model.generateContent({
+      contents: [
+        { role: 'user', parts: [{ text: 'first' }] },
+        { role: 'model', parts: [{ text: 'a' }] },
+        { role: 'user', parts: [{ text: 'latest about NATS' }] },
+      ],
+    });
+    assert.equal(capturedQuery, 'latest about NATS');
   });
 });
 

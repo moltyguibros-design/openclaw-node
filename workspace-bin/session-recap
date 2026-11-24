@@ -6,10 +6,8 @@
  * (skips tool calls/results), flattens to single-line entries, and writes a
  * structured recap to memory/last-session-recap.md.
  *
- * Scans ALL transcript sources:
- *   - Claude Code workspace sessions (~/.claude/projects/-Users-moltymac--openclaw-workspace/)
- *   - Claude Code home sessions (~/.claude/projects/-Users-moltymac/)
- *   - OpenClaw Gateway sessions (~/.openclaw/agents/main/sessions/)
+ * Scans every transcript folder lib/transcript-sources.mjs lists: the enabled
+ * sources of the node's registry, or the default folders without a readable one.
  *
  * Handles both JSONL formats:
  *   - Claude Code: {type: "user"/"assistant", message: {role, content}, timestamp}
@@ -19,6 +17,7 @@
  * Total bootstrap read cost: ≤40 lines.
  *
  * FLAGS:
+ *   --file <path> Digest exactly this transcript (the daemon names the session it means).
  *   --previous    Digest the previous session (not current). Use at session start.
  *   --all-recent  Digest the 3 most recent NON-current sessions. Full catch-up.
  *   --list        Show recent JSONL files with sizes and dates.
@@ -33,50 +32,16 @@
 
 const fs = require("fs");
 const path = require("path");
+const { MIN_SESSION_BYTES } = require("../lib/session-floor");
+const { loadTranscriptSources } = require("../lib/transcript-sources.mjs");
+const TIMEZONE = process.env.OPENCLAW_TIMEZONE || process.env.TZ || "America/Montreal";
 
 // --- Config (portable — derives paths from script location) ---
 const SCRIPT_DIR = path.dirname(fs.realpathSync(__filename));
 const WORKSPACE = process.env.OPENCLAW_WORKSPACE || path.dirname(SCRIPT_DIR);
-const HOME = process.env.HOME || require("os").homedir();
-
-// --- Transcript source discovery ---
-// Primary: read from ~/.openclaw/config/transcript-sources.json (registry-driven)
-// Fallback: hardcoded paths + .config/transcript-sources.txt (legacy)
-const TRANSCRIPT_REGISTRY = path.join(HOME, ".openclaw/config/transcript-sources.json");
-const EXTRA_DIRS_FILE = path.join(WORKSPACE, ".config/transcript-sources.txt");
-
-function resolveSourcePath(p) {
-  if (p.startsWith("~")) return path.join(HOME, p.slice(1));
-  return p;
-}
 
 function loadTranscriptDirs() {
-  // Registry-driven (preferred)
-  if (fs.existsSync(TRANSCRIPT_REGISTRY)) {
-    try {
-      const reg = JSON.parse(fs.readFileSync(TRANSCRIPT_REGISTRY, "utf-8"));
-      return (reg.sources || [])
-        .filter(s => s.enabled !== false)
-        .map(s => resolveSourcePath(s.path));
-    } catch { /* fall through to legacy */ }
-  }
-
-  // Legacy fallback: hardcoded paths + .config/transcript-sources.txt
-  const WORKSPACE_ABS = fs.realpathSync(WORKSPACE);
-  const CLAUDE_PROJECT_SLUG = WORKSPACE_ABS.replace(/[/.]/g, "-");
-  const dirs = [
-    path.join(HOME, ".claude/projects", CLAUDE_PROJECT_SLUG),
-    path.join(HOME, ".claude/projects", "-" + path.basename(HOME)),
-    path.join(HOME, ".openclaw/agents/main/sessions"),
-  ];
-  if (fs.existsSync(EXTRA_DIRS_FILE)) {
-    const lines = fs.readFileSync(EXTRA_DIRS_FILE, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith("#")) dirs.push(trimmed);
-    }
-  }
-  return dirs;
+  return loadTranscriptSources(undefined, { workspace: WORKSPACE }).map(s => s.path);
 }
 
 const OUTPUT_FILE = path.join(WORKSPACE, "memory/last-session-recap.md");
@@ -96,8 +61,7 @@ function findJsonlFiles() {
       const full = path.join(dir, f);
       try {
         const stat = fs.statSync(full);
-        // Skip tiny files (< 50KB) — empty/aborted/heartbeat-only sessions
-        if (stat.size < 50 * 1024) continue;
+        if (stat.size < MIN_SESSION_BYTES) continue;
         all.push({ name: f, path: full, mtime: stat.mtimeMs, size: stat.size, source: dir });
       } catch { /* skip unreadable */ }
     }
@@ -232,7 +196,7 @@ function extractMessages(jsonlText) {
 function formatDigest(messages, sessionFile) {
   const now = new Date();
   const ts = now.toLocaleString("en-CA", {
-    timeZone: "America/Montreal",
+    timeZone: TIMEZONE,
     year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false,
   });
@@ -280,6 +244,7 @@ function buildDigest(file) {
 // --- Main ---
 function main() {
   const args = process.argv.slice(2);
+  const fileArg = args.indexOf("--file");
   const previousMode = args.includes("--previous");
   const allRecentMode = args.includes("--all-recent");
   const listMode = args.includes("--list");
@@ -290,7 +255,7 @@ function main() {
     console.log(`Found ${files.length} JSONL transcripts:\n`);
     files.slice(0, 10).forEach((f, i) => {
       const date = new Date(f.mtime).toLocaleString("en-CA", {
-        timeZone: "America/Montreal", hour12: false,
+        timeZone: TIMEZONE, hour12: false,
       });
       const sizeKB = (f.size / 1024).toFixed(0);
       const marker = i === 0 ? " ← current" : "";
@@ -303,12 +268,15 @@ function main() {
   // --previous: digest only the previous session (offset=1)
   // default: digest the most recent (offset=0, current session)
   let targets = [];
-  if (allRecentMode) {
-    // Skip offset 0 (current session), take next 3
-    for (let i = 1; i <= 3; i++) {
-      const f = findJsonlByOffset(i);
-      if (f) targets.push(f);
+  if (fileArg >= 0) {
+    const file = args[fileArg + 1];
+    if (file && fs.existsSync(file)) {
+      const stat = fs.statSync(file);
+      targets.push({ name: path.basename(file), path: file, mtime: stat.mtimeMs, size: stat.size, source: path.dirname(file) });
     }
+  } else if (allRecentMode) {
+    // Skip offset 0 (current session), take next 3
+    targets = findJsonlFiles().slice(1, 4);
   } else if (previousMode) {
     const f = findJsonlByOffset(1);
     if (f) targets.push(f);

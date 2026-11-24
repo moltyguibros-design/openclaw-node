@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // openclaw-stack — one command (and one double-clickable icon) for the whole node.
 //
-//   openclaw-stack up        start everything installed + probe + popup
+//   openclaw-stack up        start what the installer starts + probe + popup
 //   openclaw-stack status    probe table only, no side effects
 //   openclaw-stack down      stop every openclaw unit (and the bridge child)
 //
-// Discovery over hardcoding: starts whatever ai.openclaw.* launchd plists
-// (macOS) or openclaw-* systemd user units (Linux) are installed on this node.
+// Discovery over hardcoding: scans the ai.openclaw.* launchd plists (macOS) or
+// openclaw-* systemd user units (Linux) installed on this node, and `up` starts
+// the same set a fresh install starts: units services/service-manifest.json marks
+// autostart:false (gateway, mesh-agent, Discord tool) stay operator-started, and
+// the NATS slot is only the bus layout declared in nats-writer-cohort.json —
+// a second bus copy would fight the live one for :4222.
 // Units parked as .disabled are REPORTED but never resurrected — they were
 // disabled deliberately (crash-loop triage 2026-07-03); re-enabling is an
 // operator move. companion-bridge lives in its own repo with no service unit:
@@ -27,6 +31,9 @@ const BRIDGE_DIR = process.env.OPENCLAW_BRIDGE_DIR
   || path.join(HOME, 'Documents', 'openclaw infrastructure', 'companion-bridge');
 const BRIDGE_LOG = path.join(HOME, '.openclaw', 'logs', 'companion-bridge.log');
 const MC_URL = process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000';
+const MANIFEST = path.join(HERE, '..', 'services', 'service-manifest.json');
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(HOME, '.openclaw');
+const DEFAULT_NATS_COHORT = ['ai.openclaw.nats'];
 
 // Port probes for the units that expose one; everything else is judged by
 // launchd/systemd process state. Periodic (timer-style) units are healthy
@@ -66,11 +73,35 @@ export function scanLaunchdUnits(dir = LAUNCH_AGENTS) {
 export function scanSystemdUnits(exec = execFileSync) {
   try {
     const out = String(exec('systemctl', ['--user', 'list-unit-files', 'openclaw-*', '--no-legend', '--plain'], { encoding: 'utf8' }));
-    return out.split('\n').filter(Boolean).map(l => {
+    const units = out.split('\n').filter(Boolean).map(l => {
       const [name, state] = l.trim().split(/\s+/);
       return { id: shortId(name), label: name, disabled: state === 'masked', timer: name.endsWith('.timer') };
     });
+    // The .service behind a timer is its oneshot job: `systemctl start` runs it to completion.
+    // `up` starts the timer and the status row is the timer's; `down` still stops both.
+    const timers = new Set(units.filter(u => u.timer).map(u => u.id));
+    for (const u of units) u.timerJob = !u.timer && timers.has(u.id);
+    return units;
   } catch { return []; }
+}
+
+export function readNatsCohort(home = OPENCLAW_HOME) {
+  const file = path.join(home, 'config', 'nats-writer-cohort.json');
+  let declared;
+  try {
+    declared = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw new Error(`${file}: ${error.message}`);
+  }
+  if (!Array.isArray(declared?.activeLabels)) throw new Error(`${file} has no activeLabels list`);
+  return declared.activeLabels;
+}
+
+export function selectUnitsToStart(units, manifest, cohort) {
+  const natsIds = new Set((cohort ?? DEFAULT_NATS_COHORT).map(shortId));
+  const manual = new Set(manifest.filter((s) => s.autostart === false).map((s) => shortId(s.name)));
+  return units.filter((u) => (/^nats(?:-\d+)?$/.test(u.id) ? natsIds.has(u.id) : !manual.has(u.id)));
 }
 
 export function probePort(port, timeoutMs = 1500) {
@@ -102,17 +133,20 @@ export function classify(unit, { loaded, pid, portOk }) {
   return PERIODIC.has(unit.id) ? 'LOADED' : 'DOWN';
 }
 
-async function statusTable(units) {
+async function statusTable(units, startable) {
   const pids = process.platform === 'darwin' ? launchctlPids() : new Map();
   const rows = [];
   for (const u of units) {
+    if (u.timerJob) continue;
     const loaded = process.platform === 'darwin'
       ? pids.has(u.label)
       : systemdActive(u.label);
-    const pid = process.platform === 'darwin' ? pids.get(u.label) : null;
+    const pid = process.platform === 'darwin' ? pids.get(u.label) : (loaded ? systemdMainPid(u.label) : null);
+    const manual = !startable.includes(u);
     const port = PORTS[u.id];
-    const portOk = port ? await probePort(port) : undefined;
-    rows.push({ ...u, loaded, pid, port, portOk, status: classify(u, { loaded, pid, portOk }) });
+    // With the three-copy bus declared, nats-1 holds :4222; an unloaded single-bus unit must not read LIVE off it.
+    const portOk = port ? (manual && !loaded ? false : await probePort(port)) : undefined;
+    rows.push({ ...u, loaded, pid, port, portOk, manual, status: classify(u, { loaded, pid, portOk }) });
   }
   const bridgeOk = await probePort(PORTS['companion-bridge']);
   rows.push({
@@ -126,6 +160,14 @@ function systemdActive(unit) {
   try {
     return execFileSync('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8' }).trim() === 'active';
   } catch { return false; }
+}
+
+// Without it every active non-port daemon on Linux classified as DOWN (pid was always null).
+function systemdMainPid(unit) {
+  try {
+    const pid = Number(execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', unit], { encoding: 'utf8' }).trim());
+    return pid > 0 ? pid : null;
+  } catch { return null; }
 }
 
 function printTable(rows) {
@@ -166,7 +208,7 @@ function up(units) {
 function upLinux(units) {
   const started = [];
   for (const u of units) {
-    if (u.disabled) continue;
+    if (u.disabled || u.timerJob) continue;
     if (!systemdActive(u.label)) {
       try {
         execFileSync('systemctl', ['--user', 'start', u.label], { stdio: 'pipe' });
@@ -205,10 +247,17 @@ function down(units) {
   } catch { /* bridge not running */ }
 }
 
+export function summarize(rows) {
+  const counted = rows.filter(r => r.status !== 'DISABLED' && r.status !== 'ABSENT' && !(r.manual && r.status === 'OFF'));
+  return {
+    live: counted.filter(r => r.status === 'LIVE' || r.status === 'LOADED').length,
+    total: counted.length,
+    bad: counted.filter(r => r.status === 'DOWN' || r.status === 'OFF').map(r => r.id),
+  };
+}
+
 function notifyResult(rows) {
-  const live = rows.filter(r => r.status === 'LIVE' || r.status === 'LOADED').length;
-  const total = rows.filter(r => r.status !== 'DISABLED' && r.status !== 'ABSENT').length;
-  const bad = rows.filter(r => r.status === 'DOWN' || r.status === 'OFF').map(r => r.id);
+  const { live, total, bad } = summarize(rows);
   const kind = bad.length === 0 ? 'success' : 'warn';
   try {
     execFileSync(process.execPath, [
@@ -219,6 +268,16 @@ function notifyResult(rows) {
       '--url', `${MC_URL}/diagnostics`,
     ], { stdio: 'pipe', timeout: 15_000 });
   } catch { /* popup is best-effort; the table already printed */ }
+}
+
+// up and status fail closed on an unreadable bus layout; down never reads it.
+function startableUnits(units) {
+  try {
+    return selectUnitsToStart(units, JSON.parse(fs.readFileSync(MANIFEST, 'utf8')), readNatsCohort());
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
 }
 
 const cmd = process.argv[2] || 'status';
@@ -236,11 +295,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   delete process.env.OPENCLAW_NATS_LEGACY_LOCK_HELD;
 
   if (cmd === 'up') {
-    const started = process.platform === 'darwin' ? up(units) : upLinux(units);
+    const startable = startableUnits(units);
+    const started = process.platform === 'darwin' ? up(startable) : upLinux(startable);
     const bridge = await startBridge();
     console.log(`started: ${started.length ? started.join(', ') : '(everything already running)'} · bridge: ${bridge}`);
     await new Promise(r => setTimeout(r, 4000));
-    const rows = await statusTable(units);
+    const rows = await statusTable(units, startable);
     printTable(rows);
     notifyResult(rows);
     process.exit(rows.some(r => r.status === 'DOWN') ? 1 : 0);
@@ -248,7 +308,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     down(units);
     console.log('stack stopped (disabled units untouched)');
   } else if (cmd === 'status') {
-    const rows = await statusTable(units);
+    const rows = await statusTable(units, startableUnits(units));
     printTable(rows);
     process.exit(rows.some(r => r.status === 'DOWN') ? 1 : 0);
   } else {

@@ -7,7 +7,8 @@
  * and the LLM extractor on each, and produces a structured markdown comparison
  * document for manual operator scoring.
  *
- * The output document lands at memory-plan/eval/block-3-validation.md by default.
+ * The output document lands at ~/.openclaw/eval/block-3-validation.md by default
+ * (the Block 3 record in memory-plan/plans/legacy/eval/ is an archive, never rewritten).
  * The operator reviews the comparison and makes the go/no-go decision for Block 4.
  *
  * Prerequisites:
@@ -18,7 +19,7 @@
  * Usage:
  *   node bin/run-block3-validation.mjs
  *   node bin/run-block3-validation.mjs --limit 10 --session-db ~/.openclaw/state.db
- *   node bin/run-block3-validation.mjs --out memory-plan/eval/block-3-validation.md
+ *   node bin/run-block3-validation.mjs --out /tmp/block-3-validation.md
  *   node bin/run-block3-validation.mjs --llm-base-url http://localhost:11434 --llm-model qwen3:8b
  */
 
@@ -37,7 +38,7 @@ import { createExtractionStore } from '../lib/extraction-store.mjs';
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SESSION_DB = join(homedir(), '.openclaw/state.db');
-const DEFAULT_OUT = join(process.cwd(), 'memory-plan/eval/block-3-validation.md');
+export const DEFAULT_OUT = join(homedir(), '.openclaw', 'eval', 'block-3-validation.md');
 const DEFAULT_LIMIT = 10;
 
 // ─── Session Reader ──────────────────────────────────────────────────────────
@@ -149,9 +150,7 @@ export async function runLlmExtraction(client, messages, sessionId) {
         entityCount: result.entities.length,
         themeCount: result.themes.length,
         decisionCount: result.decisions.length,
-        frictionCount: result.friction_signals.length,
         relationshipCount: result.relationships.length,
-        actionCount: result.actions.length,
         charLength: memoryContent.length,
       },
     };
@@ -261,7 +260,7 @@ export function formatComparison(results) {
     lines.push(`| Avg decisions per session | — | ${agg.llm.avgDecisions} |`);
   }
 
-  lines.push(`| Categories/types | ${agg.regex.allCategories.join(', ') || 'none'} | ${agg.llm ? 'entities, themes, decisions, friction, relationships, actions' : '—'} |`);
+  lines.push(`| Categories/types | ${agg.regex.allCategories.join(', ') || 'none'} | ${agg.llm ? 'entities, themes, decisions, relationships' : '—'} |`);
   lines.push('');
   lines.push('---');
   lines.push('');
@@ -301,9 +300,7 @@ export function formatComparison(results) {
       lines.push(`- Entities: ${r.llm.metrics.entityCount}`);
       lines.push(`- Themes: ${r.llm.metrics.themeCount}`);
       lines.push(`- Decisions: ${r.llm.metrics.decisionCount}`);
-      lines.push(`- Friction signals: ${r.llm.metrics.frictionCount}`);
       lines.push(`- Relationships: ${r.llm.metrics.relationshipCount}`);
-      lines.push(`- Actions: ${r.llm.metrics.actionCount}`);
       lines.push(`- MEMORY.md length: ${r.llm.metrics.charLength} chars`);
       lines.push('');
       lines.push('<details><summary>LLM MEMORY.md output</summary>');

@@ -86,6 +86,7 @@ class LegacyWriterLockTest(unittest.TestCase):
             self.run_locked(command)
         self.assertFalse(output.exists())
 
+    @unittest.skipIf(os.geteuid() == 0, 'root can traverse a mode-0 directory')
     def test_unobservable_marker_refuses(self):
         private = self.root / 'unsearchable'
         private.mkdir()

@@ -1,7 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
-import { FileText, BookOpen, Database } from "lucide-react";
+import { FileText, BookOpen, BookMarked, Database } from "lucide-react";
 import type { MemoryResult } from "@/lib/hooks";
 
 /** Strip all HTML except <mark> tags, and escape content between them to prevent XSS */
@@ -39,6 +39,7 @@ const SOURCE_STYLES: Record<string, { color: string; icon: typeof FileText }> = 
   daily_log: { color: "bg-blue-500/20 text-blue-400", icon: FileText },
   long_term_memory: { color: "bg-purple-500/20 text-purple-400", icon: BookOpen },
   clawvault: { color: "bg-amber-500/20 text-amber-400", icon: Database },
+  lore: { color: "bg-emerald-500/20 text-emerald-400", icon: BookMarked },
 };
 
 interface SearchResultsProps {
@@ -127,7 +128,7 @@ export function SearchResults({
                   <span
                     className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium ${sourceStyle.color}`}
                   >
-                    {result.source.replace("_", " ")}
+                    {result.source.replaceAll("_", " ")}
                   </span>
                   {dateStr && (
                     <span className="text-[10px] text-muted-foreground">

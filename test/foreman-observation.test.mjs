@@ -1,13 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { buildObservation, gitEvidence, readInstructions, restoreTree, tail, treeSnapshot, DEFAULT_LIMITS } from '../lib/foreman/observation.mjs';
 
+const { tmpDir } = createRequire(import.meta.url)('./helpers/tmp-dir.cjs');
+
 function tempRepo() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-obs-'));
+  const dir = tmpDir('foreman-obs-');
   execFileSync('git', ['init', '-q', dir]);
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@example.com']);
   execFileSync('git', ['-C', dir, 'config', 'user.name', 'test']);
@@ -71,7 +73,7 @@ describe('foreman observation — git evidence', () => {
   });
   it('reads a linked worktree without refreshing its index', async () => {
     const main = tempRepo();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-linked-'));
+    const dir = tmpDir('foreman-linked-');
     execFileSync('git', ['-C', main, 'worktree', 'add', '-q', '-b', 'linked', dir]);
     const index = path.resolve(dir, execFileSync('git', ['-C', dir, 'rev-parse', '--git-path', 'index'], { encoding: 'utf8' }).trim());
     const later = new Date(Date.now() + 5_000);
@@ -106,7 +108,7 @@ describe('foreman observation — git evidence', () => {
     assert.match(evidence.diff, /earlier characters omitted/);
   });
   it('reads as empty outside a git repository and never throws', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-nogit-'));
+    const dir = tmpDir('foreman-nogit-');
     const evidence = await gitEvidence(dir, DEFAULT_LIMITS);
     assert.equal(evidence.diff, '');
     assert.deepEqual(evidence.changed_files, []);
@@ -135,7 +137,7 @@ describe('foreman observation — tree snapshots', () => {
     assert.equal(await treeSnapshot(dir), third, 'ignored files do not');
   });
   it('is null outside a repository and without a worktree', async () => {
-    assert.equal(await treeSnapshot(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-nogit-'))), null);
+    assert.equal(await treeSnapshot(tmpDir('foreman-nogit-')), null);
     assert.equal(await treeSnapshot(null), null);
   });
   it('restoreTree puts back what changed and removes what was added, leaving staging alone', async () => {
@@ -169,7 +171,7 @@ describe('foreman observation — tree snapshots', () => {
 
 describe('foreman observation — repository instructions', () => {
   it('prefers AGENTS.override.md, then AGENTS.md, then CLAUDE.md', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-instr-'));
+    const dir = tmpDir('foreman-instr-');
     assert.deepEqual(readInstructions(dir), { path: null, text: '' });
     fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'claude rules');
     assert.equal(readInstructions(dir).path, 'CLAUDE.md');
@@ -179,7 +181,7 @@ describe('foreman observation — repository instructions', () => {
     assert.equal(readInstructions(dir).text, 'override rules');
   });
   it('skips a symlinked instruction file and truncates long ones', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-instr-'));
+    const dir = tmpDir('foreman-instr-');
     fs.writeFileSync(path.join(dir, 'real.md'), 'linked');
     fs.symlinkSync(path.join(dir, 'real.md'), path.join(dir, 'AGENTS.md'));
     assert.equal(readInstructions(dir).path, null);

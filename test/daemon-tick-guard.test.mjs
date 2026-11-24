@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { createConcurrencyGuard } from '../lib/concurrency-guard.mjs';
 
 const daemonSrc = fs.readFileSync(
@@ -43,18 +44,73 @@ test('overlapping guarded tick fires skip, runs the body once', async () => {
   assert.equal(maxConcurrent, 1);
 });
 
+test('the orphan\'s finally leaves the current run marked in flight', async () => {
+  const releases = [];
+  let clock = 0;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  try {
+    const guarded = createConcurrencyGuard(() => new Promise((r) => releases.push(r)), { maxAgeMs: 100 });
+    const orphan = guarded();          // started at t=0
+    clock = 200;
+    const current = guarded();         // age 200 > 100 → force-clear, run #2 starts at t=200
+    releases[0]();
+    await orphan;                      // the orphan settles while run #2 is in flight
+    clock = 250;                       // run #2 is 50ms old: inside maxAgeMs
+    const third = guarded();
+    assert.equal(releases.length, 2, 'a third run started while run #2 was still in flight');
+    assert.deepEqual(await third, { skipped: true, reason: 'in_flight' });
+    releases[1]();
+    await current;
+  } finally {
+    Date.now = realNow;
+    releases.forEach((r) => r()); // a failed assertion must not leave a run pending
+  }
+});
+
 test('daemon imports the shared concurrency guard', () => {
   assert.match(daemonSrc, /import \{ createConcurrencyGuard \} from '\.\.\/lib\/concurrency-guard\.mjs';/);
 });
 
-test('daemon wraps tick in the guard with a deadlock force-clear', () => {
-  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(tick, \{ maxAgeMs: 30 \* 60_000, log \}\)/);
+test('daemon wraps tick in the guard with a deadlock force-clear well past its longest legitimate tick', () => {
+  assert.match(daemonSrc, /const guardedTick = createConcurrencyGuard\(trackedTick, \{ maxAgeMs: 2 \* 60 \* 60_000, log \}\)/);
+  // A tick can await a flush worker and a knowledge-index child back to back;
+  // a bound at or under their sum force-cleared a live tick and overlapped it.
+  const product = (expr) => expr.split('*').reduce((acc, n) => acc * Number(n.trim().replaceAll('_', '')), 1);
+  const flushWorker = product(daemonSrc.match(/const FLUSH_WORKER_TIMEOUT_MS = ([^;]+);/)[1]);
+  const indexJob = product(daemonSrc.match(/execFileAsync\(process\.execPath, jobArgs,\s*\{ timeout: ([^,]+),/)[1]);
+  const maxAge = product(daemonSrc.match(/createConcurrencyGuard\(trackedTick, \{ maxAgeMs: ([^,]+),/)[1]);
+  assert.ok(maxAge > 2 * flushWorker + indexJob, `maxAgeMs ${maxAge} must exceed two flush workers plus the index job`);
 });
 
-test('no call site invokes tick() bare — both go through guardedTick, tracked for fencing', () => {
+test('no call site invokes tick() bare, and only a started run is tracked for fencing', () => {
   assert.doesNotMatch(daemonSrc, /await tick\(\)/);
-  const tracked = daemonSrc.match(/inFlightTick = guardedTick\(\)/g) || [];
-  assert.equal(tracked.length, 2, 'both call sites must assign inFlightTick so shutdown can fence');
+  assert.doesNotMatch(daemonSrc, /inFlightTick = guardedTick\(\)/, 'a skipped call must not overwrite the fenced run');
+  assert.match(daemonSrc, /inFlightTick = run;/);
+  assert.match(daemonSrc, /if \(inFlightTick === run\) inFlightTick = null/);
+});
+
+test('a skipped fire leaves the in-flight run tracked; the run clears it when it ends', async () => {
+  let inFlightTick = null;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const tick = async () => { await gate; };
+  const trackedTick = () => {
+    const run = tick();
+    inFlightTick = run;
+    return run.finally(() => { if (inFlightTick === run) inFlightTick = null; });
+  };
+  const guardedTick = createConcurrencyGuard(trackedTick, { maxAgeMs: 30 * 60_000 });
+
+  const first = guardedTick();
+  const runA = inFlightTick;
+  assert.ok(runA, 'the started run is tracked');
+  assert.deepEqual(await guardedTick(), { skipped: true, reason: 'in_flight' });
+  assert.equal(inFlightTick, runA, 'the skipped fire must not replace or clear the tracked run');
+
+  release();
+  await first;
+  assert.equal(inFlightTick, null);
 });
 
 test('shutdown fences the in-flight tick before closing handles and owns the exit (R15, repair 4.1)', () => {
@@ -86,25 +142,79 @@ test('synthesis trigger labels are truthful per call site (R10, repair 2.11)', (
   const labels = [...daemonSrc.matchAll(/synthesisLabel: '([a-z_]+)'/g)].map((m) => m[1]);
   labels.sort();
   // Phase-2 interval, IDLE→ENDED end, ACTIVE→IDLE pre-compression (its own
-  // label), ACTIVE→ENDED end, NATS-triggered manual.
-  assert.deepEqual(labels, ['idle', 'interval', 'manual', 'session_end', 'session_end']);
+  // label), NATS-triggered manual. Sessions are tracked per transcript, so
+  // there is no ACTIVE→ENDED session-switch end any more.
+  assert.deepEqual(labels, ['idle', 'interval', 'manual', 'session_end']);
 });
 
 test('IDLE→ENDED targets the ended session\'s own JSONL (R17, repair 4.4)', () => {
   const branch = daemonSrc.match(/if \(t\.from === STATES\.IDLE && t\.to === STATES\.ENDED\) \{[\s\S]*?\n    \}\n/)[0];
-  const targeted = branch.match(/findJsonlBySessionId\(sources, t\.sessionId\) \|\| findCurrentJsonl\(sources\)/g) || [];
-  assert.equal(targeted.length, 2, 'flush + subagent-audit must both target the ended session');
-  const bare = branch.match(/= findCurrentJsonl\(sources\)/g) || [];
-  assert.equal(bare.length, 0, 'no bare newest-file lookup may remain in the ended-session path');
+  const targeted = branch.match(/const currentJsonl = findJsonlBySessionId\(sources, t\.sessionId\);/g) || [];
+  assert.equal(targeted.length, 1, 'the ended session\'s own transcript is looked up once');
+  assert.doesNotMatch(branch, /findCurrentJsonl/, 'with concurrent sessions the newest file belongs to another session');
 });
 
 test('the session-size floor is a named 1KB constant, not a bare 50KB (repair 4.6)', () => {
   assert.doesNotMatch(daemonSrc, /50 \* 1024/);
-  assert.match(daemonSrc, /const MIN_SESSION_BYTES = 1024;/);
+  assert.match(daemonSrc, /const \{ MIN_SESSION_BYTES \} = require\('\.\.\/lib\/session-floor'\);/);
+  const { MIN_SESSION_BYTES } = createRequire(import.meta.url)('../lib/session-floor.js');
+  assert.equal(MIN_SESSION_BYTES, 1024);
   const uses = daemonSrc.match(/MIN_SESSION_BYTES/g) || [];
-  assert.equal(uses.length, 4, 'declaration + all three lookup sites (previous/current/by-id)');
+  assert.equal(uses.length, 3, 'declaration + the activity scan + the by-session-id lookup');
 });
 
 test('synthesized events carry session_id (R10, repair 2.10)', () => {
-  assert.match(daemonSrc, /buildMemoryEvent\('memory\.synthesized', sessionId, 'memory', \{\n    session_id: sessionId,/);
+  assert.match(daemonSrc, /buildMemoryEvent\('memory\.synthesized', sessionId, 'memory', synthesizedEventData\(sessionId, /);
+  assert.match(daemonSrc, /function synthesizedEventData\(sessionId, trigger, synthesis\) \{\n[^}]*return \{\n    session_id: sessionId,/);
+});
+
+test('the NATS retry timer never reads `running` before it is initialized', () => {
+  const decl = daemonSrc.indexOf('let running = true;');
+  const armed = daemonSrc.indexOf('natsRetryTimer = setInterval(');
+  assert.ok(decl > 0 && armed > 0);
+  assert.ok(decl < armed, '`running` must be initialized before the NATS retry timer can fire');
+});
+
+test('the daemon owns the maintenance cadence: Phase 2 forces the run, Phase 0 stamps it', () => {
+  assert.match(daemonSrc, /runSubprocess\('node', \[maint, '--force'\], 60000\)/);
+  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n}\n/)[0];
+  assert.match(phase0, /throttle\.lastMaintenance = Date\.now\(\);[\s\S]*saveThrottleState\(throttle\)/);
+});
+
+test('transition pipelines stamp the Phase 2 throttles of the work they already ran', () => {
+  const phase0 = daemonSrc.match(/async function runPhase0Bootstrap[\s\S]*?\n}\n/)[0];
+  const importDir = phase0.indexOf('runImportDirInWorker(');
+  assert.ok(phase0.indexOf("stampThrottle('lastSessionImport')", importDir) > importDir, 'Phase 0 import must stamp lastSessionImport');
+
+  const toIdle = daemonSrc.match(/if \(t\.from === STATES\.ACTIVE && t\.to === STATES\.IDLE\) \{[\s\S]*?\n    \}\n/)[0];
+  assert.match(toIdle, /await Promise\.allSettled\(tasks\);\n\s*stampThrottle\('lastRecap'\);/);
+
+  const toEnded = daemonSrc.match(/if \(t\.from === STATES\.IDLE && t\.to === STATES\.ENDED\) \{[\s\S]*?\n    \}\n/)[0];
+  const sync = toEnded.indexOf("runSubprocess('node', [obsSync]");
+  assert.ok(toEnded.indexOf("stampThrottle('lastObsidianSync')", sync) > sync, 'the final obsidian-sync must stamp lastObsidianSync');
+});
+
+test('the store-health probe inspects the workspace the daemon runs from', () => {
+  assert.match(daemonSrc, /workspaceLib: path\.join\(WORKSPACE, 'lib'\)/);
+  assert.match(daemonSrc, /workspaceDaemon: path\.join\(WORKSPACE, 'bin', 'memory-daemon\.mjs'\)/);
+  assert.doesNotMatch(daemonSrc, /path\.join\(PATHS\.root, 'workspace'/);
+});
+
+test('runSubprocess is traced with wrapAsync, so a failed or slow run is recorded', () => {
+  assert.match(daemonSrc, /runSubprocess = tracer\.wrapAsync\('runSubprocess', runSubprocess, \{ tier: 2 \}\);/);
+  assert.doesNotMatch(daemonSrc, /runSubprocess = tracer\.wrap\(/);
+});
+
+test('an event log set by a NATS retry reaches the inject server and the memory budget', () => {
+  assert.doesNotMatch(daemonSrc, /eventLog: localEventLog/);
+  assert.equal((daemonSrc.match(/eventLog: liveEventLog/g) || []).length, 2);
+  assert.match(daemonSrc, /const liveEventLog = \{ publishLocal: \(event\) => \(localEventLog \? localEventLog\.publishLocal\(event\) : Promise\.resolve\(\)\) \};/);
+});
+
+test('memory.ingested reports the messages a re-import added, not the whole session', () => {
+  assert.match(daemonSrc, /messages_added: Math\.max\(0, messageCount - previousCount\)/);
+  assert.doesNotMatch(daemonSrc, /messages_added: messageCount,/);
+  const calls = daemonSrc.match(/emitIngestEvent\([^)]*\)/g).filter(c => !c.startsWith('emitIngestEvent(sessionId'));
+  assert.ok(calls.length >= 2);
+  for (const c of calls) assert.match(c, /previousCount\)$/, c);
 });

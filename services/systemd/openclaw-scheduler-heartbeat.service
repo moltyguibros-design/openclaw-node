@@ -4,4 +4,5 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=${NODE_BIN} ${OPENCLAW_WORKSPACE}/bin/scheduler-heartbeat.mjs
+ExecStart="${NODE_BIN}" "${OPENCLAW_WORKSPACE}/bin/scheduler-heartbeat.mjs"
+Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"

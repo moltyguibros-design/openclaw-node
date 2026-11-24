@@ -34,13 +34,10 @@ interface KanbanColumnProps {
   childrenMap: Record<string, Task[]>;
   onTaskClick: (task: Task) => void;
   onMoveTask: (taskId: string, targetColumn: string) => void;
-  onClearDone?: () => void;
-  label?: string;
-  dotColor?: string;
+  onClearDone?: (visibleTasks: Task[]) => void;
   highlight?: boolean;
   bulkMode?: boolean;
   bulkSelection?: Set<string>;
-  cardSize?: CardSize;
 }
 
 export function KanbanColumn({
@@ -50,13 +47,11 @@ export function KanbanColumn({
   onTaskClick,
   onMoveTask,
   onClearDone,
-  label,
-  dotColor,
   highlight,
   bulkMode,
   bulkSelection,
-  cardSize = column === "done" ? "signet" : "full",
 }: KanbanColumnProps) {
+  const cardSize: CardSize = column === "done" ? "signet" : "full";
   const [dragOver, setDragOver] = useState(false);
   const [doneWindow, setDoneWindow] = useState<string>("3d");
   const [doneWindowOpen, setDoneWindowOpen] = useState(false);
@@ -101,11 +96,11 @@ export function KanbanColumn({
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
         <div
           className={`h-2 w-2 rounded-full ${
-            dotColor ?? COLUMN_DOT_COLORS[column] ?? "bg-zinc-400"
+            COLUMN_DOT_COLORS[column] ?? "bg-zinc-400"
           }`}
         />
         <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
-          {label ?? COLUMN_LABELS[column] ?? column}
+          {COLUMN_LABELS[column] ?? column}
         </span>
         <span className="ml-auto text-[10px] text-muted-foreground">
           {filteredTasks.length}
@@ -150,7 +145,7 @@ export function KanbanColumn({
           {/* Clear done button */}
           {onClearDone && filteredTasks.length > 0 && (
             <button
-              onClick={onClearDone}
+              onClick={() => onClearDone(filteredTasks)}
               className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"
               title="Archive visible done tasks"
             >

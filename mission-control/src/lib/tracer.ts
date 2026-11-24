@@ -3,6 +3,28 @@ import { getDb } from "./db";
 import { observabilityEvents, type NewObservabilityEvent } from "./db/schema";
 import { getNats, sc } from "./nats";
 import { NODE_ID } from "./config";
+import { lt } from "drizzle-orm";
+
+const RETENTION_MS = 86_400_000;
+const PRUNE_EVERY_MS = 3_600_000;
+
+const g = globalThis as unknown as { __obs_prune_timer?: ReturnType<typeof setInterval> | null };
+
+/** Drop events past the 24h retention, whoever wrote them (MC, same-host daemons, trace ingest). */
+export function pruneObservability() {
+  try {
+    getDb().delete(observabilityEvents).where(lt(observabilityEvents.timestamp, Date.now() - RETENTION_MS)).run();
+  } catch (err) {
+    console.error(`[tracer] observability prune failed: ${(err as Error).message}`);
+  }
+}
+
+/** Started once per server process (src/instrumentation.ts); runMigrations prunes at startup. */
+export function startObservabilityPrune() {
+  if (g.__obs_prune_timer) return;
+  g.__obs_prune_timer = setInterval(pruneObservability, PRUNE_EVERY_MS);
+  g.__obs_prune_timer.unref?.();
+}
 
 /** Summarize URL search params for trace logging (max 120 chars) */
 function summarizeParams(url: URL): string {
@@ -99,8 +121,7 @@ export function withTrace(
 /** Insert trace event into SQLite */
 function insertEvent(event: NewObservabilityEvent) {
   try {
-    const db = getDb();
-    db.insert(observabilityEvents).values(event).run();
+    getDb().insert(observabilityEvents).values(event).run();
   } catch (err) {
     console.error(`[tracer] insertEvent failed: ${(err as Error).message}`);
   }
@@ -143,16 +164,4 @@ export function traceCall(
   };
   insertEvent(event);
   publishEvent(event);
-}
-
-/** Batch insert events (for NATS ingestion) */
-export function batchInsertEvents(events: NewObservabilityEvent[]) {
-  try {
-    const db = getDb();
-    for (const e of events) {
-      db.insert(observabilityEvents).values(e).run();
-    }
-  } catch (err) {
-    console.warn(`[tracer] batchInsert failed (${events.length} events): ${(err as Error).message}`);
-  }
 }

@@ -1,38 +1,35 @@
 ---
 name: humanize-ai-text
-description: "Detect and transform AI-generated text using Python scripts (detect.py, transform.py, compare.py). Use when you need to scan text for AI patterns, get an AI probability score, or batch-process files through the detection/transformation pipeline."
+description: "Detect signs of AI-generated text with a Python script (detect.py). Use when you need to scan text for AI writing patterns, get an AI probability score, or batch-scan files. It reports only; it never rewrites text."
 triggers:
   - "scan this text for AI patterns"
   - "run the AI detector on this file"
-  - "batch process these files for AI detection"
+  - "batch scan these files for AI writing"
   - "check AI probability score"
 negative_triggers:
   - "rewrite this to sound more human"
   - "humanize this text"
   - "edit this to remove AI patterns"
+  - "make this pass an AI detector"
 allowed-tools:
   - Read
-  - Write
-  - StrReplace
   - Shell
   - Glob
 ---
 
-# Humanize AI Text
+# Humanize AI Text (detector)
 
-Comprehensive CLI for detecting and transforming AI-generated text to bypass detectors. Based on [Wikipedia's Signs of AI Writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing).
+A CLI that scans text for the signs of AI writing listed in [Wikipedia's Signs of AI Writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing) and scores how likely the text is machine-written. Use it to review drafts, check submissions, or find boilerplate to edit by hand.
+
+It does not rewrite text. For editing your own draft toward a plainer style, use the `humanizer` skill. Do not use either to pass AI-written text off as human-written: that is deceptive, and the node's rules forbid it.
 
 ## Quick Start
 
 ```bash
-# Detect AI patterns
-python scripts/detect.py text.txt
-
-# Transform to human-like
-python scripts/transform.py text.txt -o clean.txt
-
-# Compare before/after
-python scripts/compare.py text.txt -o clean.txt
+python3 scripts/detect.py text.txt        # full report
+python3 scripts/detect.py text.txt -j     # JSON
+python3 scripts/detect.py text.txt -s     # score only
+echo "text" | python3 scripts/detect.py   # stdin
 ```
 
 ---
@@ -68,82 +65,18 @@ The analyzer checks for **16 pattern categories** from Wikipedia's guide:
 ### Style Signal
 | Category | Examples |
 |----------|----------|
-| Curly Quotes | "" instead of "" (ChatGPT signature) |
+| Curly Quotes | “ ” instead of " " |
 | Em Dash Overuse | Excessive use of — for emphasis |
 | Negative Parallelisms | "Not only... but also", "It's not just... it's" |
 | Rule of Three | Forced triplets like "innovation, inspiration, and insight" |
 
 ---
 
-## Scripts
+## Output
 
-### detect.py — Scan for AI Patterns
-
-```bash
-python scripts/detect.py essay.txt
-python scripts/detect.py essay.txt -j  # JSON output
-python scripts/detect.py essay.txt -s  # score only
-echo "text" | python scripts/detect.py
-```
-
-**Output:**
 - Issue count and word count
 - AI probability (low/medium/high/very high)
-- Breakdown by category
-- Auto-fixable patterns marked
-
-### transform.py — Rewrite Text
-
-```bash
-python scripts/transform.py essay.txt
-python scripts/transform.py essay.txt -o output.txt
-python scripts/transform.py essay.txt -a  # aggressive
-python scripts/transform.py essay.txt -q  # quiet
-```
-
-**Auto-fixes:**
-- Citation bugs (oaicite, turn0search)
-- Markdown (**, ##, ```)
-- Chatbot sentences
-- Copula avoidance → "is/has"
-- Filler phrases → simpler forms
-- Curly → straight quotes
-
-**Aggressive (-a):**
-- Simplifies -ing clauses
-- Reduces em dashes
-
-### compare.py — Before/After Analysis
-
-```bash
-python scripts/compare.py essay.txt
-python scripts/compare.py essay.txt -a -o clean.txt
-```
-
-Shows side-by-side detection scores before and after transformation
-
----
-
-## Workflow
-
-1. **Scan** for detection risk:
-   ```bash
-   python scripts/detect.py document.txt
-   ```
-
-2. **Transform** with comparison:
-   ```bash
-   python scripts/compare.py document.txt -o document_v2.txt
-   ```
-
-3. **Verify** improvement:
-   ```bash
-   python scripts/detect.py document_v2.txt -s
-   ```
-
-4. **Manual review** for AI vocabulary and promotional language (requires judgment)
-
----
+- Breakdown by category, with the plainer form noted for copula and filler phrases
 
 ## AI Probability Scoring
 
@@ -154,6 +87,8 @@ Shows side-by-side detection scores before and after transformation
 | Medium | >15 issues OR >2% issue density |
 | Low | <15 issues AND <2% density |
 
+The score is a heuristic: plain human prose can trip it and edited AI text can pass it. Treat it as a pointer for review, never as proof of who wrote something.
+
 ---
 
 ## Customizing Patterns
@@ -162,24 +97,19 @@ Edit `scripts/patterns.json` to add/modify:
 - `ai_vocabulary` — words to flag
 - `significance_inflation` — puffery phrases
 - `promotional_language` — marketing speak
-- `copula_avoidance` — phrase → replacement
-- `filler_replacements` — phrase → simpler form
-- `chatbot_artifacts` — phrases triggering sentence removal
+- `copula_avoidance` — phrase → plainer form shown in the report
+- `filler_replacements` — phrase → plainer form shown in the report
+- `chatbot_artifacts` — chatbot phrases
+- `rule_of_three_patterns` — triplet openings
 
 ---
 
-## Batch Processing
+## Batch Scanning
 
 ```bash
-# Scan all files
 for f in *.txt; do
   echo "=== $f ==="
-  python scripts/detect.py "$f" -s
-done
-
-# Transform all markdown
-for f in *.md; do
-  python scripts/transform.py "$f" -a -o "${f%.md}_clean.md" -q
+  python3 scripts/detect.py "$f" -s
 done
 ```
 
@@ -187,6 +117,4 @@ done
 
 ## Reference
 
-Based on Wikipedia's [Signs of AI Writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), maintained by WikiProject AI Cleanup. Patterns documented from thousands of AI-generated text examples.
-
-Key insight: "LLMs use statistical algorithms to guess what should come next. The result tends toward the most statistically likely result that applies to the widest variety of cases."
+Based on Wikipedia's [Signs of AI Writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), maintained by WikiProject AI Cleanup.

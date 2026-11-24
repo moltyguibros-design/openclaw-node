@@ -30,7 +30,6 @@ VERSION = "1.0.0"
 DEFAULT_SKILLS_DIR = Path.home() / ".openclaw" / "workspace" / "skills"
 SCANNER_DIR = Path(__file__).parent.resolve()
 WHITELIST_FILE = SCANNER_DIR / "whitelist.json"
-REPORT_TEMPLATE = SCANNER_DIR / "report-template.md"
 SCANNABLE_EXTENSIONS = {".py", ".sh", ".js", ".ts", ".bash", ".zsh", ".rb", ".pl", ".php", ".md", ".yml", ".yaml", ".json", ".toml", ".cfg", ".ini", ".conf", ".env", ".txt"}
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
@@ -74,7 +73,7 @@ PATTERNS = [
         "base64_decode_exec",
         "critical",
         re.compile(
-            r"""base64[._](?:b64)?decode\s*\(.*?\).*?(?:exec|eval|system|popen|subprocess)""",
+            r"""base64[._](?:b64)?decode\s*\([\s\S]{0,120}?\)[\s\S]{0,200}?\b(?:exec|eval|system|popen|subprocess)\b""",
             re.IGNORECASE | re.DOTALL,
         ),
         "Base64 decode piped into code execution",
@@ -201,7 +200,7 @@ PATTERNS = [
         "env_exfil",
         "high",
         re.compile(
-            r"""(?:open|read|load).*?\.env\b.*?(?:requests?\.|urllib|http|curl|wget|socket|send|post|fetch)""",
+            r"""\b(?:open|read|load)[\s\S]{0,80}?\.env\b[\s\S]{0,300}?(?:requests?\.|urllib|\b(?:http|curl|wget|socket|send|post|fetch))""",
             re.IGNORECASE | re.DOTALL,
         ),
         "Reading .env file with network send capability",
@@ -210,7 +209,7 @@ PATTERNS = [
         "api_key_grab",
         "high",
         re.compile(
-            r"""(?:os\.environ|process\.env).*?(?:API.?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL).*?(?:requests?\.|urllib|http|curl|fetch|send|post|socket)""",
+            r"""(?:os\.environ|process\.env)[\s\S]{0,80}?(?:API.?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[\s\S]{0,300}?(?:requests?\.|urllib|\b(?:http|curl|fetch|send|post|socket))""",
             re.IGNORECASE | re.DOTALL,
         ),
         "API key/secret read and potential exfiltration",
@@ -604,8 +603,8 @@ def scan_skill(skill_path, whitelist, blacklist):
 
     # Scan all scannable files
     for root, dirs, files in os.walk(skill_path):
-        # Skip hidden directories and common non-code dirs
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".git", "venv")]
+        # Dot-directories ship with the skill (install-hook copies the whole tree); only .git is not skill content.
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "__pycache__", "venv")]
         for filename in files:
             fp = Path(root) / filename
             suffix = fp.suffix.lower()

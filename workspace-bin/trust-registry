@@ -16,7 +16,9 @@ Usage:
     --result success|failure \\
     --turns N \\
     [--verified true|false] \\
-    [--task "description"]                          # record a delegation outcome
+    [--task "description"] \\
+    [--delegation-id ID]                            # record a delegation outcome
+                                                     # (an ID already recorded is ignored)
   bin/trust-registry recommend "task description"   # suggest best soul
   bin/trust-registry reset <soul-id>               # reset a soul's record
   bin/trust-registry check <soul-id>               # check if circuit allows delegation
@@ -26,9 +28,11 @@ Storage: .tmp/trust-registry.json
 """
 
 import argparse
+import fcntl
 import json
 import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -73,7 +77,19 @@ def load_registry():
 
 def save_registry(data):
     REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Readers that catch a half-written file fall back to an empty registry
+    # and would save that over every soul's history.
+    tmp = REGISTRY_FILE.with_name(f"{REGISTRY_FILE.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, REGISTRY_FILE)
+
+
+@contextmanager
+def registry_lock():
+    REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(REGISTRY_FILE.with_name("trust-registry.lock"), "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
 
 
 # ── Trust computation ─────────────────────────────────────────────────────────
@@ -203,6 +219,13 @@ def cmd_update(args):
     turns = args.turns or 1
     verified = args.verified in ("true", "yes", "1", True) if args.verified else False
     task_desc = args.task or ""
+    delegation_id = args.delegation_id or None
+
+    # The same session can be audited twice (at its end and again at the next
+    # bootstrap); a repeat would double-count and open the circuit early.
+    if delegation_id and any(d.get("delegation_id") == delegation_id for d in reg["delegations"]):
+        print(f"  = Already recorded: delegation {delegation_id} for {soul_id} — ignored")
+        return
 
     if soul_id not in reg["souls"]:
         reg["souls"][soul_id] = {
@@ -235,6 +258,7 @@ def cmd_update(args):
 
     # Record delegation event
     reg["delegations"].append({
+        "delegation_id": delegation_id,
         "soul_id": soul_id,
         "result": result,
         "turns": turns,
@@ -376,6 +400,18 @@ def cmd_check(args):
             sys.exit(0)
 
     if cb_state == "half_open":
+        # A probe that never reports back (never run, or classified unknown)
+        # would otherwise hold the soul in half_open forever.
+        cooldown = s.get("cooldown_minutes", 30)
+        try:
+            probe_age = (datetime.now() - datetime.fromisoformat(s.get("last_probe_at"))).total_seconds() / 60
+        except (ValueError, TypeError):
+            probe_age = cooldown
+        if probe_age >= cooldown:
+            s["last_probe_at"] = datetime.now().isoformat()
+            save_registry(reg)
+            print(f"  {soul_id}: HALF_OPEN (previous probe never reported, new probe allowed)")
+            sys.exit(0)
         print(f"  {soul_id}: HALF_OPEN (probe in progress)")
         sys.exit(1)
 
@@ -429,6 +465,7 @@ def main():
     p_update.add_argument("--turns", type=int, default=1)
     p_update.add_argument("--verified", default=None)
     p_update.add_argument("--task", default="")
+    p_update.add_argument("--delegation-id", default=None)
 
     p_rec = sub.add_parser("recommend", help="Recommend best soul for a task")
     p_rec.add_argument("query")
@@ -448,13 +485,16 @@ def main():
     elif args.command == "score":
         cmd_score(args)
     elif args.command == "update":
-        cmd_update(args)
+        with registry_lock():
+            cmd_update(args)
     elif args.command == "recommend":
         cmd_recommend(args)
     elif args.command == "reset":
-        cmd_reset(args)
+        with registry_lock():
+            cmd_reset(args)
     elif args.command == "check":
-        cmd_check(args)
+        with registry_lock():
+            cmd_check(args)
     elif args.command == "status":
         cmd_cb_status(args)
     else:

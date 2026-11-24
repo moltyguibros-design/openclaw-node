@@ -19,11 +19,16 @@
     "tokenPath": {
       "label": "Token file",
       "placeholder": "~/.openclaw/config/memory-injection-token",
-      "help": "Bearer token the daemon writes on first start (0600). Re-read on every request so a rotated token is picked up without a restart."
+      "help": "Bearer token the daemon writes on first start (0600), under $OPENCLAW_HOME/config when OPENCLAW_HOME is set. Re-read on every request so a rotated token is picked up without a restart."
     },
     "autoRecall": {
       "label": "Auto-recall",
       "help": "Inject the [memory: …] block into the system prompt on every turn (default true)."
+    },
+    "skipHeartbeats": {
+      "label": "Skip heartbeat turns",
+      "advanced": true,
+      "help": "No auto-recall on heartbeat turns: those the host flags, or whose prompt names HEARTBEAT.md or HEARTBEAT_OK (default true). Saves a query analysis per heartbeat and keeps heartbeat checks from boosting memory ranking. A user turn that names one of those also gets no memory."
     },
     "maxInjectedChars": {
       "label": "Max injected chars",
@@ -32,9 +37,9 @@
     },
     "timeoutMs": {
       "label": "Request timeout (ms)",
-      "placeholder": "4000",
+      "placeholder": "12000",
       "advanced": true,
-      "help": "The daemon answers in well under a second when warm; on timeout the turn proceeds without memory."
+      "help": "The daemon may spend up to 8 s on LLM query analysis before embedding and retrieval (about 9-11 s worst case), and the turn waits that long. Lower it for faster turns at the cost of memory on cold or busy ones; on timeout the turn proceeds without memory."
     },
     "bypassSessionPatterns": {
       "label": "Bypass session patterns",
@@ -50,6 +55,7 @@
       "injectUrl": { "type": "string" },
       "tokenPath": { "type": "string" },
       "autoRecall": { "type": "boolean" },
+      "skipHeartbeats": { "type": "boolean" },
       "maxInjectedChars": { "type": "number", "minimum": 200, "maximum": 60000 },
       "timeoutMs": { "type": "number", "minimum": 250, "maximum": 60000 },
       "bypassSessionPatterns": { "type": "array", "items": { "type": "string" } }

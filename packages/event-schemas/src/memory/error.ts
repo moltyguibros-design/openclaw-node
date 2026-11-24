@@ -6,7 +6,7 @@ export const MemoryErrorSchema = EventEnvelopeSchema.extend({
   // R31 (repair 7.7): content samples are byte-capped so no producible
   // event can exceed the stream's payload limit or be dropped for size.
   data: z.object({
-    boundary: z.enum(['ingest', 'extract', 'retrieve', 'inject', 'synthesize', 'decay', 'promote']),
+    boundary: z.enum(['ingest', 'extract', 'retrieve', 'inject', 'synthesize', 'decay', 'promote', 'knowledge_index', 'graph_cache_refresh']),
     error_code: z.string().max(100),
     error_message: z.string().max(500),
     session_id: z.string().optional(),

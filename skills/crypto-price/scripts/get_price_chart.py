@@ -123,37 +123,6 @@ def _post_json(url, payload):
     raise RuntimeError(str(last_error))
 
 
-def _post_json(url, payload):
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "clawdbot-crypto-price/1.0"},
-    )
-    retry_codes = {429, 502, 503, 504}
-    last_error = None
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                raw = resp.read().decode("utf-8")
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError("invalid JSON") from exc
-        except urllib.error.HTTPError as exc:
-            last_error = exc
-            if exc.code in retry_codes and attempt < 2:
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise RuntimeError(str(exc)) from exc
-        except urllib.error.URLError as exc:
-            last_error = exc
-            if attempt < 2:
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise RuntimeError(str(exc)) from exc
-    raise RuntimeError(str(last_error))
-
-
 def _get_price(token_id, currency):
     cache_path = _cache_path(f"price_{currency}", token_id)
     cached = _read_cache(cache_path, CACHE_TTL_SEC)
@@ -196,109 +165,6 @@ def _get_hyperliquid_meta():
     data = _post_json(HYPERLIQUID_INFO_URL, {"type": "metaAndAssetCtxs"})
     _write_cache(cache_path, data)
     return data
-
-
-def _hyperliquid_lookup(symbol):
-    try:
-        meta, ctxs = _get_hyperliquid_meta()
-    except RuntimeError:
-        return None, None
-    universe = meta.get("universe", [])
-    mapping = {}
-    for idx, entry in enumerate(universe):
-        name = str(entry.get("name", "")).upper()
-        if name:
-            mapping[name] = idx
-    idx = mapping.get(symbol.upper())
-    if idx is None or idx >= len(ctxs):
-        return None, None
-    return universe[idx], ctxs[idx]
-
-
-def _pick_hyperliquid_interval_minutes(total_minutes):
-    if total_minutes <= 180:
-        return 1
-    if total_minutes <= 360:
-        return 3
-    if total_minutes <= 720:
-        return 5
-    if total_minutes <= 1440:
-        return 15
-    if total_minutes <= 4320:
-        return 30
-    if total_minutes <= 10080:
-        return 60
-    if total_minutes <= 20160:
-        return 120
-    if total_minutes <= 40320:
-        return 240
-    if total_minutes <= 80640:
-        return 480
-    return 1440
-
-
-def _interval_minutes_to_str(minutes):
-    if minutes < 60:
-        return f"{int(minutes)}m"
-    hours = int(minutes / 60)
-    if hours < 24:
-        return f"{hours}h"
-    days = int(hours / 24)
-    return f"{days}d"
-
-
-def _get_hyperliquid_candles(symbol, total_minutes, interval_minutes):
-    now_ms = int(time.time() * 1000)
-    start_ms = now_ms - int(total_minutes * 60 * 1000)
-    payload = {
-        "type": "candleSnapshot",
-        "req": {
-            "coin": symbol.upper(),
-            "interval": _interval_minutes_to_str(interval_minutes),
-            "startTime": start_ms,
-            "endTime": now_ms,
-        },
-    }
-    data = _post_json(HYPERLIQUID_INFO_URL, payload)
-    candles = []
-    for row in data:
-        try:
-            ts_ms = int(row["t"])
-            open_price = float(row["o"])
-            high_price = float(row["h"])
-            low_price = float(row["l"])
-            close_price = float(row["c"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        candles.append((ts_ms, open_price, high_price, low_price, close_price))
-    return candles
-
-
-def _get_hyperliquid_meta():
-    cache_path = _cache_path("hyperliquid_meta", "meta")
-    cached = _read_cache(cache_path, CACHE_TTL_SEC)
-    if cached is not None:
-        return cached
-    data = _post_json(HYPERLIQUID_INFO_URL, {"type": "metaAndAssetCtxs"})
-    _write_cache(cache_path, data)
-    return data
-
-
-def _hyperliquid_lookup(symbol):
-    try:
-        meta, ctxs = _get_hyperliquid_meta()
-    except RuntimeError:
-        return None, None
-    universe = meta.get("universe", [])
-    mapping = {}
-    for idx, entry in enumerate(universe):
-        name = str(entry.get("name", "")).upper()
-        if name:
-            mapping[name] = idx
-    idx = mapping.get(symbol.upper())
-    if idx is None or idx >= len(ctxs):
-        return None, None
-    return universe[idx], ctxs[idx]
 
 
 def _pick_hyperliquid_interval_minutes(total_minutes):
@@ -783,12 +649,25 @@ def _build_chart(symbol, ohlc_rows, currency, label, use_gradient=False):
                    ha='right', va='center',
                    bbox=dict(boxstyle='round,pad=0.3', facecolor='#0f141c', edgecolor='white', linewidth=1))
 
-    ts = int(time.time())
-    chart_path = f"/tmp/crypto_chart_{symbol}_{ts}.png"
+    chart_path = _chart_path(symbol, int(time.time()))
     fig.tight_layout()
     fig.savefig(chart_path, dpi=150)
     plt.close(fig)
     return chart_path
+
+
+def _chart_path(symbol, ts):
+    return f"/tmp/crypto_chart_{re.sub(r'[^A-Za-z0-9]', '_', symbol)}_{ts}.png"
+
+
+def _period_window(candles, hours, candle_minutes):
+    full = max(2, int((hours * 60) / candle_minutes))
+    # The chart drops the oldest 20% for breathing room; the stated change still spans the full period.
+    plot_points = candles[-max(2, int(full * 0.8)):]
+    if len(candles) < 2:
+        return plot_points, None
+    base = candles[-full] if len(candles) >= full else candles[0]
+    return plot_points, base[4]
 
 
 def _normalize_hl_symbol(symbol):
@@ -931,22 +810,14 @@ def main():
             candles.append((ts_ms, open_price, high_price, low_price, close_price))
 
     candles.sort(key=lambda item: item[0])
-    if candles:
-        target = max(2, int((hours * 60) / candle_minutes))
-        target = int(target * 0.8)  # 20% fewer candles for breathing room
-        last_points = candles[-target:]
-    else:
-        last_points = []
+    last_points, price_period_ago = _period_window(candles, hours, candle_minutes)
 
     change_period = None
     change_period_percent = None
-    price_period_ago = None
 
-    if len(last_points) >= 2:
-        price_period_ago = last_points[0][4]
-        if price_period_ago:
-            change_period = price_usdt - price_period_ago
-            change_period_percent = (change_period / price_period_ago) * 100
+    if price_period_ago:
+        change_period = price_usdt - price_period_ago
+        change_period_percent = (change_period / price_period_ago) * 100
     chart_path = _build_chart(symbol_upper, last_points, currency, label, use_gradient)
 
     if change_period_percent is None:

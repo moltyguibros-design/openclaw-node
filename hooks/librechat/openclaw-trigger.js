@@ -5,7 +5,7 @@
  * to fire extraction events after each conversation turn.
  *
  * Usage in LibreChat config:
- *   const { onResponse } = require('./openclaw-trigger.js');
+ *   import { onResponse } from './openclaw-trigger.js';
  *   // Call onResponse() in your endpoint's post-response hook
  *
  * Or as a standalone trigger:
@@ -31,7 +31,7 @@ export function getPublisher() {
 
 /**
  * Call after a LibreChat response is sent to the user.
- * Fires a mesh.memory.extract_request event (fire-and-forget).
+ * Fires a mesh.memory.extract_request.<nodeId> event (fire-and-forget).
  */
 export async function onResponse() {
   await getPublisher().publish('librechat-trigger');

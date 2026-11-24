@@ -4,7 +4,6 @@ description: "Use when you need to define or refine product positioning. Walks t
 type: interactive
 triggers:
   - "help me position this product"
-  - "write a positioning statement"
   - "who is our target customer and how do we differentiate"
   - "run a positioning workshop"
   - "define our competitive positioning before launch"

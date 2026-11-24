@@ -33,6 +33,8 @@ if ! $SKIP_LLM && ! $DRY_RUN && llm_url_is_local "$LLM_BASE_URL"; then
       if [ "$OS" = "macos" ]; then
         brew services start ollama >/dev/null 2>&1 || {
           (
+            # fd 9 is workspace.sh's timer-source copy lock; a detached ollama must not keep it.
+            exec 9>&-
             if [ -n "${OPENCLAW_NATS_LEGACY_LOCK_HELD:-}" ]; then
               lock_fd="${OPENCLAW_NATS_LEGACY_LOCK_HELD%%:*}"
               [[ "$lock_fd" =~ ^[0-9]+$ ]] || exit 1
@@ -43,7 +45,7 @@ if ! $SKIP_LLM && ! $DRY_RUN && llm_url_is_local "$LLM_BASE_URL"; then
           )
         }
       else
-        if $DRY_RUN; then info "  [dry-run] would start ollama"; else sudo systemctl start ollama 2>/dev/null || { nohup ollama serve >"$OPENCLAW_ROOT/logs/ollama.log" 2>&1 & }; fi
+        sudo systemctl start ollama 2>/dev/null || { nohup ollama serve >"$OPENCLAW_ROOT/logs/ollama.log" 2>&1 & }
       fi
       for _ in $(seq 1 15); do
         curl -fsS --max-time 2 "$LLM_BASE_URL/api/tags" >/dev/null 2>&1 && break
@@ -54,14 +56,15 @@ if ! $SKIP_LLM && ! $DRY_RUN && llm_url_is_local "$LLM_BASE_URL"; then
 
   if curl -fsS --max-time 3 "$LLM_BASE_URL/api/tags" >/dev/null 2>&1; then
     # RAM-tier model pick — upgrades only the shipped floor default, never an
-    # operator-customized value
+    # operator-customized value, and only on a full install: an --update must not
+    # start a multi-GB pull and switch an existing node's model (wave 2 does that).
     TIER_MODEL=$("$NODE_BIN" "$REPO_DIR/bin/check-llm-baseline.mjs" --json 2>/dev/null | "$NODE_BIN" -e '
       let s = "";
       process.stdin.on("data", (d) => s += d).on("end", () => {
         try { console.log(JSON.parse(s).recommendation?.model || ""); } catch { console.log(""); }
       });
     ' 2>/dev/null || echo "")
-    if [ -n "$TIER_MODEL" ] && [ "$LLM_MODEL" = "qwen3:8b" ] && [ "$TIER_MODEL" != "qwen3:8b" ]; then
+    if ! $UPDATE_ONLY && [ -n "$TIER_MODEL" ] && [ "$LLM_MODEL" = "qwen3:8b" ] && [ "$TIER_MODEL" != "qwen3:8b" ]; then
       run sed -i.bak "s|^LLM_MODEL=qwen3:8b$|LLM_MODEL=$TIER_MODEL|" "$ENV_FILE" && run rm -f "$ENV_FILE.bak"
       export LLM_MODEL="$TIER_MODEL"
       info "RAM-tier upgrade: LLM_MODEL=$TIER_MODEL"
@@ -129,8 +132,14 @@ if [ -d "$REPO_DIR/obsidian-vault" ]; then
     run rsync -av "$REPO_DIR/obsidian-vault/" "$VAULT_DIR/"
     # Remove .gitkeep files (only needed for git, not for runtime)
     find "$VAULT_DIR" -name '.gitkeep' -delete 2>/dev/null || true
-    info "Obsidian vault scaffold installed (22 domain folders + plugins)"
-    warn "Obsidian Local REST API plugin included. Set API key in $VAULT_DIR/.obsidian-api-key"
+    info "Obsidian vault scaffold installed (22 domain folders)"
+    if $DRY_RUN; then
+      info "  [dry-run] would download the Obsidian Local REST API plugin (pinned release, sha256-verified)"
+    elif bash "$REPO_DIR/scripts/install/obsidian-rest-api.sh" "$VAULT_DIR"; then
+      warn "Obsidian Local REST API plugin installed. Set API key in $VAULT_DIR/.obsidian-api-key"
+    else
+      warn "Obsidian Local REST API plugin not installed — install it from Obsidian's community plugins"
+    fi
   else
     info "Obsidian vault already exists, skipping"
   fi
@@ -143,60 +152,70 @@ fi
 step "Step 11: Mission Control"
 
 MC_DIR="$WORKSPACE/projects/mission-control"
+# workspace-docs/RUNBOOK_MC_DEPLOY.md: an exact copy of the repo tree (a route
+# deleted from the repo leaves the live tree too), keeping the node's env,
+# database and build state.
+mc_sync() {
+  run rsync -a --delete --exclude='.env.local' --exclude='node_modules' --exclude='.next' \
+    --exclude='.next.prev' --exclude='data' --exclude='*.db' \
+    "$REPO_DIR/mission-control/" "$MC_DIR/"
+}
+
 if [ ! -d "$MC_DIR/src" ]; then
   run mkdir -p "$MC_DIR"
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
+  mc_sync
   info "Mission Control source copied"
-else
+elif $UPDATE_ONLY; then
   info "Mission Control already exists, updating source..."
-  run rsync -av --exclude='node_modules' --exclude='.next' --exclude='*.db' \
-    "$REPO_DIR/mission-control/" "$MC_DIR/"
+  mc_sync
+else
+  info "Mission Control already exists (use --update to redeploy it)"
 fi
 
+# The same steps a fleet deploy runs (mc-build.sh): npm@10 ci and the
+# better-sqlite3 rebuild under NODE_BIN's dir, and a build that keeps the
+# previous one when it fails.
+source "$REPO_DIR/scripts/install/mc-build.sh"
 if $SANDBOX; then
   info "Sandbox: skipping Mission Control dependencies + build"
-elif [ ! -d "$MC_DIR/node_modules" ]; then
-  info "Installing Mission Control dependencies (this may take a minute)..."
-  (cd "$MC_DIR" && run npm install)
-elif $UPDATE_ONLY; then
-  info "Updating Mission Control dependencies..."
-  (cd "$MC_DIR" && run npm install)
+elif [ ! -d "$MC_DIR/node_modules" ] || [ ! -d "$MC_DIR/.next" ] || $UPDATE_ONLY; then
+  # A failure is warned about inside; nothing later in the install needs MC built.
+  mc_install_and_build "$MC_DIR" "$NODE_BIN_DIR" || true
 else
-  info "Mission Control dependencies already installed"
-fi
-
-# Production build — the unit runs `npm start` (= next start), which needs a
-# .next build; without one the unit crash-loops (2026-07-11 audit).
-if ! $SANDBOX && ! $DRY_RUN && [ -d "$MC_DIR/node_modules" ] && [ ! -d "$MC_DIR/.next" ]; then
-  info "Building Mission Control (next build)..."
-  if (cd "$MC_DIR" && npm run build); then
-    info "Mission Control production build ready"
-  else
-    warn "Mission Control build FAILED — the unit cannot serve until fixed (known queued tsc errors)."
-    warn "Interim: cd $MC_DIR && npm run dev   — the acceptance gate reports MC honestly either way"
-  fi
+  info "Mission Control dependencies and build already in place"
 fi
 
 # Create .env.local for MC if not exists
+# The bus URL, token, auth mode and voice key are NOT written here: Next loads
+# .env.local ahead of openclaw.env (OPENCLAW_HOME), so a copy froze them at their
+# install-day values and every later openclaw.env edit never reached MC.
 if [ ! -f "$MC_DIR/.env.local" ]; then
   write_file "$MC_DIR/.env.local" << MCENV
 # Mission Control Environment
 WORKSPACE_ROOT=$WORKSPACE
 OPENCLAW_HOME=$OPENCLAW_ROOT
 DB_PATH=$MC_DIR/data/mission-control.db
-
-# NATS (mesh connectivity — resolved from openclaw.env if not set here)
-OPENCLAW_NATS=${OPENCLAW_NATS:-}
-OPENCLAW_NATS_TOKEN=${OPENCLAW_NATS_TOKEN:-}
-OPENCLAW_NATS_AUTH=${OPENCLAW_NATS_AUTH:-token}
-
-# TTS (optional — falls back to Edge TTS if missing)
-GEMINI_API_KEY=${GOOGLE_API_KEY:-}
 MCENV
-  # Holds the NATS token and an API key — never leave it at the default umask.
   run chmod 600 "$MC_DIR/.env.local"
   info "Created Mission Control .env.local (mode 600)"
+fi
+MC_FROZEN_KEYS='^(OPENCLAW_NATS|OPENCLAW_NATS_TOKEN|OPENCLAW_NATS_AUTH|GEMINI_API_KEY)='
+if grep -qE "$MC_FROZEN_KEYS" "$MC_DIR/.env.local" 2>/dev/null; then
+  if $DRY_RUN; then
+    echo "  [dry-run] would remove the frozen OPENCLAW_NATS*/GEMINI_API_KEY lines from $MC_DIR/.env.local"
+  else
+    # A voice key only .env.local held (set by hand) moves to openclaw.env instead of being lost.
+    mc_voice_key="$(sed -n 's/^GEMINI_API_KEY=//p' "$MC_DIR/.env.local" | tail -n 1)"
+    if [ -n "$mc_voice_key" ] && [ -f "$ENV_FILE" ] && ! grep -q '^GOOGLE_API_KEY=.' "$ENV_FILE"; then
+      set_env_key GOOGLE_API_KEY "$mc_voice_key"
+      info "Moved Mission Control's GEMINI_API_KEY to GOOGLE_API_KEY in $ENV_FILE"
+    fi
+    mc_env_tmp="$(mktemp "$MC_DIR/.env.local.XXXXXX")"
+    grep -vE "$MC_FROZEN_KEYS" "$MC_DIR/.env.local" > "$mc_env_tmp" || true
+    cat "$mc_env_tmp" > "$MC_DIR/.env.local"
+    rm -f "$mc_env_tmp"
+    info "Removed the frozen OPENCLAW_NATS, OPENCLAW_NATS_TOKEN, OPENCLAW_NATS_AUTH and GEMINI_API_KEY lines from Mission Control .env.local: openclaw.env is their only source"
+  fi
 fi
 
 # Ensure data directory exists for SQLite
@@ -281,9 +300,9 @@ else
       echo "    1) claude    (Claude Code CLI)"
       echo "    2) openai    (Codex CLI)"
       echo "    3) gemini    (Gemini CLI)"
-      echo "    4) deepseek"
-      echo "    5) kimi"
-      echo "    6) minimax"
+      echo "    4) deepseek  (DeepSeek dsh; needs Node >=24.9.0)"
+      echo "    5) kimi      (Kimi Code CLI; needs Node >=22.19.0)"
+      echo "    6) minimax   (Rust crate minimax-cli >=0.7: cargo install minimax-cli --locked)"
       echo "    7) aider"
       echo "    8) ollama    (local model — solo tasks only; grappe workers refuse it, D11)"
       echo "    9) none for now (seat it later with: bash install.sh --update --provider=NAME)"
@@ -303,26 +322,47 @@ else
 
   if [ -n "$PROVIDER" ]; then
     BIN="$(provider_binary "$PROVIDER")"
-    if command -v "$BIN" >/dev/null 2>&1; then
-      info "Mind seated: $PROVIDER ($BIN on PATH)"
-    else
-      # Install only the CLI the operator chose, only where the package is known.
-      case "$PROVIDER" in
-        claude) PKG="@anthropic-ai/claude-code" ;;
-        openai) PKG="@openai/codex" ;;
-        gemini) PKG="@google/gemini-cli" ;;
-        *)      PKG="" ;;
-      esac
-      if [ -n "$PKG" ]; then
-        info "Installing the $PROVIDER CLI ($PKG)..."
-        if [ "$OS" = "linux" ]; then
-          run sudo npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
-        else
-          run npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
-        fi
-        command -v "$BIN" >/dev/null 2>&1 && info "Mind seated: $PROVIDER ($BIN)" || warn "'$BIN' still not on PATH"
+    BIN_VAR="$(echo "$PROVIDER" | tr '[:lower:]' '[:upper:]')_PATH"
+    # Install only the CLI the operator chose, only where the package is known.
+    # NODE_FLOOR is the package's published engines.node, above the Node 22 this
+    # installer ships: npm installs past it with only an EBADENGINE warning.
+    NODE_FLOOR=""
+    case "$PROVIDER" in
+      claude) PKG="@anthropic-ai/claude-code" ;;
+      openai) PKG="@openai/codex" ;;
+      gemini) PKG="@google/gemini-cli" ;;
+      deepseek) PKG="@deepseek-ai/dsh" NODE_FLOOR=24.9.0 ;;
+      kimi)   PKG="@moonshot-ai/kimi-code" NODE_FLOOR=22.19.0 ;;
+      *)      PKG="" ;;
+    esac
+    # The agent runs an operator-set *_PATH (lib/llm-providers.js; config.sh exported
+    # openclaw.env's copy), so that binary, not the Node on PATH, decides the seat.
+    BIN_SET="${!BIN_VAR:-}"
+    if [ -n "$BIN_SET" ]; then
+      if [ -x "$BIN_SET" ]; then
+        info "Mind seated: $PROVIDER ($BIN_SET from $BIN_VAR)"
       else
-        warn "$PROVIDER chosen but the '$BIN' CLI is not on PATH — install it (or set $(echo "$PROVIDER" | tr '[:lower:]' '[:upper:]')_PATH) and re-run: bash $0 --update"
+        warn "$BIN_VAR=$BIN_SET is not an executable file — the agent runs that path, so the $PROVIDER mind is NOT seated"
+        warn "Fix or remove $BIN_VAR in $ENV_FILE and re-run: bash $0 --update --provider=$PROVIDER"
+      fi
+    elif [ -n "$NODE_FLOOR" ] && ! node_at_least "$NODE_FLOOR"; then
+      warn "$PKG needs Node >=$NODE_FLOOR, and this node runs $(node -v 2>/dev/null || echo 'no node') — the $PROVIDER mind is NOT seated"
+      warn "Upgrade Node to >=$NODE_FLOOR and re-run: bash $0 --update --provider=$PROVIDER"
+      warn "  or point $BIN_VAR at a '$BIN' that runs (one installed under Node >=$NODE_FLOOR)"
+    elif command -v "$BIN" >/dev/null 2>&1; then
+      info "Mind seated: $PROVIDER ($BIN on PATH)"
+    elif [ -n "$PKG" ]; then
+      info "Installing the $PROVIDER CLI ($PKG)..."
+      if [ "$OS" = "linux" ]; then
+        run sudo npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
+      else
+        run npm install -g "$PKG" || warn "$PKG install failed — install the '$BIN' CLI manually"
+      fi
+      command -v "$BIN" >/dev/null 2>&1 && info "Mind seated: $PROVIDER ($BIN)" || warn "'$BIN' still not on PATH"
+    else
+      warn "$PROVIDER chosen but the '$BIN' CLI is not on PATH — install it (or set $BIN_VAR) and re-run: bash $0 --update"
+      if [ "$PROVIDER" = minimax ]; then
+        warn "  minimax is the Rust crate minimax-cli >=0.7: cargo install minimax-cli --locked (the npm minimax-cli and @hmbown/minimax-cli have no exec)"
       fi
     fi
     export OPENCLAW_PROVIDER="$PROVIDER"
@@ -415,22 +455,6 @@ updated_at: YYYY-MM-DD HH:MM
 (none yet)
 TASKS
   info "Created active-tasks.md"
-fi
-
-if [ ! -f "$WORKSPACE/.companion-state.md" ]; then
-  write_file "$WORKSPACE/.companion-state.md" << STATE
-## Session Status
-status: inactive
-started_at:
-last_flush: $(date -Iseconds)
-
-## Active Task
-(none)
-
-## Current State
-0 running, 0 done
-STATE
-  info "Created .companion-state.md"
 fi
 
 if [ ! -f "$WORKSPACE/.learnings/lessons.md" ]; then

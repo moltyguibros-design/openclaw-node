@@ -11,11 +11,15 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { tmpDir } = require('./helpers/tmp-dir.cjs');
+const path = require('node:path');
 const {
   checkDestructivePatterns,
   isAllowedExecCommand,
   validateExecCommand,
   containsShellChaining,
+  DESTRUCTIVE_PATTERNS,
 } = require('../lib/exec-safety');
 
 // ---------------------------------------------------------------------------
@@ -68,6 +72,16 @@ describe('checkDestructivePatterns', () => {
       assert.equal(result.pattern, undefined);
     });
   }
+
+  it('every destructive pattern matches at least one sample', () => {
+    const samples = [
+      ...destructive.map(([cmd]) => cmd),
+      'cat foo>/dev/sda', 'echo x >/etc/hosts', 'nft flush ruleset', 'systemctl disable sshd',
+    ];
+    for (const re of DESTRUCTIVE_PATTERNS) {
+      assert.ok(samples.some(s => re.test(s)), `${re} matches nothing`);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -391,30 +405,60 @@ describe('shell-chain bypasses (bare & and space-less redirect)', () => {
 });
 
 describe('validateMetricCommand (shared worker + daemon gate)', () => {
-  it('allows ordinary test runners', () => {
-    for (const m of ['npm test', 'npm run test:unit', 'pytest tests/', 'cargo test', 'go test ./...', 'make test', 'vitest run']) {
+  it('allows ordinary test runners and returns their argv', () => {
+    for (const m of ['npm test', 'npm run test:unit', 'pytest tests/', 'cargo test', 'go test ./...', 'make test', 'vitest run',
+      'node --test test/foo.test.mjs', 'node test/run.js', 'npm test -- --grep foo']) {
       assert.equal(es.validateMetricCommand(m).allowed, true, m);
+    }
+    assert.deepEqual(es.validateMetricCommand(`node test/run.js 'a b' "c"`).argv, ['node', 'test/run.js', 'a b', 'c']);
+  });
+
+  it('refuses shell syntax: metrics run as argv with no shell', () => {
+    for (const m of ['npm test & rm -rf ~', 'npm run x && rm -rf /', 'npm test; sudo reboot', 'npm test | tail -5',
+      'npm test > out', 'node ${x:--pe} 1', 'node $(echo x).js', 'node `x`.js', 'node a\\b.js']) {
+      const r = es.validateMetricCommand(m);
+      assert.equal(r.allowed, false, m);
+      assert.match(r.reason, /without a shell/, m);
     }
   });
 
-  it('refuses the bare & bypass that used to pass the worker filter', () => {
-    const r = es.validateMetricCommand('npm test & rm -rf ~');
-    assert.equal(r.allowed, false);
-    assert.match(r.reason, /chaining/);
+  it('refuses node eval/print/preload flags anywhere in its option list (mesh-core~2#5)', () => {
+    for (const m of ['node -e "process.exit()"', 'node -pe "require(\'child_process\').execSync(\'id\')"', 'node -ep 1',
+      'node --no-warnings -e 1', 'node --input-type=module -e x', 'node "-e" 1', 'node --eval=1', 'node --print 1',
+      'node -r ./x.js t.js', 'node --require=./x.js t.js', 'node --import ./x.mjs t.js', 'node --loader ./x.mjs t.js',
+      'node --inspect t.js', 'node --test --test-reporter=./r.js', 'node -']) {
+      assert.equal(es.validateMetricCommand(m).allowed, false, m);
+    }
   });
 
-  it('refuses destructive patterns even behind an allowed prefix', () => {
-    assert.equal(es.validateMetricCommand('npm run x && rm -rf /').allowed, false);
-    assert.equal(es.validateMetricCommand('npm test; sudo reboot').allowed, false);
+  it('refuses paths outside the worktree', () => {
+    for (const m of ['node /tmp/x.js', 'node ../x.js', 'node ~/x.js', 'pytest /tmp/evil_test.py', 'node --test ../../t.mjs',
+      'make test SHELL=/tmp/evil', 'jest --config=/tmp/j.js', 'cargo test --manifest-path ../Cargo.toml']) {
+      assert.equal(es.validateMetricCommand(m).allowed, false, m);
+    }
   });
 
-  it('refuses dangerous flags the old inline copy did not check', () => {
-    assert.equal(es.validateMetricCommand('make test SHELL=/tmp/evil').allowed, false);
-    assert.equal(es.validateMetricCommand('node -e "process.exit()"').allowed, false);
+  it('refuses runner options that load code or reconfigure spawning', () => {
+    for (const m of ['npm test --script-shell=sh', 'npm test --node-options=--require=./x.js', 'cargo test --config a=b',
+      'go test -exec=sh ./...', 'go test -toolexec x ./...', 'mocha -n eval=1', 'mocha --require x', 'pytest -p evil',
+      'make test -f other.mk', 'make test CC=x']) {
+      assert.equal(es.validateMetricCommand(m).allowed, false, m);
+    }
+  });
+
+  it('refuses a symlink that leads out of the worktree when the worktree is known', () => {
+    const wt = tmpDir('metric-wt-');
+    const outside = tmpDir('metric-out-');
+    fs.writeFileSync(path.join(outside, 'x.js'), '');
+    fs.symlinkSync(path.join(outside, 'x.js'), path.join(wt, 'link.js'));
+    fs.writeFileSync(path.join(wt, 'ok.js'), '');
+    assert.equal(es.validateMetricCommand('node link.js', { cwd: wt }).allowed, false);
+    assert.equal(es.validateMetricCommand('node ok.js', { cwd: wt }).allowed, true);
   });
 
   it('refuses commands outside the metric allowlist', () => {
-    assert.equal(es.validateMetricCommand('curl http://evil').allowed, false);
-    assert.equal(es.validateMetricCommand('').allowed, false);
+    for (const m of ['curl http://evil', '', 'bash -c x', 'npm install', 'npm run', 'go build', 'jestx']) {
+      assert.equal(es.validateMetricCommand(m).allowed, false, m);
+    }
   });
 });

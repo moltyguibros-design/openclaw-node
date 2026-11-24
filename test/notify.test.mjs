@@ -6,7 +6,7 @@ import os from 'node:os';
 import {
   notify, readLedger, appendLedger, recordClick, loadConfig, resolveIcon,
   buildDarwinArgs, buildLinuxArgs, dispatch, awaitClickAndOpen, notifyPaths,
-  findTerminalNotifier, DEFAULT_CONFIG, KINDS,
+  findTerminalNotifier, DEFAULT_CONFIG, KINDS, LEDGER_MAX_BYTES,
 } from '../lib/notify.mjs';
 
 let tmp, paths;
@@ -98,6 +98,19 @@ describe('ledger', () => {
     assert.equal(limited.events.length, 1);
     assert.equal(limited.total, 2);
   });
+  it('rotates to ledger.jsonl.1 past the size cap, keeping one older generation', () => {
+    const evt = (id) => ({ v: 1, type: 'notification', id, ts: `2026-07-04T10:00:0${id}Z`, title: 'x'.repeat(40) });
+    const cap = JSON.stringify(evt('1')).length * 2;
+    for (const id of ['1', '2', '3']) appendLedger(evt(id), paths, cap);
+    assert.deepEqual(readLedger({}, paths).events.map(e => e.id), ['3']);
+    assert.match(fs.readFileSync(`${paths.ledger}.1`, 'utf8'), /"id":"1".*\n.*"id":"2"/);
+    for (const id of ['4', '5']) appendLedger(evt(id), paths, cap);
+    assert.deepEqual(readLedger({}, paths).events.map(e => e.id), ['5']);
+    assert.doesNotMatch(fs.readFileSync(`${paths.ledger}.1`, 'utf8'), /"id":"1"/);
+  });
+  it('the default cap is 5 MB', () => {
+    assert.equal(LEDGER_MAX_BYTES, 5 * 1024 * 1024);
+  });
 });
 
 describe('findTerminalNotifier', () => {
@@ -187,6 +200,30 @@ describe('dispatch', () => {
     release(null);
     assert.equal((await active).clickable, false);
   });
+  it('osascript fallback escapes the sound name like title and message', async () => {
+    let seen = null;
+    await dispatch(evt, DEFAULT_CONFIG, {
+      platform: 'darwin', terminalNotifier: null, sound: 'a"b',
+      exec: (c, a, o, cb) => { seen = a; cb(null); },
+    });
+    assert.ok(seen[1].endsWith(' sound name "a\\"b"'), seen[1]);
+  });
+  it('osascript fallback escapes backslashes so a message cannot close the string', async () => {
+    let seen = null;
+    await dispatch({ ...evt, message: 'a\\" & (do shell script "id") --' }, DEFAULT_CONFIG, {
+      platform: 'darwin', terminalNotifier: null, sound: 'default',
+      exec: (c, a, o, cb) => { seen = a; cb(null); },
+    });
+    assert.equal(seen[1], 'display notification "a\\\\\\" & (do shell script \\"id\\") --" with title "T"');
+  });
+  it('osascript fallback truncates before escaping so an escape is never cut in half', async () => {
+    let seen = null;
+    await dispatch({ ...evt, message: 'x'.repeat(199) + '"' }, DEFAULT_CONFIG, {
+      platform: 'darwin', terminalNotifier: null, sound: 'default',
+      exec: (c, a, o, cb) => { seen = a; cb(null); },
+    });
+    assert.ok(seen[1].startsWith(`display notification "${'x'.repeat(199)}\\"" with title "T"`), seen[1]);
+  });
   it('delivery failure is reported, not thrown', async () => {
     const d = await dispatch(evt, DEFAULT_CONFIG, { platform: 'darwin', terminalNotifier: '/tn', exec: failExec });
     assert.equal(d.ok, false);
@@ -227,6 +264,18 @@ describe('notify (end to end, mocked dispatch)', () => {
     assert.equal(events[0].id, evt.id);
     assert.equal(events[0].delivery.clickable, true);
   });
+  it('a caller-supplied sound (the CLI --sound) overrides the per-kind default', async () => {
+    let seen = null;
+    const exec = (cmd, args, o, cb) => { seen = args; cb(null); };
+    await notify({ kind: 'success', title: 'T', sound: 'Ping' }, { paths, platform: 'darwin', terminalNotifier: '/tn', exec });
+    assert.equal(seen[seen.indexOf('-sound') + 1], 'Ping');
+  });
+  it('a bare --sound (parsed as true) keeps the per-kind default', async () => {
+    let seen = null;
+    const exec = (cmd, args, o, cb) => { seen = args; cb(null); };
+    await notify({ kind: 'success', title: 'T', sound: true }, { paths, platform: 'darwin', terminalNotifier: '/tn', exec });
+    assert.equal(seen[seen.indexOf('-sound') + 1], DEFAULT_CONFIG.sounds.success);
+  });
   it('unknown kind coerces to info', async () => {
     const evt = await notify({ kind: 'nope', title: 'T' }, { paths, platform: 'win32' });
     assert.equal(evt.kind, 'info');
@@ -257,6 +306,16 @@ describe('notify (end to end, mocked dispatch)', () => {
     assert.equal(second.deduped, true);
     const events = readLedger({}, paths).events.filter((e) => e.id === 'hyperagent-proposal:7');
     assert.equal(events.length, 1, 'exactly one ledger identity');
+  });
+  it('a stable id already in the rotated generation is still deduped', async () => {
+    fs.mkdirSync(path.dirname(paths.ledger), { recursive: true });
+    fs.writeFileSync(`${paths.ledger}.1`, JSON.stringify({ v: 1, type: 'notification', id: 'hyperagent-proposal:8', ts: '2026-07-04T10:00:00Z' }) + '\n');
+    const again = await notify(
+      { id: 'hyperagent-proposal:8', title: 'P8 again' },
+      { paths, platform: 'darwin', exec: () => { throw new Error('must not dispatch'); } },
+    );
+    assert.equal(again.deduped, true);
+    assert.equal(fs.existsSync(paths.ledger), false);
   });
   it('every kind has a default sound and icon mapping', () => {
     for (const k of KINDS) {

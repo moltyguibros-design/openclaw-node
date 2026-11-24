@@ -1,0 +1,68 @@
+# Files the installer once shipped and the repo no longer does. rsync never
+# deletes, so each stays runnable on a node until retire_shipped_files moves it
+# into ~/.openclaw/retired/<date>/<group>/. One "<group> <name>" per line, a name
+# in that deployed dir, at most one folder down (dir/file):
+#   workspace-bin  ~/.openclaw/workspace/bin   (from workspace-bin/)
+#   mesh-bin       ~/openclaw/bin              (from bin/)
+#   workspace-lib  ~/.openclaw/workspace/lib   (from lib/)
+#   mesh-lib       ~/openclaw/lib              (from lib/)
+#   skills         ~/.openclaw/workspace/skills (from skills/; mesh-deploy also
+#                  archives ~/.openclaw/skills copies)
+# Add a line when you delete or rename a shipped file, or quarantine a skill.
+# *.bak* backups are never listed and never touched.
+workspace-bin brainstorm-server
+workspace-bin daily-log-writer.mjs
+workspace-bin mesh-bridge.mjs
+workspace-bin lane-watchdog.js
+mesh-bin session-search.mjs
+# The session backfill CLI diverged from the live flush; the benchmark tools
+# belonged to the retired federation premise benchmark.
+mesh-bin extract-existing-sessions.mjs
+mesh-bin fed-benchmark-driver.mjs
+mesh-bin grappe-benchmark.mjs
+# openclaw-status grepped daemon source and misreported what was wired; node-watch
+# and node-acceptance probe the running node instead.
+mesh-bin openclaw-status.mjs
+# sync-to-harness: its "dry run" rewrote ~/openclaw (the deploy checkout) with
+# --delete and pushed to main.
+workspace-bin sync-to-harness
+# Pre-silo plan tools: they read memory-plan/VERSION, INVENTORY.md and tick-logs,
+# which moved into memory-plan/plans/<id>/; nothing called the notify shim.
+workspace-bin memory-plan-status.sh
+workspace-bin memory-plan-timeline.sh
+workspace-bin memory-plan-notify.sh
+# pair-session.js read prompt templates that never shipped, so every run crashed.
+workspace-bin pair-session.js
+# install-daemon wrote its own memory-daemon unit over the one services.sh renders.
+workspace-bin install-daemon
+# Quarantined skills (skills/_quarantine/README.md): none may stay installed.
+skills memorylayer
+skills moltbook-registry
+skills second-brain
+skills refactor-suggest
+skills capability-evolver
+skills auto-updater
+skills proactive-messages
+skills self-reflection
+skills ontology
+skills google-drive
+skills fast-browser-use
+skills cc-godmode
+# Skills deleted from the repo.
+skills memory-setup
+skills memory-hygiene
+skills deep-research
+skills save-money
+skills markdown-formatter
+skills search
+skills self-improving-agent-1-0-2
+skills clawdbot-filesystem
+# Deleted from lib/; node-watch's deploy-drift diff reports each one left behind.
+workspace-lib pair-transport-teams.js
+workspace-lib mcp-knowledge/bench.mjs
+workspace-lib mcp-knowledge/package-lock.json
+workspace-lib wakefulness.mjs
+mesh-lib pair-transport-teams.js
+mesh-lib mcp-knowledge/bench.mjs
+mesh-lib mcp-knowledge/package-lock.json
+mesh-lib wakefulness.mjs

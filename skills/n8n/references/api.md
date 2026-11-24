@@ -10,9 +10,8 @@ API keys are managed in the n8n UI:
 
 ## Base URL
 
-`N8N_BASE_URL`
-
-Default: `${N8N_BASE_URL}$/api/v1`
+`${N8N_BASE_URL}/api/v1` (no default: set `N8N_BASE_URL` to the instance root,
+e.g. `http://localhost:5678`)
 
 ## Endpoints
 
@@ -58,8 +57,8 @@ Body: partial workflow JSON
 
 #### Activate/Deactivate
 ```
-PATCH /workflows/{id}
-Body: {"active": true|false}
+POST /workflows/{id}/activate
+POST /workflows/{id}/deactivate
 ```
 
 #### Delete Workflow
@@ -102,10 +101,8 @@ DELETE /executions/{id}
 ```
 
 #### Manual Execution
-```
-POST /workflows/{id}/execute
-Body: {"data": {...}}
-```
+The public API has no execute endpoint. Trigger a workflow through its Webhook
+node's URL.
 
 ## Common Patterns
 
@@ -128,16 +125,6 @@ python3 scripts/n8n_api.py deactivate --id <workflow-id>
 ### List Recent Executions
 ```bash
 python3 scripts/n8n_api.py list-executions --limit 10 --pretty
-```
-
-### Manually Execute Workflow
-```bash
-python3 scripts/n8n_api.py execute --id <workflow-id>
-```
-
-With data:
-```bash
-python3 scripts/n8n_api.py execute --id <workflow-id> --data '{"key": "value"}'
 ```
 
 ## Error Handling

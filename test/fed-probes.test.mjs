@@ -3,7 +3,8 @@
 // UNKNOWN when unobservable. Never green without evidence.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { gradeClusterQuorum, gradeGrappeMembers, gradeSessionLiveness, gradeCoordinator, parseLaunchdPrint, toMemberHealth, FED_STATUS } from '../lib/fed-probes.mjs';
+import { readFileSync } from 'node:fs';
+import { gradeClusterQuorum, gradeGrappeMembers, gradeSessionLiveness, gradeCoordinator, parseLaunchdPrint, toMemberHealth, readLiveCollabSessions, FED_STATUS } from '../lib/fed-probes.mjs';
 
 // Real `jsz.meta_cluster`, captured verbatim from the live 3-node cluster
 // (curl :8222/jsz, 2026-07-16T11:21Z). Tests feed the SHAPE production emits —
@@ -49,6 +50,11 @@ test('REGRESSION: R=3 with NO raft leader → BROKEN (quorum loss must be detect
 });
 test('cluster quorum: jsz answered but unparseable → UNKNOWN, never green', () => {
   assert.equal(gradeClusterQuorum({ jszReachable: true, jszParsed: false }).status, FED_STATUS.UNKNOWN);
+});
+test('cluster quorum: JetStream disabled → BROKEN, never single-node WORKING', () => {
+  const v = gradeClusterQuorum({ jszReachable: true, jsDisabled: true, metaCluster: null });
+  assert.equal(v.status, FED_STATUS.BROKEN);
+  assert.match(v.detail, /JetStream disabled/);
 });
 
 // A real MESH_NODE_HEALTH row, captured verbatim from the live bucket
@@ -102,11 +108,38 @@ test('grappe members: all fresh → WORKING; stale member → BROKEN', () => {
   assert.match(v.detail, /wg-alpha\/b/);
 });
 
+test('grappe members: a dissolved grappe is intentionally inactive → OFF, not BROKEN', () => {
+  const now = Date.now();
+  assert.equal(gradeGrappeMembers({ grappes: [{ id: 'wg-alpha', status: 'dissolved', members: ['a'] }], memberHealth: {}, now }).status, FED_STATUS.OFF);
+  const mixed = gradeGrappeMembers({
+    grappes: [{ id: 'old', status: 'dissolved', members: ['gone'] }, { id: 'wg-b', status: 'live', members: ['a'] }],
+    memberHealth: { a: now },
+    now,
+  });
+  assert.equal(mixed.status, FED_STATUS.WORKING);
+});
+
+test('openclaw-grappe: only form may create the registry; read-modify-write commands compare-and-set', () => {
+  const src = readFileSync(new URL('../bin/openclaw-grappe.mjs', import.meta.url), 'utf8');
+  const formEnd = src.indexOf('async function cmdStatus(');
+  const opens = [...src.matchAll(/openKv\(js,[^)]*\)/g)].filter((m) => m.index > formEnd).map((m) => m[0]);
+  assert.equal(opens.length, 5);
+  for (const call of opens) assert.match(call, /bindOnly: true/, call);
+  assert.equal(src.split('kv.put(').length - 1, 1, 'only cmdForm writes without an expected revision');
+  assert.equal(src.split('kv.update(').length - 1, 3, 'dissolve, issue-token and join use kv.update(key, value, entry.revision)');
+  assert.match(src, /ageSec <= 90 \?/, 'CLI liveness window matches gradeGrappeMembers freshMs 90_000');
+});
+
 test('session liveness: none active → OFF; active advancing → WORKING; stalled → BROKEN', () => {
   const now = 10_000_000;
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'completed' }], now }).status, FED_STATUS.OFF);
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', lastActivityMs: now - 1000 }], now }).status, FED_STATUS.WORKING);
   assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', lastActivityMs: now - 20 * 60000 }], now }).status, FED_STATUS.BROKEN);
+});
+test('session liveness: a circling step is graded against its 30 min step budget, not the 15 min round one', () => {
+  const now = 10_000_000;
+  assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', circling: true, lastActivityMs: now - 20 * 60000 }], now }).status, FED_STATUS.WORKING);
+  assert.equal(gradeSessionLiveness({ sessions: [{ status: 'active', circling: true, lastActivityMs: now - 40 * 60000 }], now }).status, FED_STATUS.BROKEN);
 });
 test('session liveness: KV unreadable → UNKNOWN', () => {
   assert.equal(gradeSessionLiveness({ sessions: null, now: Date.now() }).status, FED_STATUS.UNKNOWN);
@@ -117,3 +150,40 @@ test('coordinator: running PID → WORKING; loaded without PID → BROKEN; absen
   assert.equal(gradeCoordinator({ loaded: true, running: false, pid: null, state: 'not running' }).status, FED_STATUS.BROKEN);
   assert.equal(gradeCoordinator({ loaded: false }).status, FED_STATUS.OFF);
 });
+
+// MESH_COLLAB keeps every session ever run; the daemon's index.live lists the live ones.
+function fakeCollabKv({ completed = 100, live = { a1: 'active', a2: 'recruiting' }, index = true } = {}) {
+  const rows = new Map();
+  const put = (k, v) => rows.set(k, new TextEncoder().encode(JSON.stringify(v)));
+  const now = new Date().toISOString();
+  for (let i = 0; i < completed; i++) put(`done-${i}`, { session_id: `done-${i}`, status: 'completed', created_at: now });
+  for (const [id, status] of Object.entries(live)) put(id, { session_id: id, status, created_at: now });
+  if (index) put('index.live', { ...live, gone: 'active' });
+  const kv = {
+    gets: 0,
+    async get(k) { kv.gets++; return rows.has(k) ? { value: rows.get(k) } : null; },
+    async keys() { return (async function* () { yield* rows.keys(); })(); },
+  };
+  return kv;
+}
+
+test('live collab sessions come from index.live: one get for the index plus one per listed id', async () => {
+  const kv = fakeCollabKv();
+  const sessions = await readLiveCollabSessions(kv);
+  assert.deepEqual(sessions.map((s) => s.session_id).sort(), ['a1', 'a2']);
+  assert.equal(kv.gets, 4);
+  const graded = gradeSessionLiveness({ sessions: sessions.map((s) => ({ status: s.status, lastActivityMs: Date.now() })), now: Date.now() });
+  assert.equal(graded.status, FED_STATUS.WORKING);
+});
+
+test('without index.live the live sessions are found by scanning the bucket', async () => {
+  const sessions = await readLiveCollabSessions(fakeCollabKv({ completed: 10, index: false }));
+  assert.deepEqual(sessions.map((s) => s.session_id).sort(), ['a1', 'a2']);
+});
+
+test('an index.live naming only a session that is gone yields none, without a scan', async () => {
+  const kv = fakeCollabKv({ live: {}, index: true });
+  assert.deepEqual(await readLiveCollabSessions(kv), []);
+  assert.equal(kv.gets, 2);
+});
+

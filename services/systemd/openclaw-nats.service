@@ -4,14 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${NATS_SERVER_BIN} --config ${HOME}/.openclaw/config/nats.conf
+ExecStart="${NATS_SERVER_BIN}" --config "${OPENCLAW_ROOT}/config/nats.conf"
 # SIGHUP re-reads authorization (nats-auth.conf) without dropping healthy clients.
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
-Environment=HOME=${HOME}
-StandardOutput=append:${HOME}/.openclaw/logs/nats.log
-StandardError=append:${HOME}/.openclaw/logs/nats.err
+Environment="HOME=${HOME}"
+StandardOutput=append:${OPENCLAW_ROOT}/logs/nats.log
+StandardError=append:${OPENCLAW_ROOT}/logs/nats.err
 
 [Install]
 WantedBy=default.target

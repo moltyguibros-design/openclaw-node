@@ -12,20 +12,22 @@ function formatNodeShort(nodeId: string): string {
   return nodeId.split("-")[0];
 }
 
-/** Look up latency from node A to node B using tailscale peer data */
-function getPeerInfo(
+export function getPeerInfo(
   from: MeshNode,
   to: MeshNode
-): { latencyMs: number | null; relay: boolean; online: boolean } | null {
-  const peers = from.tailscale?.peers ?? [];
-  const peer = peers.find(
-    (p) => p.nodeId === to.nodeId || p.ip === to.health?.tailscaleIp
-  );
+): { latencyMs: number | null; relay: boolean; idle: boolean; online: boolean } | null {
+  const toIp = to.tailscale?.selfIp || to.health?.tailscaleIp;
+  const peer = (from.tailscale?.peers ?? []).find((p) => p.ip && p.ip === toIp);
   if (!peer) return null;
-  return { latencyMs: peer.latencyMs, relay: peer.relay, online: peer.online };
+  return {
+    latencyMs: peer.latency?.latencyMs ?? null,
+    relay: !peer.direct && !peer.idle,
+    idle: !!peer.idle,
+    online: !!peer.online,
+  };
 }
 
-function CellContent({
+export function CellContent({
   info,
 }: {
   info: ReturnType<typeof getPeerInfo>;
@@ -63,7 +65,10 @@ function CellContent({
       {info.relay && (
         <span className="text-yellow-400/60 ml-1 text-[8px]">(relay)</span>
       )}
-      {!info.relay && latency !== null && (
+      {info.idle && (
+        <span className="text-muted-foreground/60 ml-1 text-[8px]">(idle)</span>
+      )}
+      {!info.relay && !info.idle && latency !== null && (
         <span className="text-green-400/40 ml-1 text-[8px]">(direct)</span>
       )}
     </span>

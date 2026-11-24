@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash uninstall.sh              # Remove services and scripts (keep data)
-#   bash uninstall.sh --purge      # Remove everything including memory data
+#   bash uninstall.sh --purge      # Also remove the toolkit's data; asks again before OpenClaw's own files
 
 set -euo pipefail
 
@@ -29,6 +29,9 @@ fi
 
 OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
 WORKSPACE="$OPENCLAW_ROOT/workspace"
+BOOTSTRAP_SRC="$HOME/.openclaw-src/openclaw-node"
+# bootstrap.sh keeps .old when install.sh fails and leaves .new after a cut download.
+BOOTSTRAP_TREES=("$BOOTSTRAP_SRC" "$BOOTSTRAP_SRC.old" "$BOOTSTRAP_SRC.new")
 PURGE=false
 
 for arg in "$@"; do
@@ -49,14 +52,40 @@ echo ""
 echo "OpenClaw Node Uninstaller"
 echo ""
 
-# Stop and remove daemon service
-if [ -f "$WORKSPACE/bin/install-daemon" ]; then
-  info "Stopping memory daemon..."
-  bash "$WORKSPACE/bin/install-daemon" --uninstall 2>/dev/null || true
+# ~/.openclaw is shared with the OpenClaw gateway, which stays installed: --purge removes
+# only what the toolkit writes there and asks again before the rest (credentials,
+# pairings, agents and their sessions, openclaw.json).
+TOOLKIT_PATHS=(
+  workspace config services souls logs nats rules plan-templates share notifications foreman
+  retired 'skills.retired-*' transcript-archive preservation roles eval worktrees mesh-leases
+  obsidian-local artifacts run backups .tmp harness
+  'state.db' 'state.db-*' 'graph-cache.db' 'graph-cache.db-*' openclaw.env harness-rules.json
+  identity.key identity-registry.json .mesh-secret mesh-aliases.json mesh-providers.json
+  dogfood-metrics.jsonl 'watcher.jsonl' 'watcher.jsonl.1' .deploy-state.json .last-deploy.json
+  .embed-migration-checkpoint.json '.node-watch.*' .node-acceptance.md .install-acceptance.md
+  timer-transition-active timer-source-copy.lock timer-entry-installed
+  skills/mesh state/observer.jsonl state/memory-activity.jsonl state/observer-logpos.json
+)
+
+if $PURGE; then
+  PURGE_TARGETS=("$OPENCLAW_ROOT (the toolkit's files)" "$HOME/openclaw")
+  for tree in "${BOOTSTRAP_TREES[@]}"; do
+    if [ -d "$tree" ]; then PURGE_TARGETS+=("$tree"); fi
+  done
+  warn "PURGE mode: this deletes:"
+  for target in "${PURGE_TARGETS[@]}"; do echo "    $target"; done
+  echo "The OpenClaw gateway's own files in $OPENCLAW_ROOT are asked about separately."
+  echo ""
+  read -r -p "Are you sure? [y/N] " confirm || confirm=""
+  case "$confirm" in
+    y|Y) ;;
+    *) info "Aborted, nothing changed."; exit 0 ;;
+  esac
 fi
 
 # Stop and remove services
 OS="$(uname -s)"
+LEGACY=()
 if [ "$OS" = "Linux" ]; then
   # --- Current services: openclaw-*.service under user systemd ---
   SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
@@ -72,14 +101,8 @@ if [ "$OS" = "Linux" ]; then
     done
     systemctl --user daemon-reload 2>/dev/null || true
   fi
-  # --- Legacy fallback: old system-level openclaw-agent ---
-  if systemctl is-active --quiet openclaw-agent 2>/dev/null; then
-    info "Stopping legacy mesh agent (openclaw-agent)..."
-    sudo systemctl stop openclaw-agent 2>/dev/null || true
-    sudo systemctl disable openclaw-agent 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/openclaw-agent.service
-    sudo systemctl daemon-reload 2>/dev/null || true
-    info "Legacy mesh agent service removed"
+  if systemctl is-active --quiet openclaw-agent 2>/dev/null || [ -e /etc/systemd/system/openclaw-agent.service ]; then
+    LEGACY+=("system service openclaw-agent (/etc/systemd/system/openclaw-agent.service)")
   fi
 elif [ "$OS" = "Darwin" ]; then
   # --- Current services: ai.openclaw.*.plist under ~/Library/LaunchAgents ---
@@ -94,56 +117,95 @@ elif [ "$OS" = "Darwin" ]; then
       info "Removed $PLIST_NAME"
     done
   fi
-  # --- Legacy fallback: old system-level com.openclaw.agent ---
-  LEGACY_PLIST="/Library/LaunchDaemons/com.openclaw.agent.plist"
-  if [ -f "$LEGACY_PLIST" ]; then
-    info "Stopping legacy mesh agent (com.openclaw.agent)..."
-    sudo launchctl unload "$LEGACY_PLIST" 2>/dev/null || true
-    sudo rm -f "$LEGACY_PLIST"
-    info "Legacy mesh agent LaunchDaemon removed"
+  if [ -e /Library/LaunchDaemons/com.openclaw.agent.plist ]; then
+    LEGACY+=("LaunchDaemon com.openclaw.agent (/Library/LaunchDaemons/com.openclaw.agent.plist)")
   fi
 fi
-# Remove mesh symlinks
 for cmd in mesh mesh-health mesh-repair; do
-  [ -L "/usr/local/bin/$cmd" ] && sudo rm -f "/usr/local/bin/$cmd" && info "Removed /usr/local/bin/$cmd"
-done
-# Remove mesh sudoers
-[ -f "/etc/sudoers.d/openclaw-mesh" ] && sudo rm -f "/etc/sudoers.d/openclaw-mesh" && info "Removed mesh sudoers rules"
-
-# Stop Mission Control if running
-if command -v lsof >/dev/null 2>&1; then
-  MC_PID=$(lsof -ti:3000 2>/dev/null || true)
-  if [ -n "$MC_PID" ]; then
-    info "Stopping Mission Control (PID $MC_PID)..."
-    kill "$MC_PID" 2>/dev/null || true
+  if [ -L "/usr/local/bin/$cmd" ]; then
+    LEGACY+=("symlink /usr/local/bin/$cmd -> $(readlink "/usr/local/bin/$cmd")")
   fi
+done
+if [ -e /etc/sudoers.d/openclaw-mesh ]; then
+  LEGACY+=("sudoers fragment /etc/sudoers.d/openclaw-mesh")
 fi
+# The retired openclaw-mesh setup.sh created these as root; the runbook retires them with
+# the checks (target, visudo, open root shell) a blind removal would skip.
+if [ "${#LEGACY[@]}" -gt 0 ]; then
+  warn "Legacy openclaw-mesh leftovers found, left in place:"
+  for item in "${LEGACY[@]}"; do echo "    $item"; done
+  warn "Retire them by hand: $REPO_DIR/memory-plan/plans/node-state-recovery/audits/step12_jetstream/LEGACY_AGENT_RETIREMENT_RUNBOOK.md"
+fi
+
+# The stack launchers live outside $OPENCLAW_ROOT, so --purge does not reach them either.
+rm -rf "$HOME/Applications/OpenClaw Stack.app"
+rm -f "$HOME/.local/share/applications/openclaw-stack.desktop"
 
 if $PURGE; then
-  warn "PURGE mode: removing ALL OpenClaw data"
-  echo ""
-  read -p "Are you sure? This deletes ~/.openclaw entirely. [y/N] " confirm
-  if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-    rm -rf "$OPENCLAW_ROOT"
-    rm -rf "$HOME/openclaw"
+  shopt -s nullglob dotglob
+  for pattern in "${TOOLKIT_PATHS[@]}"; do
+    for entry in "$OPENCLAW_ROOT"/$pattern; do rm -rf "$entry"; done
+  done
+  rmdir "$OPENCLAW_ROOT/skills" "$OPENCLAW_ROOT/state" 2>/dev/null || true
+  info "Removed the toolkit's files from $OPENCLAW_ROOT"
+  rm -rf "$HOME/openclaw"
+  info "Removed $HOME/openclaw (mesh shared folder + agent)"
+  for tree in "${BOOTSTRAP_TREES[@]}"; do
+    if [ -d "$tree" ]; then
+      rm -rf "$tree"
+      info "Removed $tree (bootstrap source tree)"
+    fi
+  done
+  rmdir "$HOME/.openclaw-src" 2>/dev/null || true
+  REMAINING=("$OPENCLAW_ROOT"/*)
+  shopt -u nullglob dotglob
+  if [ "${#REMAINING[@]}" -eq 0 ]; then
+    rmdir "$OPENCLAW_ROOT" 2>/dev/null || true
     info "Removed $OPENCLAW_ROOT"
-    info "Removed $HOME/openclaw (mesh shared folder + agent)"
   else
-    info "Aborted."
-    exit 0
+    echo ""
+    warn "Still in $OPENCLAW_ROOT: the OpenClaw gateway's own files (credentials, pairings, agents and sessions, openclaw.json) and anything else the toolkit did not write:"
+    for entry in "${REMAINING[@]}"; do echo "    ${entry#"$OPENCLAW_ROOT"/}"; done
+    read -r -p "Delete these too? OpenClaw then needs setting up again. [y/N] " confirm_product || confirm_product=""
+    case "$confirm_product" in
+      y|Y) rm -rf "$OPENCLAW_ROOT"; info "Removed $OPENCLAW_ROOT" ;;
+      *) info "Kept OpenClaw's own files in $OPENCLAW_ROOT" ;;
+    esac
   fi
 else
   info "Removing scripts and services (keeping memory data)..."
   rm -rf "$WORKSPACE/bin"
-  rm -rf "$WORKSPACE/skills"
+  # The scanner gate installs ClawHub skills into the same dir install.sh copies the repo's into.
+  KEPT_SKILLS=()
+  if [ -d "$WORKSPACE/skills" ]; then
+    for skill in "$REPO_DIR/skills"/*/; do
+      name="$(basename "$skill")"
+      case "$name" in dist|scripts|_quarantine) continue ;; esac
+      rm -rf "${WORKSPACE:?}/skills/$name"
+    done
+    # A skill the repo quarantined or deleted stays installed until an update retires it.
+    while read -r group name; do
+      [ "$group" = skills ] || continue
+      case "$name" in ''|/*|.*|*/.*|*..*|*/|*/*/*|*.bak*) continue ;; esac
+      rm -rf "${WORKSPACE:?}/skills/$name"
+    done < "$REPO_DIR/scripts/install/retired-files.txt"
+    for skill in "$WORKSPACE/skills"/*; do
+      if [ -e "$skill" ]; then KEPT_SKILLS+=("$(basename "$skill")"); fi
+    done
+    rmdir "$WORKSPACE/skills" 2>/dev/null || true
+  fi
   rm -rf "$WORKSPACE/projects/mission-control/node_modules"
   rm -rf "$WORKSPACE/projects/mission-control/.next"
   rm -rf "$WORKSPACE/.boot"
-  rm -rf "$HOME/openclaw/bin"
+  rm -rf "$WORKSPACE/lib" "$WORKSPACE/packages" "$WORKSPACE/node_modules"
+  rm -rf "$HOME/openclaw/bin" "$HOME/openclaw/lib"
   rm -rf "$HOME/.openclaw/skills/mesh"
-  info "Removed scripts, skills, mesh CLI, and build artifacts"
+  info "Removed scripts, repo-shipped skills, mesh CLI, and build artifacts"
+  if [ "${#KEPT_SKILLS[@]}" -gt 0 ]; then
+    info "Kept operator-installed skills in $WORKSPACE/skills: ${KEPT_SKILLS[*]}"
+  fi
   info "Memory data preserved at $WORKSPACE/memory/"
-  info "Run with --purge to remove everything"
+  info "Run with --purge to remove the toolkit's data too"
 fi
 
 echo ""

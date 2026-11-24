@@ -37,7 +37,7 @@ interface RunReport {
 }
 
 const STATUS_TEXT: Record<string, string> = {
-  pending: "text-yellow-400", observation: "text-blue-400",
+  pending: "text-yellow-400", shadow: "text-blue-400",
   approved: "text-green-400", rejected: "text-red-400", expired: "text-zinc-500",
 };
 

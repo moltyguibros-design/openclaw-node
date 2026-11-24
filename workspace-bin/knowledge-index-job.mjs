@@ -20,29 +20,33 @@ import { initDatabase, indexSessionTurns } from '../lib/mcp-knowledge/core.mjs';
 const [statePath, knowledgePath, batchArg] = process.argv.slice(2);
 const batchLimit = Number(batchArg) || 5;
 
-const knowledgeDb = initDatabase(knowledgePath);
-// R22 (repair 5.6): no integrity scan on the 10-min indexing path.
-const stateDb = openStore(statePath, { readonly: true, integrityCheck: false });
+// R22 (repair 5.6): no full integrity scan on the 10-min indexing path; both
+// DBs get quick_check only (the daemon ran the full scan when it opened them at boot).
+const knowledgeDb = initDatabase(knowledgePath, { integrityCheck: 'quick' });
+const stateDb = openStore(statePath, { readonly: true, integrityCheck: 'quick' });
 try {
   const allSessions = stateDb.prepare(
     'SELECT id, source FROM sessions ORDER BY start_time ASC'
   ).all();
+  const getIndexed = knowledgeDb.prepare(
+    'SELECT content_hash, turn_count FROM session_documents WHERE session_id = ?'
+  );
+  const countMessages = stateDb.prepare(
+    'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?'
+  );
+  const getMessages = stateDb.prepare(
+    'SELECT role, content FROM messages WHERE session_id = ? ORDER BY turn_index ASC'
+  );
   let indexed = 0, chunks = 0;
   for (const session of allSessions) {
     if (indexed >= batchLimit) break;
     // R18 fix (repair 5.1): existence is not freshness — growth pre-filter via
     // turn_count; indexSessionTurns hash-verifies and delete+reinserts when
     // content actually changed.
-    const existing = knowledgeDb.prepare(
-      'SELECT content_hash, turn_count FROM session_documents WHERE session_id = ?'
-    ).get(session.id);
-    const liveCount = stateDb.prepare(
-      'SELECT COUNT(*) AS n FROM messages WHERE session_id = ?'
-    ).get(session.id).n;
+    const existing = getIndexed.get(session.id);
+    const liveCount = countMessages.get(session.id).n;
     if (existing && existing.turn_count === liveCount) continue;
-    const messages = stateDb.prepare(
-      'SELECT role, content FROM messages WHERE session_id = ? ORDER BY turn_index ASC'
-    ).all(session.id);
+    const messages = getMessages.all(session.id);
     if (messages.length === 0) continue;
     const turns = messages.map(m => ({ role: m.role, content: m.content }));
     const result = await indexSessionTurns(knowledgeDb, session.id, `session-store://${session.id}`, turns);
@@ -51,6 +55,10 @@ try {
       chunks += result.chunks;
     }
   }
+  // node-watch's mem.knowledge_index grades this stamp: it proves the job ran,
+  // with or without new work.
+  knowledgeDb.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
+    .run('last_session_index_time', Date.now().toString());
   process.stdout.write(JSON.stringify({ indexed, chunks }) + '\n');
 } finally {
   stateDb.close();

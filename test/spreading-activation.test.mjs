@@ -110,7 +110,7 @@ describe('spreadingActivation', () => {
     assert.ok(!ids.includes('C'), 'C should be filtered by threshold');
   });
 
-  it('returns empty for empty graph', () => {
+  it('a seed below the threshold yields nothing', () => {
     const graph = makeGraph({});
     const result = spreadingActivation({ A: 1.0 }, graph, {
       steps: 3,
@@ -150,21 +150,43 @@ describe('spreadingActivation', () => {
     const map = new Map(result);
     assert.equal(map.get('B'), 0.7);
   });
+
+  it("fetches each node's edges once per call", () => {
+    const inner = makeGraph({ A: ['B'], B: ['C'], C: ['D'] });
+    const calls = new Map();
+    const graph = {
+      edgesFrom(nodeId) {
+        calls.set(nodeId, (calls.get(nodeId) ?? 0) + 1);
+        return inner.edgesFrom(nodeId);
+      },
+    };
+    const result = spreadingActivation({ A: 1.0 }, graph, {
+      steps: 3,
+      decay: 0.5,
+      threshold: 0.01,
+    });
+    assert.deepEqual(result, [['A', 1], ['B', 0.5], ['C', 0.25], ['D', 0.125]]);
+    for (const [nodeId, n] of calls) assert.equal(n, 1, `edgesFrom(${nodeId}) called ${n} times`);
+  });
 });
 
 describe('createGraphAdapter', () => {
   it('wraps queryNeighbors into edgesFrom interface (bidirectional)', () => {
     const mockCache = {
       queryNeighbors(nodeId, opts) {
-        // vault links are citations, not arrows — the walk must see both ends
-        assert.equal(opts.direction, 'both');
+        // vault links are citations, not arrows — the walk must see both ends;
+        // only the edges are read, so the cache skips its neighbour lookups
+        assert.deepEqual(opts, { direction: 'both', edgesOnly: true });
         if (nodeId === 'A') {
-          return [
-            { source_id: 'A', target_id: 'B', edge_type: 'mentions', weight: 1 },
-            { source_id: 'A', target_id: 'C', edge_type: 'derived_from', weight: 0.8 },
-          ];
+          return {
+            edges: [
+              { source_id: 'A', target_id: 'B', edge_type: 'mentions', weight: 1 },
+              { source_id: 'A', target_id: 'C', edge_type: 'derived_from', weight: 0.8 },
+            ],
+            neighbors: [],
+          };
         }
-        return [];
+        return { edges: [], neighbors: [] };
       },
     };
     const adapter = createGraphAdapter(mockCache);
@@ -186,12 +208,17 @@ describe('createGraphAdapter', () => {
       queryNeighbors(nodeId, opts) {
         assert.equal(opts.direction, 'both');
         if (nodeId === 'nats') {
-          return [{ source_id: 'session-note-x', target_id: 'nats', edge_type: 'mentions', weight: 1 }];
+          return { edges: [{ source_id: 'session-note-x', target_id: 'nats', edge_type: 'mentions', weight: 1 }], neighbors: [] };
         }
-        return [];
+        return { edges: [], neighbors: [] };
       },
     };
     const adapter = createGraphAdapter(mockCache);
     assert.deepEqual(adapter.edgesFrom('nats'), [{ target: 'session-note-x', weight: 1 }]);
+  });
+
+  it('reads only the { edges, neighbors } shape the graph cache returns', () => {
+    const adapter = createGraphAdapter({ queryNeighbors: () => [{ source_id: 'A', target_id: 'B', weight: 1 }] });
+    assert.deepEqual(adapter.edgesFrom('A'), []);
   });
 });

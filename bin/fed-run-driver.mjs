@@ -52,6 +52,12 @@ export function createGapDetector(maxGapMs = 5 * 60_000) {
   };
 }
 
+export function soloArmResult(status) {
+  if (status === 'completed') return { ok: true };
+  if (['failed', 'cancelled', 'released', 'rejected'].includes(status)) return { ok: false, reason: `solo task ${status}` };
+  return null;
+}
+
 // ── Runner ──────────────────────────────────────────────────────────────
 
 const RUN = process.env.D14_RUN || 'r2';
@@ -148,8 +154,8 @@ async function runSolo(id, file, gap) {
     if (gapMs) return { infra: gapMs };
     const t = await getTask(id).catch(() => null);
     if (!t) continue;
-    if (t.status === 'completed') { log(`${id}: completed (${Math.round((Date.now() - t0) / 1000)}s)`); return { ok: true }; }
-    if (['failed', 'cancelled'].includes(t.status)) { log(`${id}: ${t.status}`); return { ok: false, reason: `solo task ${t.status}` }; }
+    const end = soloArmResult(t.status);
+    if (end) { log(end.ok ? `${id}: completed (${Math.round((Date.now() - t0) / 1000)}s)` : `${id}: ${t.status}`); return end; }
   }
   return { ok: false, reason: 'solo 60-min budget exceeded' };
 }

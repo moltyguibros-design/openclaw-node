@@ -120,4 +120,4 @@ Apache 2.0
 
 - [OpenClaw Documentation](https://docs.openclaw.ai)
 - [ClawHub Skills Registry](https://clawhub.com)
-- [Research: AI Persona Design](/research/RESEARCH_REPORT.md)
+- [Research: AI Persona Design](research/RESEARCH_REPORT.md)

@@ -98,6 +98,18 @@ describe('runConfigQueries', () => {
   });
 });
 
+describe('runConfigQueries — seedTerms (memory-knowledge#5)', () => {
+  it('passes each query\'s seedTerms to the pipeline', async () => {
+    const seen = [];
+    const pipeline = { retrieve: async (query, opts) => { seen.push(opts.seedTerms); return []; } };
+    await runConfigQueries(pipeline, [
+      { id: 'q01', query: 'the message bus', category: 'c', expected_topic: 't', seedTerms: ['NATS'] },
+      { id: 'q02', query: 'plain', category: 'c', expected_topic: 't' },
+    ], 5);
+    assert.deepEqual(seen, [['NATS'], undefined]);
+  });
+});
+
 describe('formatTuningReport', () => {
   it('produces markdown with summary table and per-query matrix', () => {
     const allResults = [
@@ -155,5 +167,42 @@ describe('runTuningHarness', () => {
     assert.equal(allResults[0].queryResults.length, 1);
     assert.equal(allResults[1].queryResults.length, 1);
     assert.equal(allResults[0].queryResults[0].queryId, 'q01');
+  });
+});
+
+// The harness tunes for the local inject path, which recalls private rows; a
+// privacy-filtered pipeline over a default-private store saw almost nothing.
+describe('runTuningHarness retrieves like local injection', () => {
+  it('returns sessions whose entities are private', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const { createExtractionStore } = await import('../lib/extraction-store.mjs');
+    const { setChannelErrorSink } = await import('../lib/retrieval-pipeline.mjs');
+    const store = createExtractionStore({ dbPath: ':memory:', integrityCheck: false });
+    const knowledgeDb = new Database(':memory:');
+    setChannelErrorSink(() => {}); // the fixture has no session FTS/vector tables
+    try {
+      store.storeExtractionResult('sess-1', {
+        entities: [{ name: 'JetStreamQuorum', type: 'technology', salience: 0.8 }],
+        themes: [], decisions: [], actions: [], friction_signals: [], relationships: [],
+      });
+      knowledgeDb.exec(`CREATE TABLE session_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+        turn_index INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, snippet TEXT NOT NULL)`);
+      knowledgeDb.prepare(`INSERT INTO session_chunks (session_id, turn_index, role, text, snippet)
+        VALUES ('sess-1', 0, 'user', 'quorum setup', 'quorum setup')`).run();
+      const [run] = await runTuningHarness({
+        queries: [{ id: 'q01', query: 'how is JetStreamQuorum doing', category: 'entity', expected_topic: 'quorum' }],
+        knowledgeDb,
+        extractionDb: store.db,
+        configs: [{ name: 'baseline', description: 'b', env: {} }],
+      });
+      assert.deepEqual(run.queryResults[0].results.map(r => r.session_id), ['sess-1']);
+    } finally {
+      knowledgeDb.close();
+      store.close();
+      setChannelErrorSink((channel, err) => {
+        console.error(`[retrieval] channel '${channel}' failed: ${err?.message || err}`);
+      });
+    }
   });
 });

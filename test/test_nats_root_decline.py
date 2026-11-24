@@ -21,6 +21,7 @@ import preservation_journal
 import test_nats_user_transfer as fixture_module
 
 
+@unittest.skipIf(os.geteuid() == 0, 'owner fixtures need a non-root uid')
 class RootDeclineTest(unittest.TestCase):
     def setUp(self):
         helper = fixture_module.UserTransferTest('test_root_refuses_live_owner_then_pins_exact_transfer')

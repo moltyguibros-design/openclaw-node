@@ -9,7 +9,6 @@ import {
   Wifi,
   WifiOff,
   Clock,
-  Coins,
   ChevronDown,
   ChevronRight,
   Star,
@@ -17,7 +16,7 @@ import {
   CheckCircle2,
   XCircle,
 } from "lucide-react";
-import type { MeshNode, PeerView } from "./types";
+import type { MeshNode } from "./types";
 
 interface Props {
   node: MeshNode;
@@ -199,6 +198,8 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
                 <span className="text-yellow-400">⚡ Via relay</span>
               ) : node.peerConnectivity === "degraded" ? (
                 <span className="text-red-400">✗ Degraded</span>
+              ) : node.peerConnectivity === "idle" ? (
+                <span className="text-muted-foreground/60">○ Idle</span>
               ) : (
                 <span className="text-zinc-500">— No peer data</span>
               )}
@@ -246,19 +247,16 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
             <div className="pt-1 border-t border-border/30">
               <div className="text-muted-foreground/50 mb-1">Peers</div>
               <div className="space-y-1 pl-1">
-                {(node.tailscale!.peers! as PeerView[]).map((peer, i) => (
+                {node.tailscale!.peers.map((peer, i) => (
                   <div key={peer.hostname || i} className="flex items-center gap-2">
                     <span className={`h-1.5 w-1.5 rounded-full ${peer.online ? "bg-green-400" : "bg-red-400"}`} />
                     <span className="text-foreground/70">{peer.hostname || "unknown"}</span>
                     <span className="font-mono text-muted-foreground/40">{peer.ip || ""}</span>
                     {peer.online ? (
-                      <span className={`ml-auto ${peer.direct ? "text-green-400" : "text-yellow-400"}`}>
-                        {peer.direct ? "direct" : peer.relay ? `relay (${peer.relay})` : "relay"}
+                      <span className={`ml-auto ${peer.direct ? "text-green-400" : peer.idle ? "text-muted-foreground/60" : "text-yellow-400"}`}>
+                        {peer.direct ? "direct" : peer.idle ? "idle" : peer.relay ? `relay (${peer.relay})` : "relay"}
                         {peer.latency?.latencyMs != null && (
                           <span className="font-mono ml-1">{Math.round(peer.latency.latencyMs)}ms</span>
-                        )}
-                        {peer.latencyMs != null && !peer.latency && (
-                          <span className="font-mono ml-1">{Math.round(peer.latencyMs)}ms</span>
                         )}
                       </span>
                     ) : (
@@ -346,18 +344,6 @@ export function NodeCard({ node, isExpanded: controlledExpanded, onToggle }: Pro
               )}
             </div>
           ))}
-        </div>
-      )}
-
-      {/* ── Today's Stats ───────────────────────────────────────── */}
-      {h && (
-        <div className="border-t border-border/50 px-4 py-2 flex items-center gap-4 text-[10px] text-muted-foreground">
-          <span>Today: {h.stats.tasksToday} tasks</span>
-          <span>{Math.round(h.stats.successRate * 100)}% success</span>
-          <span className="flex items-center gap-0.5">
-            <Coins className="h-3 w-3" />
-            ${h.stats.tokenSpendTodayUsd.toFixed(2)}
-          </span>
         </div>
       )}
 

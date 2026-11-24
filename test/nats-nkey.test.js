@@ -25,11 +25,14 @@ const VECTOR_PEM = crypto.createPrivateKey({
   key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), SEED32]),
   format: 'der', type: 'pkcs8',
 }).export({ type: 'pkcs8', format: 'pem' });
-const VECTOR_SEED = Buffer.from(require('nkeys.js/lib/codec.js').Codec.encodeSeed(nkeys.Prefix.User, SEED32)).toString();
+// What nkeys.js 1.1.0's own codec encodes SEED32 to (and the public key it derives).
+const VECTOR_SEED = 'SUAACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB6IC5CQ';
+const VECTOR_PUBLIC = 'UB43KVROR7TFJ6KAPCYRF2FJROTZAH4FHLTJLPWX4DRZCC5NASLGJBFE';
 
 test('fixed vector: seed and public nkey are stable and correctly prefixed', () => {
   const r = nkeyFromPrivateKey(VECTOR_PEM);
   assert.equal(r.seed, VECTOR_SEED);
+  assert.equal(r.publicNkey, VECTOR_PUBLIC);
   assert.match(r.seed, /^SU[A-Z2-7]{56}$/);
   assert.match(r.publicNkey, /^U[A-Z2-7]{55}$/);
   // The nkeys library derives the same public key from that seed.
@@ -38,6 +41,15 @@ test('fixed vector: seed and public nkey are stable and correctly prefixed', () 
   const spki = crypto.createPublicKey(VECTOR_PEM).export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64');
   assert.equal(r.publicKeyBase64, spki);
   assert.equal(publicKeyBase64ToNkey(spki), r.publicNkey);
+});
+
+test('only the public nkeys.js entry is loaded: no deep import of its internal files', () => {
+  const root = path.join(__dirname, '..');
+  const files = require('node:child_process')
+    .execFileSync('git', ['ls-files', 'lib', 'bin', 'workspace-bin', 'test', 'mission-control/src'], { cwd: root, encoding: 'utf8' })
+    .split('\n').filter((f) => /\.(c?js|mjs|tsx?)$/.test(f));
+  const deep = files.filter((f) => /["']nkeys\.js\/[^"']+["']/.test(fs.readFileSync(path.join(root, f), 'utf8')));
+  assert.deepEqual(deep, []);
 });
 
 test('signatures cross-verify between nkeys and node:crypto', () => {

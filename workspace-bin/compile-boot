@@ -19,6 +19,7 @@ Output goes to stdout by default, or to .boot/{profile}.compiled.md with --all.
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -30,6 +31,17 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 AGENTS_MD = WORKSPACE / "AGENTS.md"
 MANIFEST = WORKSPACE / ".boot" / "manifest.yaml"
 BOOT_DIR = WORKSPACE / ".boot"
+
+def obsidian_vault_path():
+    """The vaultPath obsidian-sync writes shared-lessons.md under."""
+    config = os.environ.get("OPENCLAW_OBSIDIAN_SYNC_CONFIG") or Path.home() / ".openclaw" / "config" / "obsidian-sync.json"
+    try:
+        vault_path = json.loads(Path(config).read_text()).get("vaultPath")
+        if vault_path:
+            return vault_path
+    except Exception:
+        pass
+    return "projects/arcane-vault"
 
 # ────────────────────────────────────────────────────────────
 # Markdown parser — extract sections by header
@@ -151,12 +163,13 @@ def compile_structured(section_name, section_content):
         return """boot:
   tier1: [SOUL.md, PRINCIPLES.md, AGENTS.md]
   tier2:
-    - .companion-state.md (MANDATORY — if status:active + no session → crash recovery)
+    - .daemon-state-<node>.md via ls .daemon-state-*.md (MANDATORY — if status:active|idle + no live session → crash recovery)
     - memory/active-tasks.md
     - .learnings/lessons.md
+    - memory/last-session-recap.md
     - memory/{today}.md
     - MEMORY.md (main session only)
-  commands: [bin/clawvault-local wake, check localhost:3000/api/tasks]
+  commands: [node bin/mc-health.mjs (once with --restart if unhealthy; exit 3 -> flag), bin/mc-api for any other /api route]
   lazy: [TOOLS.md, memory/task-backlog.md]"""
 
     # ── Memory ──
@@ -199,7 +212,8 @@ def compile_structured(section_name, section_content):
     # ── Task Completion ──
     if section_name == "Task Completion":
         return """task_reporting (HARD RULE — interrupt priority):
-  on_finish: "✅ [name] done. [one-liner]"
+  on_finish: "✅ [name] ready for review. [one-liner]"
+  then: status=waiting-user (never done; only the operator marks done)
   on_fail: "❌ [name] failed — [reason]."
   rules:
     - report IMMEDIATELY — never batch, never silently absorb sub-agent results
@@ -212,8 +226,7 @@ def compile_structured(section_name, section_content):
         return """task_tracking (file-driven, NOT API):
   file: memory/active-tasks.md (kanban reads every 3s)
   start: add/update entry with status=running
-  finish: update entry to status=done
-  also_update: .companion-state.md (feeds Live Session banner)
+  finish: update entry to status=waiting-user (never done; only the operator marks done)
   backlog: memory/task-backlog.md (~46K tokens, read on-demand when activating a phase)"""
 
     # ── Decision Stack ──
@@ -431,22 +444,30 @@ def main():
 
     profiles_to_compile = ["main", "lite", "heartbeat", "discord", "worker"] if args.all else [args.profile]
 
-    # Fetch entity context block from MC (non-blocking, best-effort)
+    # Fetch entity context block from MC (best-effort). MC requires its session
+    # token on every /api method; same file and same loopback-only
+    # OPENCLAW_MC_API_URL rule as lib/mc-session-token.mjs (mcApiBase).
     entity_block = ""
     try:
         import urllib.request
-        req = urllib.request.Request("http://localhost:3000/api/memory/graph?boot=true", method="GET")
+        import urllib.parse
+        mc_api = urllib.parse.urlsplit(os.environ.get("OPENCLAW_MC_API_URL") or "http://127.0.0.1:3000")
+        if mc_api.scheme != "http" or mc_api.hostname not in ("127.0.0.1", "localhost") or mc_api.username or mc_api.password:
+            raise ValueError("OPENCLAW_MC_API_URL must be loopback HTTP without credentials")
+        req = urllib.request.Request(f"http://{mc_api.netloc}/api/memory/graph?boot=true", method="GET")
         req.add_header("Accept", "application/json")
+        token_path = Path(os.environ.get("OPENCLAW_MC_TOKEN_FILE") or Path.home() / ".openclaw" / "config" / "mc-session-token")
+        req.add_header("Authorization", "Bearer " + token_path.read_text().strip())
         with urllib.request.urlopen(req, timeout=3) as resp:
-            import json
             data = json.loads(resp.read().decode())
             entity_block = data.get("block", "")
-    except Exception:
-        pass  # MC not running or graph empty — skip silently
+    except Exception as e:
+        print(f"compile-boot: entity block skipped ({e})", file=sys.stderr)
 
     # Load shared lessons from vault (cross-soul propagation, non-blocking)
     shared_lessons_block = ""
-    vault_lessons = WORKSPACE / "projects" / "arcane-vault" / "00-meta" / "shared-lessons.md"
+    # lstrip: obsidian-sync's path.join(WORKSPACE, vaultPath) keeps even an absolute vaultPath inside the workspace.
+    vault_lessons = WORKSPACE / obsidian_vault_path().lstrip("/") / "00-meta" / "shared-lessons.md"
     if vault_lessons.exists():
         try:
             raw = vault_lessons.read_text()
@@ -462,6 +483,8 @@ def main():
         except Exception:
             pass
 
+    budget = manifest.get("model_overrides", {}).get(args.model, {}).get("max_boot_tokens") if args.model else None
+
     for profile in profiles_to_compile:
         output = compile_profile(profile, manifest, flat_sections, hier_sections, model=args.model)
 
@@ -473,21 +496,23 @@ def main():
         if shared_lessons_block and profile in ("main", "lite"):
             output += "\n\n" + shared_lessons_block
 
+        # Token estimate (rough: words * 1.3)
+        words = len(output.split())
+        tokens = int(words * 1.3)
+
         if args.all:
             out_path = BOOT_DIR / f"{profile}.compiled.md"
             with open(out_path, "w") as f:
                 f.write(output)
-            # Token estimate (rough: words * 1.3)
-            words = len(output.split())
-            tokens = int(words * 1.3)
             print(f"  {profile:12s} → {out_path.name} ({words} words, ~{tokens} tokens)")
         else:
             print(output)
 
             if args.stats:
-                words = len(output.split())
-                tokens = int(words * 1.3)
                 print(f"\n# Stats: {words} words, ~{tokens} tokens", file=sys.stderr)
+
+        if budget and tokens > budget:
+            print(f"compile-boot: WARNING {profile} boot is ~{tokens} tokens, over the {args.model} max_boot_tokens of {budget}", file=sys.stderr)
 
 
 if __name__ == "__main__":

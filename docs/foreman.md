@@ -98,8 +98,8 @@ protects it.
 | **ESCALATE** | same termination, then the loop stops spending attempts and releases the task for human triage with the reason | release instead of verifying | advisory — a passed metric wins |
 | **anything else** | advisory: the agent's loop owns starting, retrying and completing | the verifier gate below runs regardless | — (the metric is the verification) |
 
-The worker leads its own process group (`detached: true` in `runLLM`) so a stop ends the CLI and
-everything it spawned. The retry prompt already renders every attempt's approach and result, so
+The worker leads its own process group (`detached: true` in `runCli`, `lib/llm-run.js`, which
+`runLLM` reaches through `runProvider`) so a stop ends the CLI and everything it spawned. The retry prompt already renders every attempt's approach and result, so
 the next attempt reads exactly why the last one was stopped and what to change.
 
 ### The no-metric completion gate
@@ -146,7 +146,7 @@ assesses again.
 
 | Mode | Set by | What happens |
 |---|---|---|
-| **shadow** | default (`MESH_FOREMAN_ENFORCE` unset, empty, or anything but `1`) | Every assessment and decision is recorded; nothing is enforced. |
+| **shadow** | default (`MESH_FOREMAN_ENFORCE` unset, empty, or anything but `1`) | Every assessment and decision is recorded; nothing is enforced. A STOP or ESCALATE is recorded once per worker, as enforce would act once; later cycles for that worker record CONTINUE "worker already stopped in shadow" and count toward no ceiling. |
 | **enforce** | `MESH_FOREMAN_ENFORCE=1` | Decisions act as described above, and are recorded. |
 | off | `MESH_FOREMAN=0` | No supervisor is created. |
 
@@ -185,10 +185,16 @@ a one-line summary:
 | `MESH_FOREMAN_ASSESS_TIMEOUT_MS` | `8000` | analysis-lane ceiling before passthrough |
 | `MESH_FOREMAN_MODEL` | `LLM_MODEL` | assessor model (Ollama tag) |
 | `MESH_FOREMAN_DIR` | `~/.openclaw/foreman` | timeline directory |
+| `MESH_FOREMAN_RETENTION_DAYS` | `30` | agent startup deletes timelines whose last write is older than this; `0` keeps them all (copy out step 1.2 evidence before it ages out). Read from the agent's environment, else `~/.openclaw/openclaw.env`; a value that is not a number (a trailing `# comment` counts) prunes nothing and logs a warning |
 | `MESH_FOREMAN_MAX_INTERVENTIONS` | `20` | ceiling on actions other than CONTINUE taken while a worker runs |
 | `MESH_FOREMAN_MAX_RETRIES` | `MESH_MAX_ATTEMPTS − 1` | retries after a stop (the agent's own attempt loop is the real budget) |
 | `MESH_FOREMAN_MAX_WORKERS` | `2 × MESH_MAX_ATTEMPTS + 2` | worker records per task: one coding worker plus one verification record per attempt |
 | `MESH_FOREMAN_GRACE_MS` | `30000` | post-steer grace |
+
+A service-run agent sees only what its unit passes: `MESH_FOREMAN_ENFORCE` (rendered at install) and
+`LLM_MODEL`. `MESH_FOREMAN_RETENTION_DAYS` is also read from `~/.openclaw/openclaw.env` at each
+start, so it needs no re-render. Every other variable above reaches a service-run agent only when
+added to its unit's environment.
 
 Thresholds and observation bounds are fields of `DEFAULT_POLICY` / `DEFAULT_LIMITS` for embedders.
 
@@ -199,7 +205,7 @@ Thresholds and observation bounds are fields of `DEFAULT_POLICY` / `DEFAULT_LIMI
 - A provider that takes a prompt but cannot inspect the repository (a bare local model) passes the
   gate's mechanics while judging only the prompt; the gate cannot tell.
 - `needs_human` ≥ 0.80 escalates on a single sample; hysteresis covers STOP only.
-- `claude -p --output-format text` prints nothing until it finishes, so the assessor sees a
+- `claude -p --output-format json` prints nothing until it finishes, so the assessor sees a
   silent worker; the tree snapshot is the progress signal for it.
 - A STOP signals the worker's process group only while its leader is alive; once the CLI has
   exited, whatever it left running in the group keeps working in the worktree.

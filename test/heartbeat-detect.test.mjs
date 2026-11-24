@@ -22,6 +22,8 @@ import { join } from 'node:path';
 // our test fixtures, not the user's real ~/.openclaw config.
 const TMP_ROOT = mkdtempSync(join(tmpdir(), 'heartbeat-test-'));
 process.env.HOME = TMP_ROOT;
+// The registry below sits in the default node root; an inherited OPENCLAW_HOME (CI exports one) would win over it.
+delete process.env.OPENCLAW_HOME;
 mkdirSync(join(TMP_ROOT, '.openclaw/config'), { recursive: true });
 const TEST_GATEWAY_DIR = join(TMP_ROOT, 'gateway-sessions');
 mkdirSync(TEST_GATEWAY_DIR, { recursive: true });
@@ -211,6 +213,26 @@ describe('detectHeartbeat — robustness', () => {
     const result = detectHeartbeat({ workspace: WORKSPACE });
     assert.equal(result.isActive, true);
     assert.equal(result.sessionId, 'new');
+  });
+});
+
+describe('detectHeartbeat — bounded read', () => {
+  it('reads only the file head: a trigger past the first 64KB is not seen', () => {
+    writeSession('long-main.jsonl', [
+      { message: 'x'.repeat(70_000) },
+      { message: 'Read HEARTBEAT.md' },
+    ]);
+    const result = detectHeartbeat({ workspace: WORKSPACE });
+    assert.equal(result.sessionType, 'main');
+    assert.equal(result.isActive, false);
+  });
+
+  it('still finds a trigger at the head of a long session', () => {
+    writeSession('long-hb.jsonl', [
+      { message: 'Read HEARTBEAT.md' },
+      { message: 'x'.repeat(200_000) },
+    ]);
+    assert.equal(detectHeartbeat({ workspace: WORKSPACE }).isActive, true);
   });
 });
 

@@ -3,8 +3,7 @@
 /**
  * mesh-registry.test.js — Unit tests for lib/mesh-registry.js
  *
- * Tests MeshRegistry: tool registration, KV storage, heartbeat, remote calls,
- * listing, and shutdown.
+ * Tests MeshRegistry: tool registration, KV storage, heartbeat and shutdown.
  *
  * Run: node --test test/mesh-registry.test.js
  */
@@ -73,9 +72,6 @@ const mockNats = {
       mockSubs.push(sub);
       return sub;
     },
-    request: async (subject, data, opts) => {
-      return { data: encoder.encode(JSON.stringify({ data: 'mock-response' })) };
-    },
   }),
 };
 
@@ -96,6 +92,7 @@ require.cache[natsResolvePath] = {
     NATS_URL: 'nats://test:4222',
     NATS_TOKEN: null,
     natsConnectOpts: (extra) => ({ servers: 'nats://test:4222', ...extra }),
+    resolveEnvKey: () => null,
   },
 };
 
@@ -116,6 +113,18 @@ describe('MeshRegistry', () => {
 
   it('initializes with node ID', () => {
     assert.equal(registry.nodeId, 'test-node');
+  });
+
+  it('defaults the node id to resolveNodeId()', async () => {
+    const prev = process.env.OPENCLAW_NODE_ID;
+    process.env.OPENCLAW_NODE_ID = 'env-node';
+    try {
+      const r = new MeshRegistry(await mockNats.connect());
+      assert.equal(r.nodeId, 'env-node');
+    } finally {
+      if (prev === undefined) delete process.env.OPENCLAW_NODE_ID;
+      else process.env.OPENCLAW_NODE_ID = prev;
+    }
   });
 
   it('registers a tool manifest to KV', async () => {
@@ -149,15 +158,6 @@ describe('MeshRegistry', () => {
     assert.equal(mockSubs[0].subject, 'mesh.tool.test-node.my-tool.doThing');
   });
 
-  it('listTools returns all registered manifests', async () => {
-    await registry.register({ name: 'tool-a', methods: [] });
-    await registry.register({ name: 'tool-b', methods: [] });
-    const tools = await registry.listTools();
-    assert.equal(tools.length, 2);
-    const names = tools.map(t => t.name).sort();
-    assert.deepEqual(names, ['tool-a', 'tool-b']);
-  });
-
   it('shutdown cleans up KV entries', async () => {
     await registry.register({ name: 'cleanup-tool', methods: [] });
     assert.ok(await mockKV.get('test-node.cleanup-tool'));
@@ -176,26 +176,25 @@ describe('MeshRegistry', () => {
     assert.ok(mockSubs[0].unsubscribed);
   });
 
-  it('call sends NATS request and returns data', async () => {
-    const result = await registry.call('remote-node', 'tool', 'method', { foo: 1 });
-    assert.equal(result, 'mock-response');
-  });
-
   it('stores manifests in internal map', async () => {
     await registry.register({ name: 'tracked', methods: [] });
     assert.ok(registry.manifests.has('tracked'));
   });
 
-  it('heartbeat refreshes KV entries', async () => {
+  it('heartbeat refreshes KV entries', async (t) => {
     await registry.register({ name: 'hb-tool', methods: [] });
+    const read = async () => JSON.parse(decoder.decode((await mockKV.get('test-node.hb-tool')).value));
+    assert.equal((await read()).last_heartbeat, undefined);
 
-    // Start heartbeat (uses setInterval)
+    t.mock.timers.enable({ apis: ['setInterval'] });
     registry.startHeartbeat();
+    t.mock.timers.tick(60_000);
+    await new Promise(setImmediate);
 
-    // Verify timer was created
-    assert.ok(registry.heartbeatTimer);
+    const entry = await read();
+    assert.equal(entry.name, 'hb-tool');
+    assert.ok(!Number.isNaN(Date.parse(entry.last_heartbeat)));
 
-    // Cleanup
     await registry.shutdown();
   });
 });

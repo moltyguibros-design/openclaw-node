@@ -10,6 +10,9 @@ export const MemoryInjectedSchema = EventEnvelopeSchema.extend({
     // Preview of the actual memory block text injected into the prompt.
     block_preview: z.string().optional(),
     duration_ms: z.number().int().nonnegative(),
+    // The inject request's client tag and session, when given.
+    frontend: z.string().max(100).optional(),
+    session_id: z.string().max(200).optional(),
   }),
 });
 

@@ -12,10 +12,11 @@
  *
  * What it does:
  *   - Cancels any tasks claimed/running by the node (releases back to queue)
- *   - Publishes mesh.health.<nodeId> with status=removed
  *   - Removes node from MESH_NODES KV bucket (if it exists)
- *   - (Local mode only) Stops and removes the launchd/systemd service
+ *   - (Local mode only) Stops and removes the mesh-agent, deploy-listener and
+ *     health-publisher launchd/systemd services
  *   - (Local mode only) Optionally removes ~/.openclaw/ and ~/openclaw/
+ *   - Prints the trust-peer command the lead runs to revoke the node's bus identity
  *
  * Usage:
  *   node bin/mesh-node-remove.js                    # remove local node
@@ -30,6 +31,7 @@ const os = require('os');
 const path = require('path');
 const readline = require('readline');
 const { createTracer } = require('../lib/tracer');
+const { resolveNodeName, loadNodeAliases } = require('../lib/node-aliases');
 const tracer = createTracer('mesh-node-remove');
 
 // ── CLI args ──────────────────────────────────────────
@@ -43,9 +45,10 @@ function getArg(flag, defaultVal) {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : defaultVal;
 }
 
-const TARGET_NODE = getArg('--node', null);
-const LOCAL_MODE = !TARGET_NODE;
-const NODE_ID = TARGET_NODE || os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const TARGET_RAW = getArg('--node', null);
+const LOCAL_MODE = !TARGET_RAW;
+const LOCAL_ID = require('../lib/node-id').resolveNodeId();
+const NODE_ID = TARGET_RAW ? resolveNodeName(TARGET_RAW, { localId: LOCAL_ID, aliases: loadNodeAliases() }) : LOCAL_ID;
 
 // ── Logging ───────────────────────────────────────────
 
@@ -98,39 +101,19 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
     return;
   }
 
-  const sc = nats.StringCodec();
-
   try {
     const nc = await nats.connect(connectOpts);
     ok(`NATS connected: ${nc.getServer()}`);
 
     const js = nc.jetstream();
+    const { openMeshKv } = require('../lib/mesh-kv');
 
     // 1. Release/cancel tasks owned by this node
     try {
-      const kv = await js.views.kv('MESH_TASKS');
-      const keys = await kv.keys();
-      const allKeys = [];
-      for await (const k of keys) allKeys.push(k);
-
-      let released = 0;
-      for (const k of allKeys) {
-        const entry = await kv.get(k);
-        if (!entry || !entry.value) continue;
-        const task = JSON.parse(new TextDecoder().decode(entry.value));
-
-        if (task.owner === nodeId && (task.status === 'claimed' || task.status === 'running')) {
-          task.status = 'queued';
-          task.owner = null;
-          task.claimed_at = null;
-          task.started_at = null;
-          task.budget_deadline = null;
-          task.last_activity = null;
-          task.updated_at = new Date().toISOString();
-          await kv.put(k, JSON.stringify(task));
-          released++;
-        }
-      }
+      // Required only once nats is known to load: lib/mesh-tasks requires it.
+      const { TaskStore } = require('../lib/mesh-tasks');
+      const kv = await openMeshKv(js, 'MESH_TASKS', {}, { waitMs: 0 });
+      const released = (await new TaskStore(kv).requeueOwnedBy(nodeId)).length;
 
       if (released > 0) {
         ok(`Released ${released} task(s) back to queue`);
@@ -143,22 +126,18 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
 
     // 2. Clean node registry (if MESH_NODES bucket exists)
     try {
-      const nodeKv = await js.views.kv('MESH_NODES');
-      await nodeKv.delete(nodeId);
-      ok(`Removed ${nodeId} from MESH_NODES registry`);
+      const nodeKv = await openMeshKv(js, 'MESH_NODES', {}, { waitMs: 0 });
+      const existing = await nodeKv.get(nodeId);
+      if (existing?.value?.length) {
+        await nodeKv.delete(nodeId);
+        ok(`Removed ${nodeId} from MESH_NODES registry`);
+      } else {
+        warn(`No MESH_NODES entry for ${nodeId} — check the node id`);
+      }
     } catch (err) {
       console.warn(`[mesh-node-remove] clean MESH_NODES entry: ${err.message}`);
       ok('No MESH_NODES registry entry to remove');
     }
-
-    // 3. Publish removal announcement
-    nc.publish(`mesh.health.${nodeId}`, sc.encode(JSON.stringify({
-      node_id: nodeId,
-      status: 'removed',
-      event: 'node_removed',
-      timestamp: new Date().toISOString(),
-    })));
-    ok('Removal announcement published');
 
     await nc.drain();
   } catch (e) {
@@ -169,36 +148,44 @@ const cleanNatsState = tracer.wrapAsync('cleanNatsState', async function cleanNa
 
 // ── Local Service Removal ────────────────────────────
 
+// Every unit node-init installs, plus the health publisher a full install adds:
+// a unit left behind keeps the node on the bus (and crash-loops after --purge).
+const LAUNCHD_LABELS = ['ai.openclaw.mesh-agent', 'ai.openclaw.mesh-deploy-listener', 'ai.openclaw.mesh-health-publisher'];
+const SYSTEMD_UNITS = ['openclaw-mesh-agent', 'openclaw-mesh-deploy-listener', 'openclaw-mesh-health-publisher'];
+
 const removeLocalService = tracer.wrap('removeLocalService', function removeLocalService() {
   const platform = os.platform();
 
   if (platform === 'darwin') {
-    // launchd
-    const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'ai.openclaw.mesh-agent.plist');
-    if (fs.existsSync(plistPath)) {
+    for (const label of LAUNCHD_LABELS) {
+      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+      if (!fs.existsSync(plistPath)) continue;
       try {
         execSync(`launchctl unload "${plistPath}" 2>/dev/null || true`, { stdio: 'pipe' });
         fs.unlinkSync(plistPath);
-        ok('Launchd service stopped and removed');
+        ok(`${label} stopped and removed`);
       } catch (e) {
-        warn(`Service removal warning: ${e.message}`);
+        warn(`Service removal warning (${label}): ${e.message}`);
       }
-    } else {
-      ok('No launchd service to remove');
     }
   } else if (platform === 'linux') {
-    // systemd
-    try {
-      execSync('systemctl --user stop openclaw-mesh-agent 2>/dev/null || true', { stdio: 'pipe' });
-      execSync('systemctl --user disable openclaw-mesh-agent 2>/dev/null || true', { stdio: 'pipe' });
-      const servicePath = path.join(os.homedir(), '.config', 'systemd', 'user', 'openclaw-mesh-agent.service');
-      if (fs.existsSync(servicePath)) {
-        fs.unlinkSync(servicePath);
-        execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
+    const unitDir = path.join(os.homedir(), '.config', 'systemd', 'user');
+    for (const unit of SYSTEMD_UNITS) {
+      try {
+        execSync(`systemctl --user disable --now ${unit} 2>/dev/null || true`, { stdio: 'pipe' });
+        const servicePath = path.join(unitDir, `${unit}.service`);
+        if (fs.existsSync(servicePath)) {
+          fs.unlinkSync(servicePath);
+          ok(`${unit} stopped, disabled, and removed`);
+        }
+      } catch (e) {
+        warn(`Service removal warning (${unit}): ${e.message}`);
       }
-      ok('Systemd service stopped, disabled, and removed');
+    }
+    try {
+      execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     } catch (e) {
-      warn(`Service removal warning: ${e.message}`);
+      warn(`daemon-reload: ${e.message}`);
     }
   }
 }, { tier: 2, category: 'lifecycle' });
@@ -230,7 +217,7 @@ async function main() {
   console.log(`${BOLD}${RED}║   OpenClaw Mesh — Node Removal       ║${RESET}`);
   console.log(`${BOLD}${RED}╚══════════════════════════════════════╝${RESET}\n`);
 
-  log(`Target node: ${BOLD}${NODE_ID}${RESET}`);
+  log(`Target node: ${BOLD}${NODE_ID}${RESET}${TARGET_RAW && TARGET_RAW !== NODE_ID ? ` (from alias ${TARGET_RAW})` : ''}`);
   log(`Mode: ${LOCAL_MODE ? 'LOCAL (this machine)' : 'REMOTE (KV cleanup only)'}`);
   if (PURGE) log(`${RED}PURGE MODE — will delete all local files${RESET}`);
   console.log('');
@@ -245,15 +232,16 @@ async function main() {
     return;
   }
 
-  // 1. Clean NATS state (both modes)
-  log('Cleaning mesh state...');
-  await cleanNatsState(NODE_ID);
-
-  // 2. Stop local service (local mode only)
+  // 1. Stop local service first (local mode only): the running deploy listener
+  //    re-registers in MESH_NODES, which has no TTL.
   if (LOCAL_MODE) {
     log('Removing local service...');
     removeLocalService();
   }
+
+  // 2. Clean NATS state (both modes)
+  log('Cleaning mesh state...');
+  await cleanNatsState(NODE_ID);
 
   // 3. Purge files (local mode + --purge only)
   if (LOCAL_MODE && PURGE) {
@@ -267,6 +255,9 @@ async function main() {
   console.log(`\n${BOLD}${GREEN}═══════════════════════════════════════${RESET}`);
   console.log(`${BOLD}${GREEN}  Node "${NODE_ID}" removed from mesh.${RESET}`);
   console.log(`${BOLD}${GREEN}═══════════════════════════════════════${RESET}\n`);
+
+  console.log('Its identity stays trusted on the bus until the lead runs:');
+  console.log(`  node bin/openclaw-trust-peer.mjs --remove ${NODE_ID} --sync-nats\n`);
 
   if (!LOCAL_MODE) {
     console.log('Note: This only cleaned mesh state. If the node is still');

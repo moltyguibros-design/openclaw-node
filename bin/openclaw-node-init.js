@@ -139,12 +139,12 @@ function updateEnvFile(sets, merges = {}) {
   const final = {};
   const setKey = (key, value) => {
     final[key] = value;
-    const re = new RegExp(`^\\s*${key}\\s*=.*$`, 'm');
+    const re = new RegExp(`^[ \\t]*${key}[ \\t]*=.*$`, 'm');
     content = re.test(content) ? content.replace(re, `${key}=${value}`) : `${content.replace(/\n?$/, '\n')}${key}=${value}\n`;
   };
   for (const [key, value] of Object.entries(sets)) setKey(key, value);
   for (const [key, values] of Object.entries(merges)) {
-    const m = content.match(new RegExp(`^\\s*${key}\\s*=\\s*(.*)$`, 'm'));
+    const m = content.match(new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*([^\\r\\n]*)`, 'm'));
     const current = (m ? m[1].trim().replace(/^["']|["']$/g, '') : '').split(',').map(x => x.trim()).filter(Boolean);
     for (const value of [].concat(values)) if (!current.includes(value)) current.push(value);
     setKey(key, current.join(','));
@@ -175,7 +175,13 @@ function provisionTrust(join, nodeId) {
     ok(`Node identity: ${self.publicKeyBase64}`);
   }
 
-  const sets = {};
+  // A join builds a worker (agent + deploy listener only). Saving the role is what lets a
+  // hand-run deploy pass requireNodeRole; a role this node already saved is kept.
+  const role = process.env.OPENCLAW_NODE_ROLE
+    || require('../lib/nats-resolve').readEnvFileKey(path.join(os.homedir(), '.openclaw', 'openclaw.env'), 'OPENCLAW_NODE_ROLE')
+    || 'worker';
+  const sets = { OPENCLAW_NODE_ROLE: role };
+  process.env.OPENCLAW_NODE_ROLE = role;
   if (join.natsAuth) {
     sets.OPENCLAW_NATS_AUTH = join.natsAuth;
     process.env.OPENCLAW_NATS_AUTH = join.natsAuth;
@@ -226,15 +232,10 @@ async function discoverNats(tokenNats) {
   }
 
   // Check existing config first
-  const envPath = path.join(os.homedir(), '.openclaw', 'openclaw.env');
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf8');
-    const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-    if (match) {
-      const existing = match[1].trim();
-      ok(`Found existing NATS config: ${existing}`);
-      return existing;
-    }
+  const existing = require('../lib/nats-resolve').readEnvFileKey(path.join(os.homedir(), '.openclaw', 'openclaw.env'), 'OPENCLAW_NATS');
+  if (existing) {
+    ok(`Found existing NATS config: ${existing}`);
+    return existing;
   }
 
   // Scan Tailscale peers
@@ -318,8 +319,8 @@ function checkCommand(cmd) {
 function getNodeVersion() {
   try {
     const v = execSync('node --version', { encoding: 'utf8' }).trim();
-    const major = parseInt(v.replace('v', '').split('.')[0]);
-    return { version: v, major };
+    const [major, minor] = v.replace('v', '').split('.').map(Number);
+    return { version: v, major, minor };
   } catch {
     return null;
   }
@@ -330,10 +331,11 @@ function checkDependencies() {
   const missing = [];
 
   const nodeInfo = getNodeVersion();
-  if (nodeInfo && nodeInfo.major >= 18) {
+  // 22.12 is the first 22.x that loads lib/node-identity.mjs through require() unflagged.
+  if (nodeInfo && (nodeInfo.major > 22 || (nodeInfo.major === 22 && nodeInfo.minor >= 12))) {
     deps.push({ name: 'Node.js', status: 'ok', detail: nodeInfo.version });
   } else if (nodeInfo) {
-    deps.push({ name: 'Node.js', status: 'upgrade', detail: `${nodeInfo.version} (need 18+)` });
+    deps.push({ name: 'Node.js', status: 'upgrade', detail: `${nodeInfo.version} (need 22.12+)` });
     missing.push('node');
   } else {
     deps.push({ name: 'Node.js', status: 'missing', detail: '' });
@@ -511,16 +513,33 @@ function configureNats(natsUrl) {
 
 // ── Mesh Code Installation ───────────────────────────
 
-function installMeshCode(repoUrl) {
-  const meshDir = path.join(os.homedir(), 'openclaw');
+function outputTail(res) {
+  return (res.stderr || res.error?.message || '').trim().split('\n').slice(-5).join(' | ');
+}
+
+function installMeshCode(repoUrl, { meshDir = path.join(os.homedir(), 'openclaw'), run = spawnSync } = {}) {
+  const inMesh = { cwd: meshDir, stdio: 'pipe', encoding: 'utf8' };
 
   if (fs.existsSync(path.join(meshDir, 'package.json'))) {
     ok(`Mesh code exists at ${meshDir}`);
     if (!DRY_RUN) {
-      log('  Pulling latest + installing deps...');
-      spawnSync('git', ['pull', '--ff-only'], { cwd: meshDir, stdio: 'pipe' });
-      spawnSync('npm', ['install', '--production'], { cwd: meshDir, stdio: 'pipe' });
-      ok('Updated');
+      // The deploy listener checks out each signed sha detached. Moving that
+      // tree here would update code outside the signed path.
+      const onBranch = run('git', ['symbolic-ref', '-q', 'HEAD'], inMesh).status === 0;
+      let pulled = false;
+      if (onBranch) {
+        log('  Pulling latest...');
+        const pull = run('git', ['pull', '--ff-only'], inMesh);
+        pulled = pull.status === 0;
+        if (!pulled) warn(`git pull failed — code not updated: ${outputTail(pull)}`);
+      } else {
+        const head = (run('git', ['rev-parse', '--short', 'HEAD'], inMesh).stdout || '').trim();
+        ok(`Code left at ${head || 'its deployed commit'}: signed deploys manage this checkout, and updates arrive only through them`);
+      }
+      log('  Installing deps...');
+      const deps = run('npm', ['install', '--production'], inMesh);
+      if (deps.status !== 0) warn(`npm install failed: ${outputTail(deps)}`);
+      else ok(pulled ? 'Updated' : 'Dependencies installed');
     }
     return meshDir;
   }
@@ -533,12 +552,16 @@ function installMeshCode(repoUrl) {
   log(`Cloning mesh code from ${repoUrl}...`);
   try {
     execSync(`git clone "${repoUrl}" "${meshDir}"`, { stdio: 'inherit', timeout: 60000 });
-    spawnSync('npm', ['install', '--production'], { cwd: meshDir, stdio: 'pipe' });
-    ok('Mesh code installed');
   } catch (e) {
     fail(`Failed to clone mesh code: ${e.message}`);
     process.exit(1);
   }
+  const deps = run('npm', ['install', '--production'], inMesh);
+  if (deps.status !== 0) {
+    fail(`npm install failed in ${meshDir}: ${outputTail(deps)}`);
+    process.exit(1);
+  }
+  ok('Mesh code installed');
 
   return meshDir;
 }
@@ -562,11 +585,13 @@ function installService(osInfo, meshDir, config) {
 // services/{launchd,systemd} templates install.sh renders, with the same
 // ${VAR} substitution, and retires the legacy second listener.
 const SERVICE_TEMPLATE_VARS = [
-  'HOME', 'NODE_BIN', 'NPM_BIN', 'NATS_SERVER_BIN', 'OPENCLAW_WORKSPACE', 'OPENCLAW_REPO_DIR',
-  'OPENCLAW_NATS', 'OPENCLAW_NATS_TOKEN', 'OPENCLAW_NODE_ID', 'OPENCLAW_NODE_ROLE',
+  'HOME', 'NODE_BIN', 'NODE_BIN_DIR', 'NPM_BIN', 'NATS_SERVER_BIN', 'OPENCLAW_ROOT', 'OPENCLAW_WORKSPACE', 'OPENCLAW_REPO_DIR',
+  'OPENCLAW_NATS', 'OPENCLAW_NODE_ID', 'OPENCLAW_NODE_ROLE',
   'OPENCLAW_DEPLOY_TRUSTED_KEYS', 'MESH_LLM_PROVIDER', 'LLM_MODEL', 'LLM_BASE_URL',
-  'MESH_FOREMAN_ENFORCE',
+  'MESH_FOREMAN_ENFORCE', 'OPENCLAW_TIMEZONE',
 ];
+
+const serviceWorkspace = () => process.env.OPENCLAW_WORKSPACE || path.join(os.homedir(), '.openclaw', 'workspace');
 
 function serviceTemplateVars({ meshDir, nodeId, config }) {
   const home = os.homedir();
@@ -576,12 +601,14 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
   return {
     HOME: home,
     NODE_BIN: process.execPath,
+    NODE_BIN_DIR: path.dirname(process.execPath),
     NPM_BIN: env.NPM_BIN || path.join(path.dirname(process.execPath), 'npm'),
     NATS_SERVER_BIN: env.NATS_SERVER_BIN || '/usr/local/bin/nats-server',
-    OPENCLAW_WORKSPACE: env.OPENCLAW_WORKSPACE || path.join(home, '.openclaw', 'workspace'),
+    // main() refuses any other root; an accepted alias still renders the spelling the services read.
+    OPENCLAW_ROOT: path.join(home, '.openclaw'),
+    OPENCLAW_WORKSPACE: serviceWorkspace(),
     OPENCLAW_REPO_DIR: meshDir,
     OPENCLAW_NATS: config.nats,
-    OPENCLAW_NATS_TOKEN: env.OPENCLAW_NATS_TOKEN || '',
     OPENCLAW_NODE_ID: nodeId,
     OPENCLAW_NODE_ROLE: env.OPENCLAW_NODE_ROLE || 'worker',
     OPENCLAW_DEPLOY_TRUSTED_KEYS: env.OPENCLAW_DEPLOY_TRUSTED_KEYS || '',
@@ -593,33 +620,39 @@ function serviceTemplateVars({ meshDir, nodeId, config }) {
     // alone, where an operator's MESH_FOREMAN_ENFORCE=1 in that file rendered as shadow. The
     // process env still wins.
     MESH_FOREMAN_ENFORCE: require('../lib/nats-resolve').resolveEnvKey('MESH_FOREMAN_ENFORCE') || '',
+    OPENCLAW_TIMEZONE: require('../lib/nats-resolve').resolveEnvKey('OPENCLAW_TIMEZONE') || 'America/Montreal',
   };
 }
 
-/**
- * Substitute ${VAR} placeholders. Every known variable is replaced (an
- * empty value is a legitimate render); any OTHER placeholder left in the
- * output is a template/renderer drift and fails loudly — the install.sh
- * path has the same check_rendered guard.
- */
-function renderServiceTemplate(templateText, vars) {
-  let out = templateText;
-  for (const name of SERVICE_TEMPLATE_VARS) {
-    out = out.split('${' + name + '}').join(vars[name] ?? '');
-  }
-  const leftover = out.match(/\$\{[A-Z_][A-Z0-9_]*\}/g);
-  if (leftover) throw new Error(`unrendered template variable(s): ${[...new Set(leftover)].join(', ')}`);
-  return out;
+function renderServiceTemplate(templateText, vars, format) {
+  return require('../lib/render-unit').renderUnit(templateText, vars, SERVICE_TEMPLATE_VARS, format);
 }
 
 function renderServiceFile(meshDir, relTemplate, vars) {
   const templatePath = path.join(meshDir, 'services', relTemplate);
   const text = fs.readFileSync(templatePath, 'utf8');
-  return renderServiceTemplate(text, vars);
+  return renderServiceTemplate(text, vars, relTemplate.endsWith('.plist') ? 'plist' : 'systemd');
 }
 
 const LAUNCHD_SERVICES = ['ai.openclaw.mesh-agent.plist', 'ai.openclaw.mesh-deploy-listener.plist'];
 const SYSTEMD_SERVICES = ['openclaw-mesh-agent.service', 'openclaw-mesh-deploy-listener.service'];
+// The agent is on demand (service-manifest autostart:false; its plist has
+// RunAtLoad false): node-init renders and loads it but never starts it or
+// enables it at boot. The deploy listener is what must be running after a join.
+const ON_DEMAND_UNIT = 'openclaw-mesh-agent';
+
+function agentStartCommand(osInfo) {
+  return osInfo.serviceType === 'launchd'
+    ? 'launchctl kickstart gui/$(id -u)/ai.openclaw.mesh-agent'
+    : `systemctl --user start ${ON_DEMAND_UNIT}`;
+}
+
+// The files a rendered unit appends its stdout/stderr to; the journal holds none of it.
+function serviceLogPaths(osInfo, unit) {
+  const name = osInfo.serviceType === 'launchd' ? unit.replace(/^openclaw-/, '') : unit;
+  const base = path.join(serviceWorkspace(), '.tmp', name);
+  return { out: `${base}.log`, err: `${base}.err` };
+}
 
 function installLaunchdService(meshDir, vars) {
   const plistDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
@@ -645,6 +678,13 @@ function installLaunchdService(meshDir, vars) {
   for (const r of rendered) {
     fs.writeFileSync(r.dest, r.text);
     ok(`Service rendered: ${r.dest}`);
+  }
+  // An invalid plist must not reach launchctl: the unload below would take the running daemon down.
+  try {
+    for (const r of rendered) execSync(`plutil -lint -s "${r.dest}"`, { stdio: 'pipe' });
+  } catch (e) {
+    fail(`Rendered plist rejected by plutil, services not reloaded: ${String(e.stdout || e.message).trim()}`);
+    return;
   }
   try {
     for (const r of rendered) {
@@ -686,13 +726,17 @@ function installSystemdService(meshDir, vars) {
   try {
     execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
     for (const r of rendered) {
+      if (r.unit === ON_DEMAND_UNIT) {
+        ok(`${r.unit} installed (on demand: not enabled or started)`);
+        continue;
+      }
       execSync(`systemctl --user enable ${r.unit}`, { stdio: 'pipe' });
       execSync(`systemctl --user restart ${r.unit}`, { stdio: 'pipe' });
       ok(`${r.unit} enabled and started`);
     }
   } catch (e) {
     warn(`Service start warning: ${e.message}`);
-    warn('Try manually: systemctl --user start openclaw-mesh-agent');
+    warn('Try manually: systemctl --user restart openclaw-mesh-deploy-listener');
   }
 
   const username = os.userInfo().username;
@@ -712,48 +756,49 @@ function installSystemdService(meshDir, vars) {
 
 // ── Service Health Polling ───────────────────────────
 
-function verifyServiceRunning(osInfo) {
+function verifyServiceRunning(osInfo, { settleMs = 8000 } = {}) {
   if (DRY_RUN) {
     warn('[DRY RUN] Would verify service is running');
     return true;
   }
 
-  log('Waiting 8s for service to stabilize...');
+  log(`Waiting ${settleMs / 1000}s for service to stabilize...`);
   const start = Date.now();
-  while (Date.now() - start < 8000) {
+  while (Date.now() - start < settleMs) {
     spawnSync('sleep', ['1']);
   }
 
   if (osInfo.serviceType === 'launchd') {
     try {
-      const out = execSync('launchctl list | grep mesh-agent', { encoding: 'utf8', stdio: 'pipe' }).trim();
+      const out = execSync('launchctl list | grep ai.openclaw.mesh-deploy-listener', { encoding: 'utf8', stdio: 'pipe' }).trim();
       if (out) {
         const parts = out.split(/\s+/);
         const pid = parts[0];
         const exitStatus = parts[1];
         if (pid && pid !== '-') {
-          ok(`Service running (PID ${pid})`);
+          ok(`Deploy listener running (PID ${pid})`);
           return true;
         } else {
-          fail(`Service not running (exit status: ${exitStatus})`);
-          fail('Check logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.err');
+          fail(`Deploy listener not running (exit status: ${exitStatus})`);
+          fail('Check logs: tail -f ~/.openclaw/workspace/.tmp/mesh-deploy-listener.err');
           return false;
         }
       }
     } catch {
-      fail('Service not found in launchctl');
+      fail('Deploy listener not found in launchctl');
       return false;
     }
   } else {
     try {
-      const result = spawnSync('systemctl', ['--user', 'is-active', 'openclaw-mesh-agent'], { encoding: 'utf8', stdio: 'pipe' });
+      const result = spawnSync('systemctl', ['--user', 'is-active', 'openclaw-mesh-deploy-listener'], { encoding: 'utf8', stdio: 'pipe' });
       const status = (result.stdout || '').trim();
       if (status === 'active') {
-        ok('Service running (systemd active)');
+        ok('Deploy listener running (systemd active)');
         return true;
       } else {
-        fail(`Service not running (systemd status: ${status})`);
-        fail('Check logs: journalctl --user -u openclaw-mesh-agent -n 20');
+        fail(`Deploy listener not running (systemd status: ${status})`);
+        fail(`Check logs: tail -n 20 ${serviceLogPaths(osInfo, 'openclaw-mesh-deploy-listener').err}`);
+        fail('Start status: systemctl --user status openclaw-mesh-deploy-listener');
         return false;
       }
     } catch {
@@ -781,15 +826,6 @@ async function verifyNatsHealth(natsUrl, nodeId) {
     ok(`NATS connected: ${nc.getServer()}`);
 
     const sc = nats.StringCodec();
-    nc.publish(`mesh.health.${nodeId}`, sc.encode(JSON.stringify({
-      node_id: nodeId,
-      status: 'online',
-      event: 'node_joined',
-      os: os.platform(),
-      arch: os.arch(),
-      timestamp: new Date().toISOString(),
-    })));
-    ok('Health announcement published');
 
     try {
       const msg = await nc.request('mesh.tasks.list', sc.encode(JSON.stringify({ status: 'queued' })), { timeout: 5000 });
@@ -826,12 +862,13 @@ async function discoverTopology(natsUrl, localNodeId) {
     const nc = await nats.connect(require('../lib/nats-resolve').natsConnectOpts({ servers: natsUrl, timeout: 10000 }));
     const sc = nats.StringCodec();
     const js = nc.jetstream();
+    const { openMeshKv } = require('../lib/mesh-kv');
 
     const aliases = {};
 
     // Query MESH_NODE_HEALTH for all known nodes
     try {
-      const kv = await js.views.kv('MESH_NODE_HEALTH');
+      const kv = await openMeshKv(js, 'MESH_NODE_HEALTH', { bindOnly: true }, { waitMs: 0 });
       const keys = await kv.keys();
       for await (const key of keys) {
         const entry = await kv.get(key);
@@ -890,6 +927,12 @@ configureNats = tracer.wrap('configureNats', configureNats, { tier: 2, category:
 // ── Main ──────────────────────────────────────────────
 
 async function main() {
+  const refusal = require('../lib/openclaw-root').customRootRefusal(process.env.OPENCLAW_ROOT);
+  if (refusal) {
+    console.error(refusal);
+    process.exit(1);
+  }
+
   console.log(`\n${BOLD}${CYAN}╔══════════════════════════════════════╗${RESET}`);
   console.log(`${BOLD}${CYAN}║   OpenClaw Mesh — Join Network       ║${RESET}`);
   console.log(`${BOLD}${CYAN}╚══════════════════════════════════════╝${RESET}\n`);
@@ -958,9 +1001,9 @@ async function main() {
 
   // ── Step 8: Verify health ──
   step(8, 'Verifying health...');
-  const serviceAlive = verifyServiceRunning(osInfo);
+  const listenerAlive = verifyServiceRunning(osInfo);
   const natsHealthy = await verifyNatsHealth(config.nats, nodeId);
-  const healthy = serviceAlive && natsHealthy;
+  const healthy = listenerAlive && natsHealthy;
 
   // ── Step 9: Discover mesh topology ──
   step(9, 'Discovering mesh topology...');
@@ -970,12 +1013,12 @@ async function main() {
   console.log(`\n${BOLD}${GREEN}═══════════════════════════════════════${RESET}`);
   if (healthy) {
     console.log(`${BOLD}${GREEN}  Node "${nodeId}" joined the mesh!${RESET}`);
-  } else if (serviceAlive && !natsHealthy) {
-    console.log(`${BOLD}${YELLOW}  Service running but NATS unreachable.${RESET}`);
-    console.log(`${YELLOW}  The agent will retry automatically.${RESET}`);
-  } else if (!serviceAlive) {
-    console.log(`${BOLD}${RED}  Service failed to start.${RESET}`);
-    console.log(`${RED}  Provisioning complete but agent is not running.${RESET}`);
+  } else if (listenerAlive && !natsHealthy) {
+    console.log(`${BOLD}${YELLOW}  Deploy listener running but NATS unreachable.${RESET}`);
+    console.log(`${YELLOW}  It will retry automatically.${RESET}`);
+  } else if (!listenerAlive) {
+    console.log(`${BOLD}${RED}  Deploy listener failed to start.${RESET}`);
+    console.log(`${RED}  Provisioning complete but this node cannot receive deploys.${RESET}`);
   } else {
     console.log(`${BOLD}${YELLOW}  Provisioned with warnings.${RESET}`);
   }
@@ -984,12 +1027,13 @@ async function main() {
   console.log('Next steps:');
   console.log(`  1. Add API keys to ~/.openclaw/openclaw.env`);
   console.log(`     Example: ANTHROPIC_API_KEY=sk-ant-...`);
+  console.log(`  2. The mesh agent is on demand. Start it with: ${agentStartCommand(osInfo)}`);
   if (osInfo.serviceType === 'systemd') {
-    console.log(`  2. Check service: systemctl --user status openclaw-mesh-agent`);
-    console.log(`  3. View logs: journalctl --user -u openclaw-mesh-agent -f`);
+    console.log(`  3. Check it: systemctl --user status openclaw-mesh-agent`);
+    console.log(`  4. View logs: tail -f ${serviceLogPaths(osInfo, ON_DEMAND_UNIT).out}`);
   } else {
-    console.log(`  2. Check service: launchctl list | grep mesh-agent`);
-    console.log(`  3. View logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.log`);
+    console.log(`  3. Check it: launchctl list | grep mesh-agent`);
+    console.log(`  4. View logs: tail -f ~/.openclaw/workspace/.tmp/mesh-agent.log`);
   }
   console.log('');
 }
@@ -999,4 +1043,7 @@ if (require.main === module) main().catch(err => {
   process.exit(1);
 });
 
-module.exports = { renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust };
+module.exports = {
+  renderServiceTemplate, serviceTemplateVars, SERVICE_TEMPLATE_VARS, parseJoinToken, updateEnvFile, provisionTrust,
+  installService, verifyServiceRunning, agentStartCommand, serviceLogPaths, installMeshCode, discoverNats, discoverTopology,
+};

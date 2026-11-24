@@ -1,11 +1,3 @@
-export interface TailscalePeer {
-  nodeId: string;
-  ip: string;
-  online: boolean;
-  latencyMs: number | null;
-  relay: boolean;
-}
-
 export interface NodeHealth {
   nodeId: string;
   platform: string;
@@ -15,7 +7,7 @@ export interface NodeHealth {
   mem: { total: number; free: number };
   uptimeSeconds: number;
   cpuLoadPercent?: number;
-  services: Array<{ name: string; status: string; pid?: number }>;
+  services: Array<{ name: string; status: string; pid?: number; autostart?: boolean }>;
   agent: {
     status: string;
     currentTask: string | null;
@@ -25,13 +17,8 @@ export interface NodeHealth {
     budgetRemainingSeconds?: number;
   };
   capabilities: string[];
-  stats: {
-    tasksToday: number;
-    successRate: number;
-    tokenSpendTodayUsd: number;
-  };
   tailscale?: {
-    peers: TailscalePeer[];
+    peers: PeerView[];
     selfIp: string;
     natType: string;
     dnsName?: string;
@@ -55,6 +42,7 @@ export interface ActiveTask {
 
 export interface MeshNode {
   nodeId: string;
+  isLocal: boolean;
   status: "online" | "degraded" | "offline";
   health: NodeHealth | null;
   activeTasks: ActiveTask[];
@@ -64,21 +52,20 @@ export interface MeshNode {
   nats: NodeHealth["nats"] | null;
   cpuLoadPercent: number | null;
   isNatsHost: boolean;
-  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "unknown";
+  peerConnectivity: "all_direct" | "some_relay" | "degraded" | "idle" | "unknown";
 }
 
-// Peers arrive in two shapes: the KV-published TailscalePeer contract
-// (nodeId/latencyMs) and the local-fallback blob from /api/mesh/nodes
-// (hostname/os/lastSeen). This view type covers both.
+// Peers come from bin/mesh-health-publisher.js (latency is set only on the cycles
+// that ping) and from the /api/mesh/nodes local fallback (latency: null).
 export interface PeerView {
   online?: boolean;
   hostname?: string;
   ip?: string;
   os?: string;
   direct?: boolean;
-  relay?: boolean | string | null;
-  latency?: { latencyMs?: number } | null;
-  latencyMs?: number | null;
+  idle?: boolean;
+  relay?: string | null;
+  latency?: { latencyMs?: number | null } | null;
   lastSeen?: string | null;
 }
 

@@ -4,11 +4,7 @@ A Clawdbot skill that removes signs of AI-generated writing from text, making it
 
 ## Installation
 
-Install via ClawdHub:
-
-```bash
-clawdhub install humanizer
-```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Usage
 

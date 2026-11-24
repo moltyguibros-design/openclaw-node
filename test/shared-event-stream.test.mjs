@@ -67,6 +67,7 @@ describe('SHARED_SUBJECTS', () => {
 function createMockNc({ streamExists = false, existingConfig = null } = {}) {
   const addCalls = [];
   const infoCalls = [];
+  const updateCalls = [];
 
   const mockStreamInfo = existingConfig || {
     config: {
@@ -74,10 +75,14 @@ function createMockNc({ streamExists = false, existingConfig = null } = {}) {
       subjects: SHARED_SUBJECTS,
       num_replicas: 3,
       storage: StorageType.File,
+      max_age: 30 * 24 * 60 * 60 * 1e9,
+      max_bytes: 256 * 1024 * 1024,
+      discard: 'old',
     },
     state: {
       messages: 0,
       bytes: 0,
+      first_ts: '0001-01-01T00:00:00Z',
       consumer_count: 0,
     },
   };
@@ -85,6 +90,7 @@ function createMockNc({ streamExists = false, existingConfig = null } = {}) {
   return {
     addCalls,
     infoCalls,
+    updateCalls,
     jetstreamManager: async () => ({
       streams: {
         info: async (name) => {
@@ -102,6 +108,10 @@ function createMockNc({ streamExists = false, existingConfig = null } = {}) {
             config,
             state: { messages: 0, bytes: 0, consumer_count: 0 },
           };
+        },
+        update: async (name, config) => {
+          updateCalls.push({ name, config });
+          return { config, state: mockStreamInfo.state };
         },
       },
     }),
@@ -140,11 +150,32 @@ describe('ensureSharedStream', () => {
     assert.equal(mock.addCalls[0].storage, StorageType.File);
   });
 
+  it('creates stream with 30 days / 256 MiB retention, oldest discarded first', async () => {
+    const mock = createMockNc({ streamExists: false });
+    await ensureSharedStream(mock, { log: () => {} });
+
+    assert.equal(mock.addCalls[0].max_age, 30 * 24 * 60 * 60 * 1e9);
+    assert.equal(mock.addCalls[0].max_bytes, 256 * 1024 * 1024);
+    assert.equal(mock.addCalls[0].discard, 'old');
+  });
+
+  it('gives an existing stream created without retention the limits in place', async () => {
+    const config = { name: SHARED_STREAM_NAME, subjects: SHARED_SUBJECTS, num_replicas: 3, storage: StorageType.File, max_age: 0, max_bytes: -1, discard: 'old' };
+    const mock = createMockNc({ streamExists: true, existingConfig: { config, state: { messages: 2, bytes: 734, first_ts: new Date().toISOString() } } });
+    const logs = [];
+    await ensureSharedStream(mock, { log: (m) => logs.push(m) });
+
+    assert.equal(mock.addCalls.length, 0);
+    assert.deepEqual(mock.updateCalls, [{ name: SHARED_STREAM_NAME, config: { ...config, max_age: 30 * 24 * 60 * 60 * 1e9, max_bytes: 256 * 1024 * 1024 } }]);
+    assert.match(logs[0], /OPENCLAW_SHARED/);
+  });
+
   it('skips creation when stream already exists (idempotent)', async () => {
     const mock = createMockNc({ streamExists: true });
     const info = await ensureSharedStream(mock);
 
     assert.equal(mock.addCalls.length, 0, 'should not call streams.add');
+    assert.equal(mock.updateCalls.length, 0, 'a stream with retention is not updated');
     assert.equal(mock.infoCalls.length, 1);
     assert.equal(mock.infoCalls[0], 'OPENCLAW_SHARED');
     assert.ok(info.config);

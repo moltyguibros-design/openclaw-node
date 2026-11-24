@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { soulEvolutionLog } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
 import { isSafeId } from "@/lib/safe-path";
-
-const SOULS_DIR = path.join(os.homedir(), ".openclaw/souls");
+import { SOULS_DIR } from "@/lib/config";
 
 interface PropagateRequest {
   sourceEventId: string;
@@ -83,6 +82,20 @@ export async function POST(
       );
     }
 
+    // Approval lives only in the DB row; events.jsonl keeps the event's original status.
+    const db = getDb();
+    const sourceRow = db
+      .select({ reviewStatus: soulEvolutionLog.reviewStatus })
+      .from(soulEvolutionLog)
+      .where(and(eq(soulEvolutionLog.eventId, sourceEventId), eq(soulEvolutionLog.soulId, sourceSoulId)))
+      .get();
+    if (sourceRow?.reviewStatus !== "approved") {
+      return NextResponse.json(
+        { error: `Source event '${sourceEventId}' is not approved` },
+        { status: 409 }
+      );
+    }
+
     // Check gene's transferRule if scope exists
     const geneContent = sourceEvent.proposedChange?.content as Record<string, unknown> | undefined;
     const geneScope = geneContent?.scope as Record<string, unknown> | undefined;
@@ -95,6 +108,14 @@ export async function POST(
 
     // Create propagation event for target soul
     const propagationEventId = `${sourceEventId}-propagate-${targetSoulId}`;
+    const already = db
+      .select({ id: soulEvolutionLog.id })
+      .from(soulEvolutionLog)
+      .where(eq(soulEvolutionLog.eventId, propagationEventId))
+      .get();
+    if (already) {
+      return NextResponse.json({ success: true, alreadyPropagated: true, propagationEventId, sourceSoulId, targetSoulId });
+    }
     const propagationEvent = {
       eventId: propagationEventId,
       soulId: targetSoulId,
@@ -125,7 +146,6 @@ export async function POST(
     );
 
     // Log in DB with source tracking
-    const db = getDb();
     await db.insert(soulEvolutionLog).values({
       soulId: targetSoulId,
       eventId: propagationEventId,

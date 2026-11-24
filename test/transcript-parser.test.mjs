@@ -4,7 +4,7 @@
  * Covers: extractContent (string + array-of-blocks), detectFormat (claude-code
  * vs openclaw-gateway), parseLine for each format (with auto-detect),
  * parseJsonlFile (auto-detect, explicit format, tail option, malformed lines),
- * estimateFileTokens, listFormats, registerFormat (custom adapter).
+ * registerFormat (custom adapter).
  *
  * Run: node --test test/transcript-parser.test.mjs
  */
@@ -20,8 +20,6 @@ import {
   detectFormat,
   parseLine,
   parseJsonlFile,
-  estimateFileTokens,
-  listFormats,
   registerFormat,
 } from '../lib/transcript-parser.mjs';
 
@@ -285,45 +283,14 @@ describe('parseJsonlFile', () => {
   });
 });
 
-// ─── estimateFileTokens ─────────────────────────────────────────────────────
-
-describe('estimateFileTokens', () => {
-  it('counts messages and estimates tokens', async () => {
-    const path = writeJsonl('est.jsonl', [
-      { type: 'user', message: { content: 'hello world' } },        // 11 chars
-      { type: 'assistant', message: { content: 'a response' } },    // 10 chars
-    ]);
-    const result = await estimateFileTokens(path);
-    assert.equal(result.messageCount, 2);
-    assert.equal(result.totalChars, 21);
-    assert.equal(result.estimatedTokens, Math.ceil(21 / 4));
-  });
-
-  it('honors custom charsPerToken', async () => {
-    const path = writeJsonl('est2.jsonl', [
-      { type: 'user', message: { content: 'eight!!!' } },  // 8 chars
-    ]);
-    const result = await estimateFileTokens(path, { charsPerToken: 2 });
-    assert.equal(result.estimatedTokens, 4);
-  });
-});
-
-// ─── listFormats + registerFormat ───────────────────────────────────────────
+// ─── registerFormat ─────────────────────────────────────────────────────────
 
 describe('format registry', () => {
-  it('listFormats includes built-in formats', () => {
-    const formats = listFormats();
-    assert.ok(formats.includes('claude-code'));
-    assert.ok(formats.includes('openclaw-gateway'));
-    assert.ok(formats.includes('auto'));
-  });
-
   it('registerFormat adds a custom adapter', () => {
     registerFormat('test-format', {
       isMessage: (entry) => entry.kind === 'msg',
       extractMessage: (entry) => ({ role: 'user', content: entry.txt, timestamp: null }),
     });
-    assert.ok(listFormats().includes('test-format'));
     const line = JSON.stringify({ kind: 'msg', txt: 'hi from custom' });
     const msg = parseLine(line, { format: 'test-format' });
     assert.equal(msg.content, 'hi from custom');

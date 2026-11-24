@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # session-stop.sh — End-of-session housekeeping.
-# Hook: Stop
+# Hook: SessionEnd
 # Logs session summary to daily memory file.
 
 set -euo pipefail

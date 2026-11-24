@@ -4,7 +4,7 @@
 and ships as a double-clickable icon.
 
 ```sh
-openclaw-stack up        # start everything installed + companion-bridge, probe, popup
+openclaw-stack up        # start what a fresh install starts + companion-bridge, probe, popup
 openclaw-stack status    # truth table only (exit 1 if anything is DOWN)
 openclaw-stack down      # stop every openclaw unit + the bridge child
 ```
@@ -15,8 +15,13 @@ install.sh via `services/launcher/build-launcher-app.sh`). Linux gets an app-men
 `up` headless; the result arrives as a ledgered notification (click-through to Mission Control
 `/diagnostics`), and details land in `~/.openclaw/logs/stack-launcher.log`.
 
-**What it starts — discovery, not a hardcoded list:** every installed `ai.openclaw.*` launchd
-plist (macOS) / `openclaw-*` systemd user unit (Linux). Unloaded units are bootstrapped;
+**What it starts — discovery, not a hardcoded list:** the installed `ai.openclaw.*` launchd
+plists (macOS) / `openclaw-*` systemd user units (Linux) that a fresh install starts. Units
+`services/service-manifest.json` marks `autostart: false` (gateway, mesh-agent, the Discord
+tool) stay operator-started, and the NATS slot is only the layout declared in
+`~/.openclaw/config/nats-writer-cohort.json` (`activeLabels`; the single `nats` unit when the
+file is absent) — a spare bus copy would fight the live one for :4222. Units it leaves off
+read `OFF` in the table but are not listed as "not running" in the popup. Unloaded units are bootstrapped;
 KeepAlive daemons that lost their process are kickstarted; running services are left alone.
 `companion-bridge` (external repo, no service unit) is spawned detached when its repo exists
 and :8787 is closed (`OPENCLAW_BRIDGE_DIR` overrides the default location).

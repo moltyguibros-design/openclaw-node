@@ -26,7 +26,7 @@ All three nodes form a full-mesh cluster named `openclaw-cluster`. JetStream str
 
 ## Local Dev Setup (macOS, launchd)
 
-Config files and plists live in `services/nats/` in the repo.
+Config templates live in `services/nats/`; `install.sh` renders them, plus the `nats-auth.conf` they include, to `~/.openclaw/config/nats-{1,2,3}.conf`. The launchd templates are `services/launchd/ai.openclaw.nats-{1,2,3}.plist`. Always start from the rendered configs, never the repo templates (see MULTI_NODE_DEPLOY.md).
 
 ### 1. Create data directories
 
@@ -37,16 +37,19 @@ mkdir -p ~/.openclaw/logs
 
 ### 2. Install the plists
 
-Before installing, replace `${OPENCLAW_REPO}` and `${HOME}` placeholders in each plist with absolute paths:
+`install.sh` renders everything this layout needs: `~/.openclaw/config/nats-{1,2,3}.conf`,
+the `~/.openclaw/config/nats-auth.conf` they include, and the three plists into
+`~/Library/LaunchAgents/ai.openclaw.nats-{1,2,3}.plist`, with every placeholder filled in
+(`${HOME}`, and `${NATS_SERVER_BIN}` resolved from `PATH`, then `/opt/homebrew/bin`, then
+`/usr/local/bin`). The units are `autostart: false`, so nothing loads them yet. On a node that is
+already installed, re-render them from the current templates with:
 
 ```bash
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"  # or set manually
-for n in 1 2 3; do
-  sed "s|\${OPENCLAW_REPO}|$REPO|g; s|\${HOME}|$HOME|g" \
-    "$REPO/services/nats/ai.openclaw.nats-$n.plist" \
-    > ~/Library/LaunchAgents/ai.openclaw.nats-$n.plist
-done
+./install.sh --update
 ```
+
+Do not hand-copy the repo templates into `~/Library/LaunchAgents`: they still carry the
+placeholders.
 
 ### 3. Start the cluster
 
@@ -115,31 +118,36 @@ For deploying across real machines, each machine runs one NATS node. The config 
 
 ### 1. Per-node config
 
-Copy `services/nats/nats-1.conf` to each machine and modify:
-
-**Machine A** (e.g., `10.0.1.10`):
+Render `services/nats/nats-cluster-node.conf` on each machine with
+`install.sh --cluster-peers=<other two> --cluster-bind=<own IP>` (docs/MULTI_NODE_DEPLOY.md §2.2).
+Machine A's result (`10.0.1.10`):
 ```
-server_name: openclaw-nats-1
-listen: 0.0.0.0:4222
-http_port: 8222
+server_name: openclaw-nats-<node id>
+listen: 10.0.1.10:4222
+http: 127.0.0.1:8222
+include "nats-auth.conf"
 
 jetstream {
-  store_dir: ~/.openclaw/nats/jetstream
+  store_dir: <home>/.openclaw/nats/jetstream
   max_mem: 256MB
-  max_file: 1GB
+  max_file: 2GB
 }
 
 cluster {
   name: openclaw-cluster
-  listen: 0.0.0.0:6222
+  listen: 10.0.1.10:6222
+  authorization {
+    user: "openclaw-route"
+    password: "<OPENCLAW_NATS_CLUSTER_PASS>"
+  }
   routes = [
-    nats-route://10.0.1.11:6222
-    nats-route://10.0.1.12:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.11:6222
+    nats-route://openclaw-route:<OPENCLAW_NATS_CLUSTER_PASS>@10.0.1.12:6222
   ]
 }
 ```
 
-**Machine B** (`10.0.1.11`) and **Machine C** (`10.0.1.12`): same structure, routes point to the other two machines. All use the same ports (4222/6222/8222) since they're on separate hosts.
+**Machine B** (`10.0.1.11`) and **Machine C** (`10.0.1.12`): same structure, routes point to the other two machines. Each binds 4222/6222 on its own address; the 8222 monitor stays on loopback.
 
 ### 2. Firewall rules
 
@@ -149,7 +157,6 @@ Open the following ports between all three machines:
 |------|----------|---------|
 | 4222 | TCP | NATS client connections |
 | 6222 | TCP | NATS cluster gossip + replication |
-| 8222 | TCP | HTTP monitoring (optional, restrict to admin network) |
 
 ### 3. systemd service (Linux)
 
@@ -175,14 +182,15 @@ If nodes are on a Tailscale network, replace IPs in the `routes` array with Tail
 
 ## Connecting OpenClaw Nodes
 
-Once the cluster is running, each openclaw node connects via the `NATS_URL` environment variable or `config/node.json`:
+Once the cluster is running, each openclaw node connects via `OPENCLAW_NATS` (else
+`~/.openclaw/openclaw.env`, as `lib/nats-resolve.js` resolves it, token included):
 
 ```bash
 # Node on machine A (or local dev node 1)
-NATS_URL=nats://localhost:4222 node workspace-bin/memory-daemon.mjs
+OPENCLAW_NATS=nats://localhost:4222 node workspace-bin/memory-daemon.mjs
 
 # Node on machine B
-NATS_URL=nats://10.0.1.11:4222 node workspace-bin/memory-daemon.mjs
+OPENCLAW_NATS=nats://10.0.1.11:4222 node workspace-bin/memory-daemon.mjs
 ```
 
 For spawned dev nodes (Step 10.1):
@@ -192,6 +200,10 @@ node bin/spawn-node.mjs --id alpha --port 7900 --nats-url nats://localhost:4222
 node bin/spawn-node.mjs --id bravo --port 7901 --nats-url nats://localhost:4223
 node bin/spawn-node.mjs --id charlie --port 7902 --nats-url nats://localhost:4224
 ```
+
+Each prints the command that runs its memory daemon: `OPENCLAW_HOME=<node root>` (its own
+config, databases, workspace and watcher log), `OPENCLAW_NATS=<--nats-url>` and
+`MEMORY_INJECT_PORT=<--port>`.
 
 Each node can connect to any cluster member — NATS handles routing internally.
 
@@ -228,6 +240,34 @@ done
 - Need all 3 nodes online and clustered before creating R=3 streams
 - Run `curl -s http://localhost:8222/jsz` — `meta_leader` should be set
 - If a node was added late, the leader may need a few seconds to recognize it
+
+**Who holds the NATS install? (read-only census, macOS):**
+
+Two read-only diagnostics from node-state-recovery step 1.2, built for the
+legacy four-server macOS layout (`ai.openclaw.nats`, `-1`, `-2`, `-3`), run from
+the repo root. Neither changes anything or certifies a state; both print a JSON
+report and exit 2 when the census is refused: the system could not be observed,
+or the node is not the legacy four-server layout.
+
+Both refuse unless all four stores `~/.openclaw/nats/jetstream`, `jetstream-1`,
+`jetstream-2` and `jetstream-3` exist. The live census also requires the four
+legacy LaunchAgents plists and their four mode-0600 configs, and refuses any
+config that contains an `include` token or a `$`. Every config rendered from
+the current templates includes `nats-auth.conf`, and a default install leaves
+`openclaw-nats-1..3` off, so exit 2 is expected on a current, merged or
+single-node install and does not mean the node is faulty.
+
+```bash
+# launchd units, nats-server processes and JetStream store identities
+/usr/bin/python3 bin/nats-live-census.py [--uid UID] [--home DIR]
+
+# processes holding open files, mappings or a cwd inside the JetStream stores
+# (~/.openclaw/nats/jetstream, jetstream-1, -2, -3), per store, linked or unlinked
+/usr/bin/python3 bin/nats-store-holder-census.py [--home DIR]
+```
+
+The holder census covers only processes it can read: check `coverage` and
+`unreadable_pids` in its report before reading an empty `holders` list as "no holder".
 
 **Port conflicts:**
 - If standalone NATS is already running on 4222: `launchctl unload ~/Library/LaunchAgents/nats.plist` (or however it was started)

@@ -26,7 +26,7 @@ const DAEMON = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', 'workspace-bin', 'memory-daemon.mjs'
 );
-const { handleFlushResult } = await import(DAEMON);
+const { handleFlushResult, sourceOfJsonl, extractedEventData } = await import(DAEMON);
 const src = readFileSync(DAEMON, 'utf8');
 
 // ── verdict logic ───────────────────────────────────────────────────────────
@@ -86,13 +86,14 @@ test('a missing result is treated as degraded, never as success', () => {
 
 // ── structural guarantee ────────────────────────────────────────────────────
 
-test('all five flush call sites route through handleFlushResult', () => {
+// Four since the per-session tracker: the ACTIVE→ENDED session-switch flush is gone.
+test('all four flush call sites route through handleFlushResult', () => {
   const flushCalls = src.match(/serializeFlush\(\(\) => runFlushInWorker\(/g) || [];
-  assert.equal(flushCalls.length, 5, 'expected exactly five runFlush trigger paths');
+  assert.equal(flushCalls.length, 4, 'expected exactly four runFlush trigger paths');
 
-  // one definition + five call sites
+  // one definition + four call sites
   const handlerRefs = src.match(/handleFlushResult\(/g) || [];
-  assert.equal(handlerRefs.length, 6, 'every flush call site must call the gate');
+  assert.equal(handlerRefs.length, 5, 'every flush call site must call the gate');
 });
 
 test('no flush call site emits extract/synthesize/degrade around the gate', () => {
@@ -116,4 +117,64 @@ test('the daemon still autostarts by default', () => {
   // and must keep booting exactly as before.
   assert.match(src, /OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1'/);
   assert.match(src, /if \(process\.env\.OPENCLAW_MEMORY_DAEMON_NO_AUTOSTART !== '1'\) \{\s*\n\s*main\(\)/);
+});
+
+test('session imports take source and format from the transcript\'s own source dir', () => {
+  const sources = [
+    { name: 'claude-code-repo', path: '/h/.claude/projects/-repo/', format: 'claude-code' },
+    { name: 'gateway', path: '/h/.openclaw/agents/main/sessions/', format: 'openclaw-gateway' },
+  ];
+  assert.equal(sourceOfJsonl(sources, '/h/.claude/projects/-repo/abc.jsonl').format, 'claude-code');
+  assert.equal(sourceOfJsonl(sources, '/h/.openclaw/agents/main/sessions/x.jsonl').name, 'gateway');
+  assert.equal(sourceOfJsonl(sources, '/elsewhere/x.jsonl'), null);
+  assert.doesNotMatch(src, /activity\.newest(Source|Format)/, 'the newest file\'s source labels a different transcript');
+});
+
+test('a tick scans the transcript dirs once and the dead shouldFlush import is gone', () => {
+  assert.doesNotMatch(src, /import\s*\{[^}]*\bshouldFlush\b[^}]*\}\s*from '\.\.\/lib\/pre-compression-flush\.mjs'/);
+  const start = src.indexOf('async function tick()');
+  const end = src.indexOf('// 5. HyperAgent maintenance', start);
+  assert.ok(start > 0 && end > start, 'could not bound the tick body');
+  const body = src.slice(start, end);
+  assert.ok(!body.includes('readdirSync('), 'Phase 1.5 must reuse detectActivity\'s scan, not rescan every source');
+  assert.equal((body.match(/loadTranscriptSources\(\)/g) || []).length, 1);
+});
+
+test('a dedup flush is recorded as a tagged noop and stays out of the extraction failure rate', async () => {
+  const { buildMemoryEvent } = await import('../lib/local-event-log.mjs');
+  const { MemoryExtractedSchema } = await import('../packages/event-schemas/dist/index.js');
+  const { toWatcherRecord, createAnomalyDetector } = await import('../lib/memory-watcher.mjs');
+  // The exact extraction block runFlush returns on an unchanged tail (mode 'llm-dedup').
+  const dedup = { session_id: 's', entities_count: 0, themes_count: 0, mentions_count: 0, decisions_count: 0, duration_ms: 0, dedup: true };
+  const event = MemoryExtractedSchema.parse(buildMemoryEvent('memory.extracted', 's', 'memory', extractedEventData('s', dedup), 'node'));
+  assert.equal(event.data.dedup, true);
+  const record = toWatcherRecord(event);
+  assert.equal(record.status, 'noop');
+
+  const detector = createAnomalyDetector({ extractionRateMinSample: 3, extractionRateThreshold: 0.5 });
+  for (let i = 0; i < 5; i++) assert.deepEqual(detector.evaluate({ ...record, ts: new Date().toISOString() }), []);
+  const real = { ...dedup };
+  delete real.dedup;
+  assert.equal(extractedEventData('s', real).dedup, undefined, 'a real zero-count extraction is untagged');
+  const failed = toWatcherRecord(buildMemoryEvent('memory.extracted', 's', 'memory', extractedEventData('s', real), 'node'));
+  detector.evaluate(failed);
+  detector.evaluate(failed);
+  const alerts = detector.evaluate(failed);
+  assert.equal(alerts[0]?.alert_type, 'extraction_failure_rate');
+  assert.deepEqual(alerts[0].window, { total: 3, failures: 3, rate: 1 });
+});
+
+test('memory.synthesized caps artifacts_written at the schema limit and counts the rest', async () => {
+  const { buildMemoryEvent } = await import('../lib/local-event-log.mjs');
+  const { MemoryEventSchema } = await import('../packages/event-schemas/dist/index.js');
+  const { synthesizedEventData } = await import(DAEMON);
+  assert.equal(typeof synthesizedEventData, 'function');
+  const many = { artifacts_written: Array.from({ length: 150 }, (_, i) => `concepts/c${i}.md`), duration_ms: 5 };
+  const parsed = MemoryEventSchema.safeParse(buildMemoryEvent('memory.synthesized', 'sess-a', 'memory', synthesizedEventData('sess-a', 'interval', many), 'node-a'));
+  assert.equal(parsed.success, true, parsed.error?.message);
+  assert.equal(parsed.data.data.artifacts_written.length, 100);
+  assert.equal(parsed.data.data.artifacts_more, 50);
+  const few = synthesizedEventData('sess-a', 'interval', { artifacts_written: ['MEMORY.md', 'a.md', 'b.md'], duration_ms: 5 });
+  assert.equal(few.artifacts_written.length, 3);
+  assert.equal('artifacts_more' in few, false);
 });

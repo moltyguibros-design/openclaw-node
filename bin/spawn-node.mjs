@@ -21,7 +21,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir, writeFile, stat, readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { createRequire } from 'node:module';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -200,6 +199,31 @@ export async function readNodeConfig(nodeId, opts = {}) {
   }
 }
 
+/**
+ * The command that runs a memory daemon on a spawned node: its own root
+ * (config, databases, workspace, watcher log), bus URL and inject port, so
+ * daemons on one machine share nothing but the bus.
+ *
+ * @param {{ nodeRoot: string, id: string, port?: number, natsUrl?: string }} node
+ * @returns {string}
+ */
+export function runCommand({ nodeRoot, id, port = DEFAULT_PORT, natsUrl = DEFAULT_NATS_URL }) {
+  return `OPENCLAW_HOME=${nodeRoot} OPENCLAW_NODE_ID=${id} OPENCLAW_NATS=${natsUrl} ` +
+    `MEMORY_INJECT_PORT=${port} node workspace-bin/memory-daemon.mjs`;
+}
+
+/**
+ * The command that consolidates a spawned node: the daemon runs no cycle, and
+ * the installed timer has no OPENCLAW_HOME, so it cycles only ~/.openclaw.
+ *
+ * @param {{ nodeRoot: string, id: string, natsUrl?: string }} node
+ * @returns {string}
+ */
+export function consolidationCommand({ nodeRoot, id, natsUrl = DEFAULT_NATS_URL }) {
+  return `OPENCLAW_HOME=${nodeRoot} OPENCLAW_NODE_ID=${id} OPENCLAW_NATS=${natsUrl} ` +
+    'node bin/consolidation-scheduler.mjs --daemon';
+}
+
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -251,8 +275,10 @@ Options:
       console.log(`  Created: ${result.created.join(', ')}`);
     }
 
+    const config = await readNodeConfig(values.id, { baseDir: values['base-dir'] });
     console.log(`\nTo run this node:`);
-    console.log(`  OPENCLAW_HOME=${result.nodeRoot} OPENCLAW_NODE_ID=${values.id} node workspace-bin/memory-daemon.mjs`);
+    console.log(`  ${runCommand({ nodeRoot: result.nodeRoot, id: values.id, port: config?.port, natsUrl: config?.nats_url })}`);
+    console.log(`  ${consolidationCommand({ nodeRoot: result.nodeRoot, id: values.id, natsUrl: config?.nats_url })}`);
   } catch (err) {
     console.error(`error: ${err.message}`);
     process.exit(1);

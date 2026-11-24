@@ -1,9 +1,8 @@
 ---
 name: n8n
-description: Manage n8n workflows and automations via API. Use when working with n8n workflows, executions, or automation tasks - listing workflows, activating/deactivating, checking execution status, manually triggering workflows, or debugging automation issues.
+description: Manage n8n workflows and automations via API. Use when working with n8n workflows, executions, or automation tasks - listing workflows, activating/deactivating, checking execution status, or debugging automation issues.
 triggers:
   - "list my n8n workflows"
-  - "trigger the n8n workflow"
   - "check n8n execution status"
   - "activate the workflow"
   - "debug my automation"
@@ -21,10 +20,14 @@ Interact with n8n automation platform via REST API.
 
 **First-time setup:**
 
-1. API key must be stored in environment:
+1. Base URL and API key must be stored in environment:
 ```bash
+export N8N_BASE_URL="http://localhost:5678"
 export N8N_API_KEY="your-api-key-here"
 ```
+
+The client needs the Python `requests` package; the installer installs it from
+`requirements.txt`.
 
 2. Verify connection:
 ```bash
@@ -33,6 +36,7 @@ python3 scripts/n8n_api.py list-workflows --pretty
 
 For persistent storage, add to `~/.bashrc` or `~/.zshrc`:
 ```bash
+echo 'export N8N_BASE_URL="http://localhost:5678"' >> ~/.bashrc
 echo 'export N8N_API_KEY="your-key"' >> ~/.bashrc
 ```
 
@@ -68,13 +72,8 @@ python3 scripts/n8n_api.py list-executions --id <workflow-id> --limit 20 --prett
 ```
 
 ### Manual Execution
-```bash
-# Trigger workflow
-python3 scripts/n8n_api.py execute --id <workflow-id>
-
-# With data
-python3 scripts/n8n_api.py execute --id <workflow-id> --data '{"key": "value"}'
-```
+The n8n public API has no endpoint that runs a workflow. Give the workflow a
+Webhook trigger and call its webhook URL instead.
 
 ## Python API
 
@@ -98,9 +97,6 @@ client.deactivate_workflow('workflow-id')
 # Executions
 executions = client.list_executions(workflow_id='workflow-id', limit=10)
 execution = client.get_execution('execution-id')
-
-# Execute workflow
-result = client.execute_workflow('workflow-id', data={'key': 'value'})
 ```
 
 ## Common Tasks
@@ -133,9 +129,8 @@ For detailed API documentation, see [references/api.md](references/api.md).
 - Check API key is valid in n8n UI
 
 **Connection error:**
-- Check N8N_BASE_URL if using custom URL
+- Verify N8N_BASE_URL is set to the instance root, without `/api/v1`: `echo $N8N_BASE_URL`
 
 **Command errors:**
 - Use `--pretty` flag for readable output
 - Check `--id` is provided when required
-- Validate JSON format for `--data` parameter

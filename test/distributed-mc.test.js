@@ -193,44 +193,6 @@ describe("Task state transitions", { skip: skipReason }, () => {
   });
 });
 
-describe("Collision-proof task IDs", { skip: skipReason }, () => {
-  it("sequential ID generation produces no collisions", () => {
-    const ids = new Set();
-    for (let i = 0; i < 100; i++) {
-      const suffix = crypto.randomBytes(3).toString("hex");
-      const now = new Date();
-      const dateStr =
-        now.getFullYear().toString() +
-        (now.getMonth() + 1).toString().padStart(2, "0") +
-        now.getDate().toString().padStart(2, "0");
-      ids.add(`T-${dateStr}-${suffix}`);
-    }
-    assert.equal(ids.size, 100);
-  });
-
-  it("parallel ID generation produces no collisions", async () => {
-    const promises = Array.from({ length: 20 }, () => {
-      return new Promise((resolve) => {
-        const suffix = crypto.randomBytes(3).toString("hex");
-        const now = new Date();
-        const dateStr =
-          now.getFullYear().toString() +
-          (now.getMonth() + 1).toString().padStart(2, "0") +
-          now.getDate().toString().padStart(2, "0");
-        resolve(`T-${dateStr}-${suffix}`);
-      });
-    });
-
-    const ids = await Promise.all(promises);
-    const unique = new Set(ids);
-    assert.equal(
-      unique.size,
-      ids.length,
-      `Expected ${ids.length} unique IDs, got ${unique.size}`
-    );
-  });
-});
-
 describe("Mesh events", { skip: skipReason }, () => {
   it("submitted event fires on task creation", async () => {
     const taskId = uniqueTaskId();

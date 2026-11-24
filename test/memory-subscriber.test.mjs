@@ -1,10 +1,17 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createSubscriber,
   evaluateIngestionPolicy,
   parseSharedSubject,
 } from '../bin/memory-subscriber.mjs';
-import { createBackoff } from '../bin/memory-promoter.mjs';
+import { eventStreamRetention } from '../lib/local-event-log.mjs';
+
+// OPENCLAW_SHARED as the server reports it once it carries its retention.
+const SHARED_INFO = {
+  config: { name: 'OPENCLAW_SHARED', ...eventStreamRetention() },
+  state: { messages: 0, bytes: 0, first_ts: '0001-01-01T00:00:00Z' },
+};
 
 // ── parseSharedSubject ───────────────────────────────────
 
@@ -113,15 +120,97 @@ describe('evaluateIngestionPolicy', () => {
   });
 });
 
-// ── createBackoff reuse ──────────────────────────────────
+describe('createSubscriber consumer identity', () => {
+  it('names the durable consumer from the canonical node id (JetStream rejects dots)', async () => {
+    let added = null;
+    const nc = {
+      jetstreamManager: async () => ({
+        streams: { info: async () => SHARED_INFO },
+        consumers: {
+          info: async () => { throw Object.assign(new Error('consumer not found'), { api_error: { err_code: 10014 } }); },
+          add: async (_stream, cfg) => { added = cfg; },
+        },
+      }),
+      jetstream: () => ({
+        consumers: {
+          get: async () => ({
+            consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() {} }),
+          }),
+        },
+      }),
+    };
+    const sub = await createSubscriber(nc, 'MoltyMacs-Virtual-Machine.local', {
+      onIngest: (event, parsed, provenance) => { void event; void parsed; void provenance; },
+      onError: () => {},
+    });
+    await sub.stop();
+    assert.equal(added.durable_name, 'subscriber-moltymacs-virtual-machine');
+    assert.equal(added.max_deliver, 5, 'a nak is retried a bounded number of times');
+    assert.equal(added.ack_policy, 'explicit');
+    assert.equal(added.deliver_policy, 'new');
+  });
+});
 
-describe('createBackoff import reuse', () => {
-  it('createBackoff imported from promoter works for subscriber', () => {
-    const backoff = createBackoff({ baseDelay: 500, maxDelay: 5000 });
-    assert.strictEqual(backoff.getDelay(), 500);
-    backoff.recordFailure();
-    assert.strictEqual(backoff.getDelay(), 1000);
-    backoff.reset();
-    assert.strictEqual(backoff.getDelay(), 500);
+describe('createSubscriber projection', () => {
+  function fakeShared(messages) {
+    return {
+      jetstreamManager: async () => ({
+        streams: { info: async () => SHARED_INFO },
+        consumers: { info: async () => ({ config: { ack_policy: 'explicit' } }), add: async () => {} },
+      }),
+      jetstream: () => ({
+        consumers: {
+          get: async () => ({
+            consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() { yield* messages; } }),
+          }),
+        },
+      }),
+    };
+  }
+  function message(log, info) {
+    const data = new TextEncoder().encode(JSON.stringify({ event_id: 'e1', promoted_from: { node_id: 'node-B' } }));
+    return { subject: 'kanban.events.task-1.kanban.created', data, info, ack: () => log.push('ack'), nak: (d) => log.push(['nak', d]) };
+  }
+  async function settled(log) {
+    while (!log.some((e) => e === 'ack' || e[0] === 'nak')) await new Promise((r) => setTimeout(r, 2));
+    await new Promise((r) => setTimeout(r, 20));
+  }
+
+  it('awaits an async onIngest: a rejection naks with a delay and is not counted as ingested', async () => {
+    const log = [];
+    const errors = [];
+    const sub = await createSubscriber(fakeShared([message(log)]), 'node-A', {
+      onIngest: async () => { await new Promise((r) => setTimeout(r, 5)); throw new Error('projection down'); },
+      onError: (ctx, err) => errors.push([ctx, err.message]),
+    });
+    await settled(log);
+    await sub.stop();
+    assert.deepEqual(log, [['nak', 5000]]);
+    assert.deepEqual(errors, [['projection', 'projection down']]);
+    assert.deepEqual(sub.stats, { ingested: 0, skipped: 0, errors: 1 });
+  });
+
+  it('drops (acks) a message that keeps failing at the delivery cap', async () => {
+    const log = [];
+    const sub = await createSubscriber(fakeShared([message(log, { deliveryCount: 5 })]), 'node-A', {
+      onIngest: async () => { throw new Error('projection down'); },
+      onError: () => {},
+    });
+    await settled(log);
+    await sub.stop();
+    assert.deepEqual(log, ['ack']);
+    assert.equal(sub.stats.errors, 1);
+  });
+
+  it('acks only after an async onIngest settles', async () => {
+    const log = [];
+    const sub = await createSubscriber(fakeShared([message(log)]), 'node-A', {
+      onIngest: async () => { await new Promise((r) => setTimeout(r, 5)); log.push('projected'); },
+      onError: () => {},
+    });
+    await settled(log);
+    await sub.stop();
+    assert.deepEqual(log, ['projected', 'ack']);
+    assert.equal(sub.stats.ingested, 1);
   });
 });

@@ -90,39 +90,6 @@ class WriterExclusion:
         self.close()
 
 
-def _create(path, uid, gid):
-    if sys.platform == 'darwin' and os.geteuid() == 0:
-        raise Refused('production root writer lock creation awaits lifecycle recovery')
-    path = pathlib.Path(path)
-    try:
-        protected_parent(path, uid, gid)
-        previous_umask = os.umask(0o022)
-        try:
-            try:
-                fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
-            except FileExistsError:
-                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                try:
-                    identity = lock_identity(fd, path, uid, gid)
-                    sync_fd(fd)
-                    sync_dir(path.parent)
-                    return identity
-                finally:
-                    os.close(fd)
-        finally:
-            os.umask(previous_umask)
-        try:
-            os.fchmod(fd, 0o644)
-            os.fchown(fd, uid, gid)
-            sync_fd(fd)
-            sync_dir(path.parent)
-            return lock_identity(fd, path, uid, gid)
-        finally:
-            os.close(fd)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise Refused('writer lock creation refused') from error
-
-
 def _acquire(path, uid, gid, seconds):
     path = pathlib.Path(path)
     try:

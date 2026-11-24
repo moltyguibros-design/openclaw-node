@@ -221,7 +221,7 @@ python3 scripts/excel.py format file.xlsx A1:D1 --font-size 14 --font-color RED 
 python3 scripts/excel.py format file.xlsx A1:D1 --bg-color YELLOW
 
 # Alignment
-python3 scripts/excel.py format file.xlsx A:A --align center --valign top
+python3 scripts/excel.py format file.xlsx A1:A100 --align center --valign top
 
 # Text wrapping
 python3 scripts/excel.py format file.xlsx B2:B100 --wrap

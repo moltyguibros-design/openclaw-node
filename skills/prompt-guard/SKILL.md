@@ -21,11 +21,7 @@ Advanced prompt injection defense + operational security system for AI agents.
 
 ## HiveFence Integration (v2.6.0)
 
-Distributed threat intelligence: one agent's detection protects the entire network.
-
-```
-Agent A detects attack -> Reports to HiveFence -> Community validates -> All agents immunized
-```
+Distributed threat intelligence, opt-in and manual: `hivefence.py` reports patterns and votes on others' submissions. `detect.py` does not fetch community patterns; its detection uses only the built-in set.
 
 ```bash
 # CLI: check stats, fetch patterns, report threats, vote
@@ -56,7 +52,7 @@ python3 scripts/hivefence.py vote --id <pattern-id> --approve
 | LOW | Minor suspicious pattern | Log only |
 | MEDIUM | Clear manipulation attempt | Warn + Log |
 | HIGH | Dangerous command attempt | Block + Log |
-| CRITICAL | Immediate threat | Block + Notify owner |
+| CRITICAL | Immediate threat | Block + Log |
 
 ---
 
@@ -88,7 +84,7 @@ Response: "I cannot display tokens, secrets, or credentials. This is a security 
 
 **Token rotation:** If a credential is EVER exposed, rotate immediately. No exceptions.
 
-**Config protection:** `~/.clawdbot/` chmod 700, `clawdbot.json` chmod 600, never sync to cloud/git.
+**Config protection:** `~/.openclaw/` chmod 700, `openclaw.json` and `openclaw.env` chmod 600, never sync to cloud/git.
 
 ---
 
@@ -115,13 +111,13 @@ prompt_guard:
     LOW: log
     MEDIUM: warn
     HIGH: block
-    CRITICAL: block_notify
+    CRITICAL: block_notify  # an action label returned to the caller; detect.py notifies no one
   secret_protection:
     enabled: true
     block_config_display: true
     block_env_display: true
     block_token_requests: true
-  rate_limit:
+  rate_limit:  # per user, within one long-lived PromptGuard instance; each detect.py run starts a fresh count
     enabled: true
     max_requests: 30
     window_seconds: 60
@@ -130,11 +126,9 @@ prompt_guard:
     path: memory/security-log.md
     include_message: true
   hivefence:
-    enabled: true
+    enabled: false
     api_url: https://hivefence-api.seojoon-kim.workers.dev/api/v1
-    auto_report: true
-    auto_fetch: true
-    cache_path: ~/.clawdbot/hivefence_cache.json
+    auto_report: false
 ```
 
 ---
@@ -142,7 +136,7 @@ prompt_guard:
 ## Scripts
 
 ```bash
-python3 scripts/detect.py "message"              # Analyze message
+python3 scripts/detect.py "message"              # Analyze message; non-SAFE results append to logging.path (relative to the working directory)
 python3 scripts/detect.py --json --sensitivity paranoid "message"
 python3 scripts/analyze_log.py --summary          # Log analysis
 python3 scripts/analyze_log.py --user 123456 --since 2024-01-01
@@ -160,14 +154,14 @@ python3 scripts/audit.py --quick | --fix          # Quick check / auto-fix
 | LOW | (logged silently) |
 | MEDIUM | "That request looks suspicious. Could you rephrase?" |
 | HIGH | "This request cannot be processed for security reasons." |
-| CRITICAL | "Suspicious activity detected. The owner has been notified." |
+| CRITICAL | "This request was blocked and logged for security review." |
 | SECRET | "I cannot display tokens, API keys, or credentials. This is a security policy." |
 
 ---
 
 ## Security Checklist
 
-**10-min hardening:** `~/.clawdbot/` 700, `clawdbot.json` 600, rotate exposed tokens, gateway bind loopback.
+**10-min hardening:** `~/.openclaw/` 700, `openclaw.json` and `openclaw.env` 600, rotate exposed tokens, gateway bind loopback.
 
 **30-min review:** DM allowlist, group policies, 2FA on providers, no config in cloud sync.
 

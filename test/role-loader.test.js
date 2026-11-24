@@ -11,7 +11,6 @@ const {
   loadRole,
   findRole,
   listRoles,
-  validateRole,
   formatRoleForPrompt,
   validateRequiredOutputs,
   checkForbiddenPatterns,
@@ -56,6 +55,12 @@ describe('findRole', () => {
     const role = findRole('nonexistent-role', [SHIPPED_ROLES]);
     assert.strictEqual(role, null);
   });
+
+  it('refuses a role id that escapes the search dir', () => {
+    assert.strictEqual(findRole('../solidity-dev', [path.join(SHIPPED_ROLES, 'missing')]), null);
+    assert.strictEqual(findRole('solidity-dev/..', [SHIPPED_ROLES]), null);
+    assert.strictEqual(findRole('..', [path.join(SHIPPED_ROLES, 'missing')]), null);
+  });
 });
 
 // ── listRoles ────────────────────────────────────
@@ -74,22 +79,19 @@ describe('listRoles', () => {
   });
 });
 
-// ── validateRole ─────────────────────────────────
+// ── shipped role structure ───────────────────────
 
-describe('validateRole', () => {
-  it('validates shipped roles', () => {
+describe('shipped roles', () => {
+  it('have an id, list-valued lists and an object escalation', () => {
     const files = fs.readdirSync(SHIPPED_ROLES).filter(f => f.endsWith('.yaml'));
     for (const file of files) {
       const role = loadRole(path.join(SHIPPED_ROLES, file));
-      const result = validateRole(role);
-      assert.ok(result.valid, `${file} should validate: ${result.errors.join(', ')}`);
+      assert.ok(role.id, `${file}: missing id`);
+      for (const list of ['responsibilities', 'must_not', 'required_outputs', 'forbidden_patterns']) {
+        if (role[list]) assert.ok(Array.isArray(role[list]), `${file}: ${list} must be an array`);
+      }
+      if (role.escalation) assert.equal(typeof role.escalation, 'object', `${file}: escalation must be an object`);
     }
-  });
-
-  it('detects missing id', () => {
-    const result = validateRole({});
-    assert.ok(!result.valid);
-    assert.ok(result.errors.some(e => e.includes('id')));
   });
 });
 

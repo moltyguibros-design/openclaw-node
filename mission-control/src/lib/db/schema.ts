@@ -107,6 +107,13 @@ export const soulEvolutionLog = sqliteTable("soul_evolution_log", {
     .default(sql`(datetime('now'))`),
 });
 
+// Per task: its active-tasks.md field lines as MC last imported or wrote them
+// (JSON object, field key → lines). See src/lib/sync/tasks.ts.
+export const taskSyncBase = sqliteTable("task_sync_base", {
+  id: text("id").primaryKey(),
+  fields: text("fields").notNull(),
+});
+
 export const dependencies = sqliteTable("dependencies", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   sourceId: text("source_id").notNull(), // task that must complete first

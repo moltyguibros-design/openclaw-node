@@ -47,7 +47,7 @@ async function main() {
     const r = await appendSample(s, { ledgerPath });
     const a = await scanMemoryActivity();
     process.stdout.write(
-      `[observer] vm/boot ok · node ${s.node.core_up}/${s.node.core_total} · ` +
+      `[observer] vm/boot ok · node ${s.node.unknown ? '?' : `${s.node.core_up}/${s.node.core_total}`} · ` +
       `interaction ${s.interaction.active ? 'ACTIVE' : s.interaction.state} · ` +
       `memory ${s.memory.daemon ? (s.memory.working ? 'WORKING' : 'IDLE') : 'DOWN'} ` +
       `(extraction ${s.memory.extraction_age_h ?? '?'}h) · +${a.appended} activity` +

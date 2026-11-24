@@ -59,13 +59,26 @@ export function KanbanBoard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<Set<string>>(new Set());
-  const [_bulkAction, setBulkAction] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Column widths as flex-basis percentages (default: equal)
   const [colWidths, setColWidths] = useState<number[]>(
     () => Array(NUM_COLS).fill(100 / NUM_COLS)
   );
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Cowork links here as /?task=<id>. useSearchParams would need a Suspense boundary on this static page.
+  const openedFromUrl = useRef(false);
+  useEffect(() => {
+    if (openedFromUrl.current) return;
+    const id = new URLSearchParams(window.location.search).get("task");
+    const task = id ? tasks.find((t) => t.id === id) : undefined;
+    if (!task) return;
+    openedFromUrl.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot (ref-guarded): opens the linked task once the poll has loaded it
+    setEditTask(task);
+    setDialogOpen(true);
+  }, [tasks]);
 
   // Filter tasks: exclude archived + roadmap hierarchy types, then apply search
   const filteredTasks = useMemo(() => {
@@ -169,12 +182,17 @@ export function KanbanBoard() {
   }, [dialogOpen, bulkMode, searchQuery]);
 
   // Bulk actions
-  const handleBulkMove = async (targetColumn: string) => {
-    for (const id of bulkSelection) {
-      await updateTask(id, { kanbanColumn: targetColumn });
+  const updateEach = async (ids: Iterable<string>, updates: Record<string, unknown>) => {
+    const failures: string[] = [];
+    for (const id of ids) {
+      await updateTask(id, updates).catch((err) => failures.push(`${id}: ${(err as Error).message}`));
     }
+    if (failures.length) alert(`Update failed:\n${failures.join("\n")}`);
+  };
+
+  const handleBulkMove = async (targetColumn: string) => {
+    await updateEach(bulkSelection, { kanbanColumn: targetColumn });
     setBulkSelection(new Set());
-    setBulkAction(null);
   };
 
   const toggleBulkSelect = (taskId: string) => {
@@ -215,12 +233,12 @@ export function KanbanBoard() {
       setDoneConfirmTaskId(taskId);
       return;
     }
-    updateTask(taskId, { kanbanColumn: targetColumn });
+    updateEach([taskId], { kanbanColumn: targetColumn });
   };
 
   const confirmDone = () => {
     if (doneConfirmTaskId) {
-      updateTask(doneConfirmTaskId, { kanbanColumn: "done", force_done: true } as Record<string, unknown>);
+      updateEach([doneConfirmTaskId], { kanbanColumn: "done", force_done: true });
       setDoneConfirmTaskId(null);
     }
   };
@@ -230,6 +248,7 @@ export function KanbanBoard() {
   };
 
   const handleTaskClick = (task: Task) => {
+    if (task.id === "__LIVE_SESSION__") return;
     if (bulkMode) {
       toggleBulkSelect(task.id);
       return;
@@ -323,11 +342,8 @@ export function KanbanBoard() {
                 highlight={bulkMode}
                 bulkMode={bulkMode}
                 bulkSelection={bulkSelection}
-                onClearDone={col === "done" ? async () => {
-                  // Archive all visible done tasks
-                  for (const t of columns.done) {
-                    await updateTask(t.id, { status: "archived" } as Record<string, unknown>);
-                  }
+                onClearDone={col === "done" ? (visibleTasks) => {
+                  updateEach(visibleTasks.map((t) => t.id), { status: "archived" });
                 } : undefined}
               />
             </div>
@@ -346,7 +362,8 @@ export function KanbanBoard() {
           </span>
           <div className="w-px h-6 bg-border" />
           <span className="text-xs text-muted-foreground">Move to:</span>
-          {COLUMNS.map((col) => (
+          {/* No "Done": without force_done it lands in Review, which has its own button. */}
+          {COLUMNS.filter((col) => col !== "done").map((col) => (
             <button
               key={col}
               onClick={() => handleBulkMove(col)}
@@ -358,11 +375,8 @@ export function KanbanBoard() {
           <div className="w-px h-6 bg-border" />
           <button
             onClick={() => {
-              for (const id of bulkSelection) {
-                updateTask(id, { status: "done", force_done: true } as Record<string, unknown>);
-              }
+              updateEach(bulkSelection, { status: "done", force_done: true });
               setBulkSelection(new Set());
-              setBulkAction(null);
             }}
             className="px-2.5 py-1 text-xs rounded-md bg-green-500/15 text-green-400 border border-green-500/20 hover:bg-green-500/25 transition-colors"
           >

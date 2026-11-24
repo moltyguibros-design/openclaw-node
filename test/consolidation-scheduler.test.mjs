@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,10 +22,10 @@ import {
 
 describe('consolidation-scheduler constants', () => {
   it('exports expected constant values', () => {
-    assert.equal(IDLE_THRESHOLD_MS, 5 * 60 * 1000);
     assert.equal(HARD_CAP_MS, 5 * 60 * 1000);
     assert.equal(ANALYSIS_QUIET_MS, 60 * 1000);
     assert.equal(DEFAULT_INTERVAL_MS, 30 * 60 * 1000);
+    assert.equal(IDLE_THRESHOLD_MS, 5 * 60 * 1000, 'isQueueIdle enforces it as the extraction quiet period');
   });
 });
 
@@ -99,6 +101,21 @@ describe('isQueueIdle', () => {
     };
     const result = isQueueIdle(() => state);
     assert.equal(result.idle, true);
+  });
+
+  it('holds the extraction and analysis quiet periods from the last completion times', () => {
+    const now = Date.now();
+    const at = (last_completed_at) => isQueueIdle(() => ({
+      current_job: null, queue_depth: 0, external_jobs: [],
+      history: { extraction: { count: 1, avg_ms: 5000 }, analysis: { count: 1, avg_ms: 800 } },
+      recent_fallbacks: [], last_completed_at,
+    }));
+
+    assert.match(at({ extraction: now - 60_000 }).reason, /extraction finished 60s ago \(quiet period 300s\)/);
+    assert.match(at({ flush: now - IDLE_THRESHOLD_MS + 5_000 }).reason, /extraction finished/);
+    assert.match(at({ analysis: now - 10_000 }).reason, /analysis finished 10s ago \(quiet period 60s\)/);
+    assert.equal(at({ extraction: now - IDLE_THRESHOLD_MS - 1_000, analysis: now - ANALYSIS_QUIET_MS - 1_000 }).idle, true);
+    assert.equal(at({ import: now - 1_000 }).idle, true, 'a worker import is not an extraction');
   });
 });
 
@@ -414,6 +431,32 @@ console.log('LOCAL_COMPLETION '+result.ok);`;
     assert.match(done, /backup written \/tmp\/backups\/state-20260926T120000000Z\.db/);
   });
 
+  it('runOnce logs the phase times of a cycle that overran the hard cap', async () => {
+    const idle = () => ({
+      current_job: null, queue_depth: 0,
+      history: { extraction: { count: 0, avg_ms: 0 }, analysis: { count: 0, avg_ms: 0 } },
+      recent_fallbacks: [],
+    });
+    const logs = [];
+    const scheduler = createConsolidationScheduler({
+      getStateFn: idle,
+      log: (msg) => logs.push(msg),
+      notifyFailure: async () => {},
+      hardCapMs: 20,
+      runCycle: async ({ signal }) => {
+        await new Promise((r) => signal.addEventListener('abort', r, { once: true }));
+        return { aborted: true, abortedAt: 'summaries-midloop', phaseMs: { init: 1, decay: 2, summaries: 17 } };
+      },
+    });
+
+    const result = await scheduler.runOnce();
+
+    assert.equal(result.ok, false);
+    const failed = logs.find((l) => l.includes('cycle failed'));
+    assert.match(failed, /exceeded hard cap \(20ms\)/);
+    assert.match(failed, /\[phases: init=1ms decay=2ms summaries=17ms\]/);
+  });
+
   it('runOnce skips when system is busy', async () => {
     const getStateFn = () => ({
       current_job: { type: 'extraction', elapsed_ms: 1000 },
@@ -430,5 +473,41 @@ console.log('LOCAL_COMPLETION '+result.ok);`;
     assert.equal(result.skipped, true);
     assert.ok(result.reason.includes('extraction'));
     assert.ok(logs.some(l => l.includes('skipping')));
+  });
+
+  it('CLI --daemon stays up without NATS until SIGTERM', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'consolidation-daemon-'));
+    const child = spawn(process.execPath, [
+      fileURLToPath(new URL('../bin/consolidation-scheduler.mjs', import.meta.url)),
+      '--daemon', '--no-events', '--interval', '3600000',
+    ], { stdio: 'ignore', env: { ...process.env, HOME: dir } });
+    const exited = once(child, 'exit');
+    try {
+      const early = await Promise.race([
+        exited.then(() => 'exited'),
+        new Promise(r => setTimeout(() => r('alive'), 1000)),
+      ]);
+      assert.equal(early, 'alive', `daemon exited early with code ${child.exitCode}`);
+      child.kill('SIGTERM');
+      const [code] = await exited;
+      assert.equal(code, 0);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Both CLIs logged `NATS connected (${natsUrl})`, and natsUrl is undefined
+// unless NATS_URL overrides the resolver, so the log read "(undefined)".
+describe('consolidation CLIs log the resolved NATS server', () => {
+  it('interpolates the resolved connect options, not the raw override', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const f of ['../bin/consolidate.mjs', '../bin/consolidation-scheduler.mjs']) {
+      const src = readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+      const line = src.split('\n').find((l) => l.includes('NATS connected ('));
+      assert.match(line, /\$\{connectOpts\.servers\}/, f);
+      assert.match(src, /const connectOpts = natsConnectOpts\(/, f);
+    }
   });
 });

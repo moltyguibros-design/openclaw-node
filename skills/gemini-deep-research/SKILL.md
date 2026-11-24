@@ -8,7 +8,6 @@ triggers:
   - "gemini market research"
 negative_triggers:
   - "quick web search"
-  - "use the deep-research skill"
   - "summarize this link"
 metadata: {"clawdbot":{"emoji":"🔬","requires":{"env":["GEMINI_API_KEY"]},"primaryEnv":"GEMINI_API_KEY"}}
 ---
@@ -35,27 +34,27 @@ Deep Research is an agent that:
 ### Basic Research
 
 ```bash
-scripts/deep_research.py --query "Research the history of Google TPUs"
+python3 {baseDir}/scripts/deep_research.py --query "Research the history of Google TPUs"
 ```
 
 ### Custom Output Format
 
 ```bash
-scripts/deep_research.py --query "Research the competitive landscape of EV batteries" \
+python3 {baseDir}/scripts/deep_research.py --query "Research the competitive landscape of EV batteries" \
   --format "1. Executive Summary\n2. Key Players (include data table)\n3. Supply Chain Risks"
 ```
 
 ### With File Search (optional)
 
 ```bash
-scripts/deep_research.py --query "Compare our 2025 fiscal year report against current public web news" \
+python3 {baseDir}/scripts/deep_research.py --query "Compare our 2025 fiscal year report against current public web news" \
   --file-search-store "fileSearchStores/my-store-name"
 ```
 
 ### Stream Progress
 
 ```bash
-scripts/deep_research.py --query "Your research topic" --stream
+python3 {baseDir}/scripts/deep_research.py --query "Your research topic" --stream
 ```
 
 ## Output

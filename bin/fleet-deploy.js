@@ -1,21 +1,17 @@
 /**
  * fleet-deploy.js — Lead-side fleet deploy orchestrator.
  *
- * This replaces the SSH remote block in mesh-deploy-v2.js.
  * Instead of SSH-ing to each node, it:
  *   1. Reads MESH_NODES KV to discover the fleet
  *   2. Publishes mesh.deploy.trigger on NATS
  *   3. Watches MESH_DEPLOY_RESULTS KV for results
  *   4. Prints results as they arrive
  *
- * Integrate into mesh-deploy-v2.js by replacing the "Remote deploy" section
- * with: await fleetDeploy(opts)
- *
  * Can also be called standalone: node fleet-deploy.js [options]
  */
 
 const { connect, StringCodec } = require('nats');
-const fs = require('fs');
+const { execFileSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const { createTracer, setNatsConnection } = require('../lib/tracer');
@@ -24,12 +20,12 @@ const tracer = createTracer('fleet-deploy');
 // ── Config ───────────────────────────────────────────────────────────────
 
 const { NATS_URL, natsConnectOpts } = require('../lib/nats-resolve');
+const { openMeshKv } = require('../lib/mesh-kv');
+const { RESULTS_BUCKET, RESULTS_KV_OPTS, openLatestKv, writeLatestMarker } = require('../lib/deploy-latest-marker');
 const sc = StringCodec();
 const REPO_DIR = process.env.OPENCLAW_REPO_DIR || path.join(os.homedir(), 'openclaw');
-const NODE_ID = process.env.OPENCLAW_NODE_ID ||
-  os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+const NODE_ID = require('../lib/node-id').resolveNodeId();
 
-const RESULTS_BUCKET = 'MESH_DEPLOY_RESULTS';
 const NODES_BUCKET = 'MESH_NODES';
 const HEALTH_BUCKET = 'MESH_NODE_HEALTH';
 
@@ -71,7 +67,7 @@ async function discoverNodes(nc) {
 
   // Try MESH_NODES bucket first (deploy-aware registry)
   try {
-    const kv = await js.views.kv(NODES_BUCKET, { history: 1 }); // No TTL — node identity persists
+    const kv = await openMeshKv(js, NODES_BUCKET, { history: 1 }, { waitMs: 0 }); // No TTL — node identity persists
     const keys = await kv.keys();
     for await (const key of keys) {
       try {
@@ -86,7 +82,7 @@ async function discoverNodes(nc) {
   // Fall back to MESH_NODE_HEALTH if MESH_NODES is empty
   if (nodes.length === 0) {
     try {
-      const kv = await js.views.kv(HEALTH_BUCKET, { history: 1, ttl: 120000 });
+      const kv = await openMeshKv(js, HEALTH_BUCKET, { history: 1, ttl: 120000 }, { waitMs: 0 });
       const keys = await kv.keys();
       for await (const key of keys) {
         try {
@@ -97,7 +93,7 @@ async function discoverNodes(nc) {
               nodeId: health.nodeId || key,
               role: health.role || 'worker',
               platform: health.platform || 'unknown',
-              deployVersion: null,
+              deployVersion: health.deployVersion && health.deployVersion !== 'unknown' ? health.deployVersion : null,
               lastSeen: health.reportedAt || null,
             });
           }
@@ -112,17 +108,43 @@ async function discoverNodes(nc) {
 
 // ── Fleet Status ─────────────────────────────────────────────────────────
 
+const STATUS_REPLY_MS = 3000;
+
+/**
+ * Ask one node's deploy listener for its live state (mesh.deploy.status.<nodeId>).
+ * Null when it does not answer in time, or its id cannot be a subject token.
+ */
+async function queryNodeStatus(nc, nodeId, timeoutMs = STATUS_REPLY_MS) {
+  if (typeof nodeId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(nodeId)) return null;
+  try {
+    const msg = await nc.request(`mesh.deploy.status.${nodeId}`, sc.encode(''), { timeout: timeoutMs });
+    return JSON.parse(sc.decode(msg.data));
+  } catch {
+    return null;
+  }
+}
+
+// The branch a fleet deploy from here would send (triggerBranch), so nodes are measured
+// against what `fleet-deploy` would deploy rather than a hardcoded main.
+function statusBranch(repoDir) {
+  let branch;
+  try { branch = triggerBranch(repoDir); } catch { branch = process.env.OPENCLAW_DEPLOY_BRANCH || 'main'; }
+  if (!/^[a-zA-Z0-9._/-]+$/.test(branch)) throw new Error(`Unsafe branch name: ${branch}`);
+  return branch;
+}
+
 async function showStatus(nc) {
   header('Fleet Deploy Status');
 
   const nodes = await discoverNodes(nc);
+  const branch = statusBranch(REPO_DIR);
   const localSha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR, ignoreError: true });
 
   // Fetch to see if remote is ahead
-  exec(`git fetch origin main`, { cwd: REPO_DIR, ignoreError: true });
-  const remoteSha = exec('git rev-parse --short origin/main', { cwd: REPO_DIR, ignoreError: true });
+  exec(`git fetch origin ${branch}`, { cwd: REPO_DIR, ignoreError: true });
+  const remoteSha = exec(`git rev-parse --short origin/${branch}`, { cwd: REPO_DIR, ignoreError: true });
 
-  console.log(`  Repo:     main @ ${remoteSha} ${localSha === remoteSha ? C.green('(pushed)') : C.yellow('(local: ' + localSha + ')')}`);
+  console.log(`  Repo:     ${branch} @ ${remoteSha || '?'} ${localSha === remoteSha ? C.green('(pushed)') : C.yellow('(local: ' + localSha + ')')}`);
   console.log(`  Nodes:    ${nodes.length} registered\n`);
 
   if (nodes.length === 0) {
@@ -130,20 +152,32 @@ async function showStatus(nc) {
     return;
   }
 
+  // The registry entry can be a minute old; a node's own answer is current.
+  const live = await Promise.all(nodes.map((node) => queryNodeStatus(nc, node.nodeId)));
+  const sameSha = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
+
   // Table header
-  const pad = (s, n) => (s || '').slice(0, n).padEnd(n);
+  // Colour codes take no columns: slicing a coloured cell cut its label and its reset.
+  const pad = (s, n) => {
+    const text = s || '';
+    const shown = text.replace(/\x1b\[[0-9;]*m/g, '');
+    return shown === text ? text.slice(0, n).padEnd(n) : text + ' '.repeat(Math.max(0, n - shown.length));
+  };
   console.log(`  ${C.dim(pad('NODE', 22) + pad('ROLE', 10) + pad('VERSION', 10) + pad('STATUS', 10) + 'LAST SEEN')}`);
   console.log(`  ${C.dim('─'.repeat(70))}`);
 
-  for (const node of nodes) {
-    const version = node.deployVersion || '—';
-    const isCurrent = version === remoteSha;
+  nodes.forEach((node, i) => {
+    const reply = live[i];
+    const reported = reply ? reply.deployVersion : node.deployVersion;
+    const version = reported && reported !== 'unknown' ? reported : '—';
+    const isCurrent = sameSha(version, remoteSha);
     const isUs = node.nodeId === NODE_ID;
 
-    // Calculate staleness from lastSeen
     let lastSeen = '—';
-    let online = false;
-    if (node.lastSeen) {
+    let online = Boolean(reply);
+    if (reply) {
+      lastSeen = 'now (live)';
+    } else if (node.lastSeen) {
       const ageMs = Date.now() - new Date(node.lastSeen).getTime();
       const ageSec = Math.round(ageMs / 1000);
       online = ageSec < 120;
@@ -151,9 +185,11 @@ async function showStatus(nc) {
       else if (ageSec < 3600) lastSeen = `${Math.floor(ageSec / 60)}m ago`;
       else if (ageSec < 86400) lastSeen = `${Math.floor(ageSec / 3600)}h ago`;
       else lastSeen = `${Math.floor(ageSec / 86400)}d ago`;
+      lastSeen += ', no reply';
     }
 
     const status = !online ? C.red('OFFLINE')
+      : reply?.deploying ? C.cyan('DEPLOYING')
       : !isCurrent && version !== '—' ? C.yellow('BEHIND')
       : version === '—' ? C.dim('UNKNOWN')
       : C.green('current');
@@ -161,7 +197,7 @@ async function showStatus(nc) {
     const nameStr = isUs ? C.bold(node.nodeId) + C.dim(' (you)') : node.nodeId;
 
     console.log(`  ${pad(nameStr, 22)}${pad(node.role || '—', 10)}${pad(version, 10)}${pad(status, 10)}${lastSeen}`);
-  }
+  });
   console.log('');
 }
 
@@ -174,9 +210,35 @@ async function showStatus(nc) {
  *   3. Watch MESH_DEPLOY_RESULTS for results (with timeout)
  *   4. Print results as they stream in
  */
+// A detached lead (mesh-deploy --rollback, pinned and off-branch deploys all
+// `checkout --detach`) reports 'HEAD'; listeners would then validate against
+// origin/HEAD, which their `git fetch origin HEAD` never updates.
+function triggerBranch(repoDir) {
+  const b = exec('git rev-parse --abbrev-ref HEAD', { cwd: repoDir });
+  return b === 'HEAD' ? (process.env.OPENCLAW_DEPLOY_BRANCH || 'main') : b;
+}
+
+// The short sha a fleet trigger carries: origin's tip of the branch, fetched
+// now. The lead's HEAD is a working checkout, behind origin or ahead of it.
+function originTip(repoDir, branch) {
+  if (!/^[a-zA-Z0-9._/-]+$/.test(branch) || branch.startsWith('-')) throw new Error(`Unsafe branch name: ${branch}`);
+  execFileSync('git', ['fetch', 'origin', branch], { cwd: repoDir, stdio: ['ignore', 'ignore', 'pipe'], timeout: 60000 });
+  return execFileSync('git', ['rev-parse', '--short', `origin/${branch}^{commit}`], { cwd: repoDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+const noResults = expected => ({ expected, succeeded: 0, skipped: 0, failed: 0, missing: 0, stillDeploying: 0 });
+
+// A node that has not written its 'deploying' status by then is offline or has
+// no listener: it catches up on reconnect, so a long wait never waits for it.
+const START_WAIT_MS = 120000;
+
+// The caller names the sha and branch it resolved (mesh-deploy: origin's tip),
+// never the lead checkout's HEAD, which a remote-only deploy leaves stale.
 async function fleetDeploy(nc, opts) {
-  const { components, targetNodes, dryRun, force, timeoutMs } = opts;
+  const { components, targetNodes, dryRun, force, schemaOverride, timeoutMs, sha, branch, startWaitMs = START_WAIT_MS } = opts;
   const timeout = timeoutMs || 120000; // 2 min default
+  if (!sha) throw new Error('fleetDeploy needs the sha to deploy (opts.sha)');
+  if (!/^[a-zA-Z0-9._/-]+$/.test(branch || '')) throw new Error(`Unsafe branch name: ${branch}`);
 
   const nodes = await discoverNodes(nc);
   // Exclude ourselves (we already deployed locally)
@@ -186,15 +248,7 @@ async function fleetDeploy(nc, opts) {
 
   if (remoteNodes.length === 0) {
     info('No remote nodes to deploy to');
-    return;
-  }
-
-  // Get the current SHA to deploy
-  const sha = exec('git rev-parse --short HEAD', { cwd: REPO_DIR });
-  const rawBranch = exec('git rev-parse --abbrev-ref HEAD', { cwd: REPO_DIR });
-  const branch = rawBranch.replace(/[^a-zA-Z0-9._/-]/g, '');
-  if (!branch || branch !== rawBranch) {
-    throw new Error(`Unsafe branch name from local git: ${rawBranch}`);
+    return noResults(0);
   }
 
   header(`Fleet Deploy: ${sha} → ${remoteNodes.length} node(s)`);
@@ -207,12 +261,13 @@ async function fleetDeploy(nc, opts) {
 
   if (dryRun) {
     info('Dry run — would publish deploy trigger. No changes made.');
-    return;
+    return noResults(remoteNodes.length);
   }
 
   // Get the results KV bucket
   const js = nc.jetstream();
-  const resultsKv = await js.views.kv(RESULTS_BUCKET, { history: 5, ttl: 7 * 24 * 60 * 60 * 1000 });
+  const resultsKv = await openMeshKv(js, RESULTS_BUCKET, RESULTS_KV_OPTS, { waitMs: 0 });
+  const latestKv = await openLatestKv(js, { waitMs: 0 });
 
   const trigger = {
     sha,
@@ -222,16 +277,26 @@ async function fleetDeploy(nc, opts) {
     timestamp: new Date().toISOString(),
     nodes: targetNodes || ['all'],
     force: !!force,
+    // Lets a listener roll back below its memory store's schema: signed with the rest.
+    ...(schemaOverride ? { schemaOverride: true } : {}),
   };
 
-  // Sign the trigger (best-effort) so signed-deploy listeners accept it. C2:
-  // harmless when no listener enforces signatures; required once they do.
-  const { maybeSignDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
-  const signedTrigger = maybeSignDeployTrigger(trigger);
+  // Every listener is strict by default and rejects an unsigned trigger, so the
+  // trigger (and the catch-up marker carrying it) goes out signed or not at all.
+  const { signDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
+  let signedTrigger;
+  try {
+    signedTrigger = signDeployTrigger(trigger);
+  } catch (err) {
+    throw new Error(`[deploy-auth] could not sign trigger: ${err.message}`);
+  }
 
   // The "latest" catch-up marker carries the SAME signed trigger — an unsigned
-  // marker let anyone with KV write access steer every catching-up node.
-  await resultsKv.put('latest', sc.encode(JSON.stringify(signedTrigger)));
+  // marker let anyone with KV write access steer every catching-up node. Only a
+  // fleet-wide deploy moves it: a node that missed one and comes back after a
+  // targeted deploy must still catch up to it.
+  if (trigger.nodes.includes('all')) await writeLatestMarker({ latestKv, resultsKv }, signedTrigger);
+  else info('targeted deploy: catch-up marker unchanged');
 
   console.log(`Publishing deploy trigger: sha=${sha} nodes=${(targetNodes || ['all']).join(',')}`);
   nc.publish('mesh.deploy.trigger', sc.encode(JSON.stringify(signedTrigger)));
@@ -243,6 +308,7 @@ async function fleetDeploy(nc, opts) {
 
   const expectedNodes = new Set(remoteNodes.map(n => n.nodeId));
   const nodeResults = new Map(); // nodeId → { status, ... }
+  const deploying = new Set();
   const startTime = Date.now();
   let allDone = false;
 
@@ -257,10 +323,11 @@ async function fleetDeploy(nc, opts) {
           const result = JSON.parse(sc.decode(entry.value));
 
           if (result.status === 'deploying') {
-            // Still working — skip for now
+            deploying.add(nodeId);
             continue;
           }
 
+          deploying.delete(nodeId);
           nodeResults.set(nodeId, result);
           const dur = result.durationSeconds || '?';
 
@@ -271,6 +338,8 @@ async function fleetDeploy(nc, opts) {
                 warn(`  ${nodeId}: ${w}`);
               }
             }
+          } else if (result.status === 'skipped') {
+            info(`${nodeId} — skipped: ${result.log || 'not applicable to this node'}`);
           } else {
             fail(`${nodeId} — ${result.status} after ${dur}s`);
             if (result.errors) {
@@ -283,15 +352,21 @@ async function fleetDeploy(nc, opts) {
       } catch (err) { console.warn(`[fleet-deploy] poll deploy result: ${err.message}`); }
     }
 
-    allDone = nodeResults.size >= expectedNodes.size;
+    const started = Date.now() - startTime >= startWaitMs;
+    allDone = [...expectedNodes].every(n => nodeResults.has(n) || (started && !deploying.has(n)));
     if (!allDone) await new Promise(r => setTimeout(r, 2000)); // Poll every 2s
   }
 
   // Report stragglers
   console.log('');
-  const missing = [...expectedNodes].filter(n => !nodeResults.has(n));
-  if (missing.length > 0) {
-    warn(`${missing.length} node(s) did not report within ${timeout / 1000}s:`);
+  const unreported = [...expectedNodes].filter(n => !nodeResults.has(n));
+  const stillDeploying = unreported.filter(n => deploying.has(n));
+  const missing = unreported.filter(n => !deploying.has(n));
+  if (unreported.length > 0) {
+    warn(`${unreported.length} node(s) did not report a result:`);
+    for (const n of stillDeploying) {
+      console.log(`    ${C.yellow('●')} ${n} — still deploying (the listener allows up to 20 min)`);
+    }
     for (const n of missing) {
       console.log(`    ${C.yellow('●')} ${n} — may be offline, will auto-catch-up on reconnect`);
     }
@@ -299,15 +374,19 @@ async function fleetDeploy(nc, opts) {
 
   // Summary — count actual success vs failure from collected results
   const succeeded = [...nodeResults.values()].filter(r => r.status === 'success').length;
-  const failed = [...nodeResults.values()].filter(r => r.status !== 'success').length;
+  const skipped = [...nodeResults.values()].filter(r => r.status === 'skipped').length;
+  const failed = [...nodeResults.values()].filter(r => r.status !== 'success' && r.status !== 'skipped').length;
 
   header('Fleet Deploy Summary');
   console.log(`  SHA:       ${sha}`);
   console.log(`  Reported:  ${nodeResults.size}/${expectedNodes.size}`);
   console.log(`  Succeeded: ${C.green(succeeded.toString())}`);
+  if (skipped > 0) console.log(`  Skipped:   ${C.yellow(skipped.toString())} (nothing to deploy on that node)`);
   if (failed > 0) console.log(`  Failed:    ${C.red(failed.toString())}`);
+  if (stillDeploying.length > 0) console.log(`  Deploying: ${C.yellow(stillDeploying.length.toString())} (still running)`);
   if (missing.length > 0) console.log(`  Pending:   ${C.yellow(missing.length.toString())} (will auto-catch-up)`);
   console.log('');
+  return { expected: expectedNodes.size, succeeded, skipped, failed, missing: missing.length, stillDeploying: stillDeploying.length };
 }
 
 // ── Tracer Instrumentation ───────────────────────────────────────────────
@@ -360,19 +439,21 @@ async function main() {
     if (showStatusFlag) {
       await showStatus(nc);
     } else {
-      await fleetDeploy(nc, {
+      const branch = statusBranch(REPO_DIR);
+      const sha = originTip(REPO_DIR, branch);
+      const outcome = await fleetDeploy(nc, {
         components: components.length > 0 ? components : null,
         targetNodes: targetNodes.length > 0 ? targetNodes : null,
-        dryRun, force, timeoutMs,
+        sha, branch, dryRun, force, timeoutMs,
       });
+      if (outcome.failed > 0) process.exitCode = 1;
     }
   } finally {
     await nc.close();
   }
 }
 
-// Export for integration into mesh-deploy-v2.js
-module.exports = { fleetDeploy, showStatus, discoverNodes };
+module.exports = { fleetDeploy, showStatus, discoverNodes, triggerBranch, queryNodeStatus, statusBranch, originTip };
 
 // Standalone mode
 if (require.main === module) {

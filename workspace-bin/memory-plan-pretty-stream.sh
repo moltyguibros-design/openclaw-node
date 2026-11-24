@@ -8,7 +8,7 @@
 // every tool call with full arguments, every tool result in full, every
 // assistant message in full.
 //
-// Used by memory-plan-tick.sh. Each input line is one JSON event; output is
+// Used by plan-tick.sh. Each input line is one JSON event; output is
 // one event header line plus indented body lines.
 
 const readline = require('readline');

@@ -7,21 +7,23 @@
  * each incoming event against an ingestion policy, filters out self-originated
  * events, and projects accepted events to local stores with provenance tracking.
  *
- * Mirrors the promoter's architecture (health-check + exponential backoff,
- * graceful shutdown) but operates in the reverse direction: shared → local.
+ * Operates in the reverse direction of the promoter: shared → local. A failed
+ * projection is retried with the federation layer's delayed nak and dropped at
+ * the consumer's max_deliver (settleFederationMessage).
  *
  * Usage:
  *   node bin/memory-subscriber.mjs
  *
  * Environment:
  *   NATS_URL           — NATS server URL (default: nats://localhost:4222)
- *   OPENCLAW_NODE_ID   — Node identifier (default: os.hostname())
+ *   OPENCLAW_NODE_ID   — Node identifier (default: lib/node-id resolveNodeId())
  */
 
-import os from 'node:os';
+import { resolveNodeId } from '../lib/node-id.js';
 import { createRequire } from 'node:module';
-import { ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
-import { createBackoff } from './memory-promoter.mjs';
+import { ensureExplicitAckConsumer, ensureSharedStream, SHARED_STREAM_NAME } from '../lib/shared-event-stream.mjs';
+import { settleFederationMessage } from '../lib/federation-resilience.mjs';
+import { canonicalNodeId } from '../lib/local-event-log.mjs';
 
 const _require = createRequire(import.meta.url);
 const { natsConnectOpts } = _require('../lib/nats-resolve.js');
@@ -121,11 +123,12 @@ export function evaluateIngestionPolicy(event, nodeId, parsed) {
  *   from JetStream's redelivery queue with no projection — events evaporate.
  *   F-N107 fix: was optional, which made an entire class of "subscriber wired
  *   but no consumer" bugs silent. Throw early so the misconfiguration is
- *   visible at startup.
- * @param {object} [opts.backoffOpts] - Backoff controller options
+ *   visible at startup. May be async: it is awaited before the ack, and a throw
+ *   or rejection naks with a delay.
  * @param {function} [opts.onSkip] - Callback(event, result) on skipped event
  * @param {function} [opts.onError] - Callback(context, err) on errors
- * @returns {Promise<{ stop: function, backoff: object, stats: object }>}
+ * @param {function} [opts.log] - Receives consumer migration notices (default console.log)
+ * @returns {Promise<{ stop: function, stats: object }>}
  */
 export async function createSubscriber(nc, nodeId, opts = {}) {
   // F-N107: fail fast on missing onIngest.
@@ -155,7 +158,7 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
       else process.stderr.write(warn + '\n');
     }
   } catch { /* toString may fail on bound/native fns — ignore */ }
-  const { StringCodec } = _require('nats');
+  const { StringCodec, DeliverPolicy } = _require('nats');
   const sc = StringCodec();
 
   // Ensure shared stream exists (degraded mode if unreachable)
@@ -170,30 +173,21 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
   if (!sharedAvailable) {
     // Cannot subscribe without the stream — return a no-op subscriber
     // that can be stopped. The caller can retry on next tick.
-    const backoff = createBackoff(opts.backoffOpts);
-    backoff.recordFailure();
     return {
       stop() { return Promise.resolve(); },
-      backoff,
       stats: { ingested: 0, skipped: 0, errors: 0 },
     };
   }
 
   const js = nc.jetstream();
   const jsm = await nc.jetstreamManager();
-  const backoff = createBackoff(opts.backoffOpts);
 
-  const consumerName = `subscriber-${nodeId}`;
+  const consumerName = `subscriber-${canonicalNodeId(nodeId)}`;
 
-  // Ensure durable consumer on shared stream
-  try {
-    await jsm.consumers.info(SHARED_STREAM_NAME, consumerName);
-  } catch {
-    await jsm.consumers.add(SHARED_STREAM_NAME, {
-      durable_name: consumerName,
-      deliver_policy: 'new',
-    });
-  }
+  await ensureExplicitAckConsumer(jsm, SHARED_STREAM_NAME, {
+    durable_name: consumerName,
+    deliver_policy: DeliverPolicy.New,
+  }, opts.log ?? console.log);
 
   const stats = { ingested: 0, skipped: 0, errors: 0 };
   let running = true;
@@ -226,14 +220,12 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
 
         try {
           // F-N107: opts.onIngest is validated as required at factory init.
-          opts.onIngest(event, parsed, provenance);
-          backoff.reset();
+          await opts.onIngest(event, parsed, provenance);
           stats.ingested++;
         } catch (err) {
-          backoff.recordFailure();
           stats.errors++;
           if (opts.onError) opts.onError('projection', err);
-          msg.nak();
+          settleFederationMessage(msg, { failed: true, eventId: event.event_id });
           continue;
         }
       } else {
@@ -252,7 +244,6 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
       iter.stop();
       return processingLoop;
     },
-    backoff,
     stats,
   };
 }
@@ -262,10 +253,10 @@ export async function createSubscriber(nc, nodeId, opts = {}) {
 async function main() {
   const { connect } = _require('nats');
 
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
   const nc = await connect(natsConnectOpts({ servers: process.env.NATS_URL }));
-  console.log(`[subscriber] connected to ${natsUrl} as node ${nodeId}`);
+  console.log(`[subscriber] connected to ${nc.getServer()} as node ${nodeId}`);
 
   const subscriber = await createSubscriber(nc, nodeId, {
     onIngest: (event, parsed, provenance) => {

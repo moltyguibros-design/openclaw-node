@@ -10,7 +10,7 @@ const WATCHER_JSONL = path.join(path.dirname(WORKSPACE_ROOT), "watcher.jsonl");
 function parseJsonlTail(filePath: string, maxLines: number): unknown[] {
   if (!fs.existsSync(filePath)) return [];
   // Tail-read (repair 6.6): the file grows without bound between rotations
-  // and is re-read on every 3s poll ×3 hooks — read only the last window
+  // and is re-read on every 3s poll — read only the last window
   // instead of the whole file, so API cost is independent of history size.
   const WINDOW_BYTES = 512 * 1024;
   const size = fs.statSync(filePath).size;

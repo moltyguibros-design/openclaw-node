@@ -14,7 +14,9 @@ function buildFixtureEvent(...args) {
   MemoryEventSchema.parse(event);
   return event;
 }
-import { toWatcherRecord, classifyStatus, runStoreHealthProbes, createAnomalyDetector, appendWatcherRecord } from '../lib/memory-watcher.mjs';
+import { toWatcherRecord, classifyStatus, runStoreHealthProbes, createAnomalyDetector, appendWatcherRecord, createMemoryWatcher } from '../lib/memory-watcher.mjs';
+import { createPromoter } from '../bin/memory-promoter.mjs';
+import { eventStreamRetention } from '../lib/local-event-log.mjs';
 
 describe('toWatcherRecord', () => {
   it('extracts flat record from memory.ingested event', () => {
@@ -350,6 +352,26 @@ describe('runStoreHealthProbes', () => {
     assert.equal(typeof result.stores.graph_cache.wal_bytes, 'number');
   });
 
+  it('probes the graph cache at GRAPH_CACHE_DB_PATH when no graphCacheDb is passed', async () => {
+    const dbPath = path.join(tmpDir, 'env-graph.db');
+    seedGraphCacheDb(dbPath);
+    const prior = process.env.GRAPH_CACHE_DB_PATH;
+    process.env.GRAPH_CACHE_DB_PATH = dbPath;
+    try {
+      const result = await runStoreHealthProbes({
+        stateDb: path.join(tmpDir, 'nonexistent.db'),
+        knowledgeDb: path.join(tmpDir, 'nonexistent.db'),
+        workspaceLib: '/nonexistent/lib',
+        workspaceDaemon: '/nonexistent/daemon',
+      });
+      assert.equal(result.stores.graph_cache.nodes, 2);
+      assert.equal(result.stores.graph_cache.edges, 1);
+    } finally {
+      if (prior === undefined) delete process.env.GRAPH_CACHE_DB_PATH;
+      else process.env.GRAPH_CACHE_DB_PATH = prior;
+    }
+  });
+
   it('returns null for missing databases', async () => {
     const result = await runStoreHealthProbes({
       stateDb: path.join(tmpDir, 'nope.db'),
@@ -368,18 +390,23 @@ describe('runStoreHealthProbes', () => {
   it('reports WAL size when WAL file exists', async () => {
     const dbPath = path.join(tmpDir, 'wal-test.db');
     seedStateDb(dbPath);
-    const walPath = dbPath + '-wal';
-    assert.ok(fs.existsSync(walPath) || true);
-    const result = await runStoreHealthProbes({
-      stateDb: dbPath,
-      knowledgeDb: path.join(tmpDir, 'nope.db'),
-      graphCacheDb: path.join(tmpDir, 'nope.db'),
-      workspaceLib: '/nonexistent/lib',
-      workspaceDaemon: '/nonexistent/daemon',
-      Database,
-    });
-    assert.equal(typeof result.stores.state.wal_bytes, 'number');
-    assert.ok(result.stores.state.wal_bytes >= 0);
+    // The last connection to close checkpoints and deletes the WAL, so hold one open.
+    const holder = new Database(dbPath);
+    try {
+      holder.prepare('INSERT INTO decisions VALUES (?, ?)').run(2, 'hold wal');
+      assert.ok(fs.existsSync(dbPath + '-wal'));
+      const result = await runStoreHealthProbes({
+        stateDb: dbPath,
+        knowledgeDb: path.join(tmpDir, 'nope.db'),
+        graphCacheDb: path.join(tmpDir, 'nope.db'),
+        workspaceLib: '/nonexistent/lib',
+        workspaceDaemon: '/nonexistent/daemon',
+        Database,
+      });
+      assert.ok(result.stores.state.wal_bytes > 0);
+    } finally {
+      holder.close();
+    }
   });
 
   it('checks drift symlinks correctly', async () => {
@@ -432,6 +459,25 @@ describe('createAnomalyDetector', () => {
     assert.equal(first.length, 1);
     const second = detector.evaluate({ ...record, session: 's2' });
     assert.equal(second.length, 0);
+  });
+
+  it('a non-extract memory.error fires memory_error with its own cooldown per boundary', () => {
+    const detector = createAnomalyDetector({ cooldownMs: 60000 });
+    const ts = new Date().toISOString();
+    const retrieve = detector.evaluate({ ts, op: 'memory.error', status: 'error', data: { boundary: 'retrieve' } });
+    assert.equal(retrieve.length, 1);
+    assert.equal(retrieve[0].alert_type, 'memory_error');
+    assert.match(retrieve[0].detail, /retrieve/);
+    assert.equal(retrieve[0].boundary, 'retrieve');
+    assert.deepEqual(detector.evaluate({ ts, op: 'memory.error', status: 'error', data: { boundary: 'retrieve' } }), []);
+
+    const extract = detector.evaluate({ ts, op: 'memory.error', status: 'error', session: 's1', data: { boundary: 'extract' } });
+    assert.equal(extract.length, 1);
+    assert.equal(extract[0].alert_type, 'extraction_failure');
+
+    const ingest = detector.evaluate({ ts, op: 'memory.error', status: 'error', data: { boundary: 'ingest' } });
+    assert.equal(ingest.length, 1, 'another boundary is not muted by the retrieve cooldown');
+    assert.equal(ingest[0].alert_type, 'memory_error');
   });
 
   it('fires extraction_failure_rate when threshold crossed', () => {
@@ -581,5 +627,51 @@ describe('R41 (repair 7.8): the gateway-era vocabulary is watcher-consumed', () 
     }, 'daedalus');
     assert.equal(classifyStatus(artifact), 'ok');
     assert.equal(toWatcherRecord(artifact).session, 's-78');
+  });
+});
+
+describe('upgraded readers: an existing durable gets this node\'s filter', () => {
+  // An explicit-ack durable from before the per-node filter, as consumers.info reports it.
+  function existingConsumerNc(filterSubject) {
+    const updates = [];
+    const nc = {
+      jetstreamManager: async () => ({
+        streams: { info: async (name) => ({ config: { name, ...eventStreamRetention() }, state: { messages: 0, bytes: 0 } }) },
+        consumers: {
+          info: async (_stream, name) => ({ config: { durable_name: name, ack_policy: 'explicit', ...(filterSubject && { filter_subject: filterSubject }) } }),
+          add: async () => { throw new Error('the durable exists'); },
+          update: async (stream, name, cfg) => { updates.push({ stream, name, ...cfg }); },
+        },
+      }),
+      jetstream: () => ({
+        consumers: { get: async () => ({ consume: async () => ({ stop() {}, async *[Symbol.asyncIterator]() {} }) }) },
+      }),
+    };
+    return { nc, updates };
+  }
+
+  it('an unfiltered watcher and promoter durable is narrowed to local.<node>.> once, and logged', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'watcher-filter-'));
+    const { nc, updates } = existingConsumerNc(null);
+    const logs = [];
+    const watcher = await createMemoryWatcher(nc, 'Daedalus.local', { outputPath: path.join(dir, 'watcher.jsonl'), log: (m) => logs.push(m) });
+    await watcher.stop();
+    const promoter = await createPromoter(nc, 'Daedalus.local', { policy: { automatic: [] }, log: (m) => logs.push(m) });
+    await promoter.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(updates, [
+      { stream: 'local-events-daedalus', name: 'watcher-daedalus', filter_subject: 'local.daedalus.>' },
+      { stream: 'local-events-daedalus', name: 'promoter-daedalus', filter_subject: 'local.daedalus.>' },
+    ]);
+    assert.equal(logs.filter((l) => l.includes('filter_subject (none) -> local.daedalus.>')).length, 2, logs.join(' | '));
+  });
+
+  it('a durable already on this node\'s filter is left alone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'watcher-filter-'));
+    const { nc, updates } = existingConsumerNc('local.daedalus.>');
+    const watcher = await createMemoryWatcher(nc, 'daedalus', { outputPath: path.join(dir, 'watcher.jsonl') });
+    await watcher.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(updates, []);
   });
 });

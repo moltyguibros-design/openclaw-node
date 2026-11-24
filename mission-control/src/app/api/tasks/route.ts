@@ -8,12 +8,12 @@ import { syncTasksFromMarkdownIfChanged, syncTasksToMarkdown } from "@/lib/sync/
 import { logActivity } from "@/lib/activity";
 import { schedulerTick } from "@/lib/scheduler";
 import { generateTaskId } from "@/lib/task-id";
+import { isSafeId } from "@/lib/safe-path";
 import { getNats, sc } from "@/lib/nats";
-import { WORKSPACE_ROOT, AGENT_NAME } from "@/lib/config";
+import { WORKSPACE_ROOT, AGENT_NAME, resolveDaemonNodeId } from "@/lib/config";
 import path from "path";
-import os from "os";
 
-const NODE_ID = process.env.OPENCLAW_NODE_ID || os.hostname();
+const NODE_ID = resolveDaemonNodeId();
 
 /**
  * Parse .daemon-state-${NODE_ID}.md to extract current active task.
@@ -157,11 +157,31 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (body.id != null && body.id !== "" && !isSafeId(body.id)) {
+      return NextResponse.json(
+        { error: "id must be 1-128 letters, digits, '.', '_' or '-', starting with a letter or digit" },
+        { status: 400 }
+      );
+    }
+
+    // A recurring copy of a one-time trigger has no next time, so it never fires.
+    if (body.trigger_kind === "at" && body.is_recurring) {
+      return NextResponse.json(
+        { error: "A one-time (at) trigger cannot be recurring; use a cron trigger to repeat" },
+        { status: 400 }
+      );
+    }
 
     const status = body.status || "not started";
     const now = new Date();
     // Allow custom IDs for projects/pipelines/phases; auto-generate for tasks
     const taskId = body.id || generateTaskId(db, now);
+    if (body.parent_id && body.parent_id === taskId) {
+      return NextResponse.json({ error: "A task cannot be its own parent" }, { status: 400 });
+    }
+    if (db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()) {
+      return NextResponse.json({ error: `task ${taskId} already exists` }, { status: 409 });
+    }
 
     db.insert(tasks)
       .values({

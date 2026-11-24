@@ -70,7 +70,7 @@ export function NetworkTopology({ nodes, meshStatus }: Props) {
   const natsHostOnline = natsHostNode ? natsHostNode.status !== "offline" : null;
 
   // ── Tailscale state ──
-  const localNode = nodes.find((n) => n.health !== null);
+  const localNode = nodes.find((n) => n.isLocal);
   const allPeers: PeerView[] = localNode?.tailscale?.peers || [];
   const onlinePeers = allPeers.filter((p) => p.online);
   const offlinePeers = allPeers.filter((p) => !p.online);
@@ -378,11 +378,11 @@ export function NetworkTopology({ nodes, meshStatus }: Props) {
                           ) : peer.relay ? (
                             <span className="text-yellow-400">Via relay ({peer.relay})</span>
                           ) : (
-                            <span className="text-zinc-400">Connected</span>
+                            <span className="text-zinc-400">{peer.idle ? "Idle" : "Connected"}</span>
                           )}
-                          {(peer.latency?.latencyMs ?? peer.latencyMs) != null && (
+                          {peer.latency?.latencyMs != null && (
                             <span className="font-mono ml-2">
-                              {Math.round(peer.latency?.latencyMs ?? peer.latencyMs ?? 0)}ms RTT
+                              {Math.round(peer.latency.latencyMs)}ms RTT
                             </span>
                           )}
                         </>

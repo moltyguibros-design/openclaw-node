@@ -12,34 +12,7 @@ A Clawdbot skill for fetching cryptocurrency token prices and generating beautif
 
 ## Installation
 
-### Via ClawdHub
-
-```bash
-clawdhub install evgyur/crypto-price
-```
-
-### Manual Installation
-
-1. Clone or copy this skill to your Clawdbot workspace:
-   ```bash
-   cd ~/.clawdbot/workspace/skills
-   git clone https://github.com/evgyur/crypto-price.git
-   ```
-
-2. Ensure Python 3 is installed:
-   ```bash
-   python3 --version
-   ```
-
-3. Install required Python packages:
-   ```bash
-   pip install matplotlib
-   ```
-
-4. Verify installation:
-   ```bash
-   clawdbot skills info crypto-price
-   ```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy, which also installs its `requirements.txt` (matplotlib). Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Usage
 
@@ -122,7 +95,6 @@ The script returns JSON with the following structure:
   - Fractal swing high/low detection (true pivots, configurable window)
   - Volume bars (when available from API)
   - Last price highlighted on Y-axis
-  - Tomorrow font for crisp rendering
 - **Output**: PNG files saved to `/tmp/crypto_chart_{SYMBOL}_{timestamp}.png`
 
 ## Data Sources
@@ -170,13 +142,6 @@ Created for Clawdbot community. Originally part of Clawdbot bundled skills, rest
 ## Contributing
 
 Contributions welcome! Please feel free to submit a Pull Request.
-
-## Related Skills
-
-This skill works with slash command skills:
-- `/hype` - HYPE token price and chart
-- `/token <SYMBOL>` - Any token price and chart
-- `/btc`, `/eth`, `/sol`, etc. - Popular tokens
 
 ## Links
 

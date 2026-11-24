@@ -11,16 +11,16 @@ OpenClaw ships a unified tracer (`lib/tracer.js`) that instruments every signifi
 - **`dev` mode** — logs every function call unconditionally (~500 instrumentation points). Useful for local debugging and development.
 - **`smart` mode** (default) — applies a sampling filter that only emits events for: tier 1 functions, errors, state transitions, cross-node events, and slow calls (>500 ms). This keeps production NATS traffic manageable while preserving all operationally critical data.
 
-**Transport:** Each trace event is published to NATS on the subject `openclaw.trace.{nodeId}.{module}`. A 2,000-event in-memory ring buffer serves as a fallback for local reads when NATS is unavailable.
+**Transport:** Each daemon writes its trace events straight into the `observability_events` table of its own host's Mission Control SQLite database (`lib/obs-db.js`, `OPENCLAW_OBS_DB`). When the daemon has a NATS connection it also publishes each event on `openclaw.trace.{nodeId}.{module}`.
 
-**Mission Control (MC) Dashboard:** The Next.js MC app subscribes to `openclaw.trace.>` via a NATS wildcard, ingests events into a SQLite database (`observabilityEvents` table), and serves them through:
+**Mission Control (MC) Dashboard:** At server start (`src/instrumentation.ts`) MC subscribes to `openclaw.trace.>` and stores every node's events in its `observability_events` table (`src/lib/trace-ingest.ts`), so remote nodes' traces appear beside the same-host ones. Rows are keyed on the event `id` with `INSERT OR IGNORE`, so an event that arrives both directly and over NATS is stored once; an event whose `node_id` differs from the node in its subject is dropped. If NATS is unreachable MC retries every 30 s; traces published while MC is not subscribed are not recovered. MC also relays `openclaw.trace.>` to the browser:
 
-- `/api/observability/events` — paginated event query
-- `/api/observability/stream` — SSE live feed
+- `/api/observability/events` — paginated event query (SQLite, all nodes)
+- `/api/observability/stream` — SSE live feed (NATS relay)
 - `/api/observability/nodes` — per-node health aggregation
-- `/api/observability/config` — runtime trace mode toggle
+- `/api/observability/config` — trace mode switch. Daemons start in `OPENCLAW_TRACE_MODE` (default `smart`). A PATCH publishes `{ mode }` on `openclaw.trace.config` as a signed operator request (`lib/operator-auth.mjs`); each daemon's tracer verifies it against the operator allowlist and switches. A daemon that restarts returns to `OPENCLAW_TRACE_MODE`.
 
-The dashboard UI includes a live feed, event timeline, and system map for real-time visibility into all mesh nodes.
+The dashboard page is a trace log that polls `/api/observability/events` every 3 s (last 24 h, all nodes) with module, level and text filters.
 
 **Trace Event Schema:** Every event carries: `id`, `timestamp`, `node_id`, `module`, `function`, `tier` (1-3), `category` (lifecycle/state_transition/error/cross_node/compute), `args_summary`, `result_summary`, `duration_ms`, `error`, and optional `meta`.
 
@@ -39,22 +39,22 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | System Layer | Tier 1 | Tier 2 | Tier 3 | Total |
 |-------------|--------|--------|--------|-------|
 | Task Lifecycle Protocol | 16 | 38 | 10 | 64 |
-| Collaboration Protocol | 16 | 13 | 1 | 30 |
+| Collaboration Protocol | 15 | 13 | 1 | 29 |
 | Plan Pipeline Protocol | 10 | 8 | 0 | 18 |
 | Mesh Network Layer | 5 | 19 | 7 | 31 |
 | Agent Execution Layer | 5 | 4 | 0 | 9 |
 | Security & Enforcement Layer | 4 | 16 | 5 | 25 |
 | Memory System | 2 | 16 | 4 | 22 |
-| Local Workspace Daemons | 4 | 44 | 7 | 55 |
+| Local Workspace Daemons | 2 | 25 | 7 | 34 |
 | Kanban & Scheduler | 2 | 4 | 3 | 9 |
 | HyperAgent Evidence Loop | 2 | 18 | 2 | 22 |
 | Knowledge & Search | 1 | 4 | 3 | 8 |
 | Communication | 1 | 4 | 1 | 6 |
-| Deployment & Provisioning | 3 | 16 | 4 | 23 |
+| Deployment & Provisioning | 2 | 15 | 4 | 21 |
 | LLM Provider Abstraction | 1 | 1 | 0 | 2 |
-| **Total** | **72** | **205** | **47** | **324** |
+| **Total** | **68** | **185** | **47** | **300** |
 
-> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~324**.
+> Note: Some functions appear in multiple protocol sections when they serve dual roles. The total unique instrumented functions across all source modules is **~300**.
 
 ---
 
@@ -125,7 +125,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
-| `handleCollabCreate` | mesh-task-daemon | 1 | Creates a new collaboration session — logs session type (circling, sequential), participating nodes, and task binding. |
 | `handleCollabJoin` | mesh-task-daemon | 1 | Node joins an existing collab session — tracks participant count growth and join timing for scheduling analysis. |
 | `handleCollabRecruiting` | mesh-task-daemon | 2 | Handles recruiting phase for collaboration — logs which nodes were invited and their response status. |
 | `handleCollabLeave` | mesh-task-daemon | 2 | Node leaves a collab session — important for understanding session attrition and triggering quorum checks. |
@@ -184,7 +183,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `sweepCirclingStepTimeouts` | mesh-task-daemon | 2 | Periodic sweep for timed-out circling steps — batch timeout enforcement. |
 | `advanceCirclingStep` | CollabStore | 2 | Moves to next step in circling sequence — tracks step progression through the strategy. |
 | `parseCirclingReflection` | circling-parser | 2 | Parses structured reflection from circling agents — validates reflection format and extracts quality signals. |
-| `processProposals` | mesh-task-daemon | 2 | Processes improvement proposals from circling — logs proposal acceptance rate and applied changes. |
 
 ---
 
@@ -212,7 +210,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `handlePlanGet` | mesh-task-daemon | 2 | Retrieves plan details — diagnostic for plan inspection. |
 | `handlePlanList` | mesh-task-daemon | 2 | Lists all plans — dashboard and CLI query. |
 | `approve` | PlanStore | 2 | Store-level approval write — confirms plan state transition persisted. |
-| `submitForReview` | PlanStore | 2 | Moves plan to review state — tracks plan review queue depth. |
 | `startExecuting` | PlanStore | 2 | Marks plan as actively executing — establishes execution start time for budget tracking. |
 | `markAborted` | PlanStore | 2 | Store-level abort — confirms abort persisted and prevents further wave dispatch. |
 
@@ -223,19 +220,15 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `handlePlanSubtaskUpdate` | mesh-task-daemon | 1 | Updates subtask status within a plan — triggers wave progression checks and dependency resolution. |
 | `advancePlanWave` | mesh-task-daemon | 1 | Advances to the next wave of subtasks — logs which subtasks are dispatched and their dependency chains. |
 | `updatePlanSubtaskStatus` | mesh-task-daemon | 2 | Internal subtask status update — correlates task completion events with plan progress. |
-| `updateSubtask` | PlanStore | 2 | Store-level subtask update — persists individual subtask state changes. |
 | `checkPlanProgress` | mesh-task-daemon | 2 | Evaluates overall plan completion percentage — provides progress metrics for dashboards. |
 | `get` | PlanStore | 2 | Retrieves a plan record — basic read for plan operations. |
 | `list` | PlanStore | 2 | Lists plans from store — used by query handlers. |
-| `findByParentTask` | PlanStore | 2 | Finds plans associated with a parent task — links task and plan lifecycles. |
 
 ### 3.4 Failure Cascade & Recovery
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
 | `cascadeFailure` | mesh-task-daemon | 1 | Propagates subtask failure up through the plan — logs which downstream subtasks are cancelled and the failure chain. |
-| `markCompleted` | PlanStore | 2 | Marks plan as completed — terminal state; confirms all waves finished successfully. |
-| `delete` | PlanStore | 2 | Removes a plan record — logged for cleanup audit. |
 
 ---
 
@@ -246,9 +239,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
 | `cmdStatus` | mesh CLI | 1 | Reports mesh node status — provides operator-facing health snapshot of the entire mesh. |
-| `cmdHealth` | mesh CLI | 2 | Detailed health check for a node — logs connectivity, store integrity, and resource usage. |
-| `cmdRepair` | mesh CLI | 2 | Initiates repair operations on a node — logged to track repair actions and their outcomes. |
-| `collectHeartbeats` | mesh CLI | 2 | Gathers heartbeats from all mesh nodes — provides fleet-wide liveness snapshot. |
+| `cmdHealth` | mesh CLI | 2 | Grades this node (or every node) ok / degraded / down from MESH_NODE_HEALTH. |
 | `gatherHealth` | health-publisher | 2 | Collects local health metrics — CPU, memory, disk, NATS status; feeds into health dashboard. |
 | `publish` | health-publisher | 2 | Publishes health data to NATS — makes local health visible to the mesh. |
 | `computeNodeScopes` | mesh-task-daemon | 2 | Computes task routing scopes per node — determines which node handles which task types. |
@@ -261,20 +252,15 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `resolveNatsToken` | nats-resolve | 2 | Resolves authentication token for NATS — logged to diagnose auth failures without exposing the token. |
 | `natsConnectOpts` | nats-resolve | 2 | Builds NATS connection options — logs connection parameters (sans secrets) for troubleshooting. |
 
-### 4.3 Remote Execution (mesh exec)
+### 4.3 Remote Execution (mesh exec) — removed
 
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `cmdExec` | mesh CLI | 1 | Executes a command on a remote mesh node — logged for security audit and debugging remote failures. |
-| `cmdCapture` | mesh CLI | 2 | Captures output from a remote command — tracks capture size and duration for performance analysis. |
-| `cmdBroadcast` | mesh CLI | 2 | Broadcasts a command to all mesh nodes — logged because it affects the entire fleet simultaneously. |
+`mesh exec/capture/broadcast/repair` were removed from the CLI: no node ran a responder for them
+(federation D4) once `~/openclaw/agent.js` was retired on 2026-10-02. Remote work goes through
+`mesh submit`; `mesh status` and `mesh health` read the `MESH_NODE_HEALTH` KV.
 
-### 4.4 File Sync & Shared Folder
+### 4.4 File Sync & Shared Folder — removed
 
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `cmdLs` | mesh CLI | 3 | Lists files on a remote node — high-frequency read; logged in dev for debugging sync issues. |
-| `cmdPut` | mesh CLI | 2 | Transfers a file to a remote node — tracks file sync operations and transfer sizes. |
+`mesh ls/put` wrote a local `~/openclaw/shared/` that nothing synced between nodes; removed.
 
 ### 4.5 Deploy Pipeline
 
@@ -361,7 +347,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `loadRole` | role-loader | 2 | Loads an agent role definition — logs role name and capability set for debugging role assignment. |
 | `findRole` | role-loader | 2 | Searches for a role by name or alias — logged to detect role resolution failures. |
 | `listRoles` | role-loader | 3 | Lists all available roles — diagnostic for role inventory. |
-| `validateRole` | role-loader | 2 | Validates role definition completeness — catches malformed roles before they affect agent behavior. |
 | `formatRoleForPrompt` | role-loader | 3 | Formats role for LLM prompt — logged in dev to debug role prompting. |
 | `checkForbiddenPatterns` | role-loader | 1 | Checks agent actions against forbidden patterns — security enforcement; always logged. |
 
@@ -385,9 +370,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 |----------|--------|------|------------|
 | `startSession` | memory-budget | 1 | Initializes a new memory budget session — logs budget limits and session binding. |
 | `endSession` | memory-budget | 1 | Closes a memory budget session — logs total consumption and whether budget was exceeded. |
-| `addEntry` | memory-budget | 2 | Adds an entry to the memory budget — tracks incremental consumption for budget forecasting. |
-| `getRendered` | memory-budget | 2 | Retrieves rendered memory content — logged to track render frequency and output size. |
-| `reload` | memory-budget | 2 | Reloads memory budget from disk — logged to detect stale budget state after crashes. |
 | `getStats` | memory-budget | 3 | Returns budget usage statistics — high-frequency read; dev-mode logging. |
 | `getMeterDisplay` | memory-budget | 3 | Formats budget meter for display — utility; logged in dev. |
 
@@ -419,7 +401,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `detectFormat` | transcript-parser | 3 | Detects transcript file format (JSONL, plain text) — utility; logged in dev. |
 | `parseLine` | transcript-parser | 3 | Parses a single transcript line — very high frequency; dev-mode only. |
 | `parseJsonlFile` | transcript-parser | 2 | Parses an entire JSONL transcript file — logs file size, line count, and parse duration. |
-| `estimateFileTokens` | transcript-parser | 2 | Estimates token count for a file — logged to track budget consumption accuracy. |
 
 ---
 
@@ -440,8 +421,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `loadDaemonState` | memory-daemon | 2 | Loads persisted daemon state — logged to detect state corruption or version mismatches. |
 | `loadConfig` | memory-daemon | 2 | Loads daemon configuration — logs effective config for debugging. |
 | `loadTranscriptSources` | memory-daemon | 2 | Discovers transcript source directories — logs source count and paths. |
-| `findCurrentJsonl` | memory-daemon | 2 | Finds the current session's JSONL file — logged to track session file resolution. |
-| `findPreviousJsonl` | memory-daemon | 2 | Finds the previous session's JSONL file — logged for session continuity debugging. |
 
 ### 8.2 Obsidian Sync (vault sync, lessons propagation)
 
@@ -460,38 +439,11 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `loadSyncState` | obsidian-sync | 2 | Loads persistent sync state (last sync times, hashes) — logged to detect stale sync state. |
 | `saveSyncState` | obsidian-sync | 2 | Saves sync state — confirms state persistence for crash recovery. |
 
-### 8.3 Memory Maintenance (14 health checks)
+### 8.3 Memory Maintenance (not instrumented)
 
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `runMaintenance` | memory-maintenance | 1 | Top-level maintenance orchestrator — logs how many checks ran and how many passed/failed. |
-| `checkArchival` | memory-maintenance | 2 | Checks if old sessions need archival — logged to track archival backlog. |
-| `checkPredictions` | memory-maintenance | 2 | Validates prediction accuracy from previous sessions — logged for self-improvement metrics. |
-| `checkStaleTasks` | memory-maintenance | 2 | Detects tasks stuck in active state — prevents memory corruption from abandoned tasks. |
-| `checkMemoryFreshness` | memory-maintenance | 2 | Verifies memory files are not stale — logged to detect memory system failures. |
-| `checkCompanionFreshness` | memory-maintenance | 2 | Checks companion state file freshness — ensures companion context is current. |
-| `checkClawVault` | memory-maintenance | 2 | Validates ClawVault integrity — logged to detect vault corruption. |
-| `checkMissionControl` | memory-maintenance | 2 | Checks MC connectivity and data freshness — logged to detect MC sync failures. |
-| `checkDailyFile` | memory-maintenance | 2 | Verifies today's daily log exists and is current — logged to catch daily log generation failures. |
-| `checkTimestamps` | memory-maintenance | 2 | Validates timestamp consistency across memory files — detects clock skew or file corruption. |
-| `checkErrors` | memory-maintenance | 2 | Scans for error patterns in recent memory — logged to surface recurring issues. |
-| `checkConsolidation` | memory-maintenance | 2 | Checks if memory consolidation is needed — logged to trigger proactive consolidation. |
-| `checkGraphHealth` | memory-maintenance | 2 | Validates knowledge graph connectivity — detects orphaned nodes or broken links. |
-| `checkSharedLessons` | memory-maintenance | 2 | Verifies shared lessons are propagated — logged to ensure cross-workspace lesson sync. |
+`workspace-bin/memory-maintenance.mjs` creates no tracer, so its checks emit no trace events.
 
-### 8.4 Daily Log Writer
-
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| `run` | daily-log-writer | 1 | Runs the daily log generation — logs whether a new daily file was created or updated. |
-| `loadState` | daily-log-writer | 2 | Loads writer state (last run, deltas) — logged for continuity across runs. |
-| `saveState` | daily-log-writer | 2 | Persists writer state — confirms durability for crash recovery. |
-| `isSessionActive` | daily-log-writer | 2 | Checks if a session is currently active — determines whether to defer log writing. |
-| `getRecapDelta` | daily-log-writer | 2 | Computes session recap changes since last run — logs delta size for content tracking. |
-| `getTaskDelta` | daily-log-writer | 2 | Computes task state changes since last run — logs task progression for daily summary. |
-| `getGitDelta` | daily-log-writer | 2 | Computes git commit changes since last run — logs commit count for daily summary. |
-
-### 8.5 Subagent Audit
+### 8.4 Subagent Audit
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
@@ -502,7 +454,7 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `processResults` | subagent-audit | 2 | Batch processes subagent results — logs batch size and aggregate quality metrics. |
 | `healthCheck` | subagent-audit | 3 | Checks subagent audit system health — periodic self-check. |
 
-### 8.6 Lane Watchdog (deadlock detection)
+### 8.5 Lane Watchdog (deadlock detection)
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
@@ -510,12 +462,12 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | `checkForDeadlock` | lane-watchdog | 1 | Evaluates if a lane is deadlocked — critical safety check; always logged because deadlock requires intervention. |
 | `sendSigusr1` | lane-watchdog | 2 | Sends SIGUSR1 to a deadlocked process — logged because it forces a state dump for debugging. |
 
-### 8.7 Heartbeat Detection
+### 8.6 Heartbeat Detection
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
-| `detectHeartbeat` | heartbeat-detect | 2 | Detects presence of heartbeat signal — logged to track liveness detection accuracy. |
-| `isHeartbeatActive` | heartbeat-detect | 2 | Checks if heartbeat is currently active — logged to feed into stall detection logic. |
+| `detectHeartbeat` | heartbeat-detect | 2 | Classifies the newest gateway session as heartbeat-triggered or main (Mission Control's heartbeat status route) — logged to track detection accuracy. |
+| `isHeartbeatActive` | heartbeat-detect | 2 | Boolean shorthand for `detectHeartbeat().isActive` — logged alongside it. |
 
 ---
 
@@ -638,12 +590,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 |----------|--------|------|------------|
 | (Integrated into `publishEvent`, `publishCollabEvent`, `publishPlanEvent`) | mesh-task-daemon | 1 | NATS-based event publishing serves as the notification gateway — all events propagate to subscribed consumers. |
 
-### 12.3 Teams Transport
-
-| Function | Module | Tier | Why Logged |
-|----------|--------|------|------------|
-| TeamsTransport class methods (15) | pair-transport-teams | 2 | All Teams transport operations — logged to track message delivery, connection health, and transport errors for the Teams integration. |
-
 ---
 
 ## 13. DEPLOYMENT & PROVISIONING
@@ -663,13 +609,11 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 
 | Function | Module | Tier | Why Logged |
 |----------|--------|------|------------|
-| `gitFetchAndDiff` | mesh-deploy | 2 | Fetches latest code and computes diff — logs changed file count and affected components. |
-| `gitMerge` | mesh-deploy | 2 | Merges fetched code — logs merge result and conflict status. |
-| `getAffectedComponents` | mesh-deploy | 2 | Determines which components need redeployment — logs component list for deploy scoping. |
-| `installComponentFiles` | mesh-deploy | 2 | Installs updated component files — logs file count and install duration. |
-| `restartComponentServices` | mesh-deploy | 1 | Restarts affected services — critical operation; logs restart success/failure for each component. |
-| `loadDeployState` | mesh-deploy | 2 | Loads deployment state — logged for deploy continuity. |
-| `saveDeployState` | mesh-deploy | 2 | Saves deployment state — confirms deploy state persistence. |
+| `planComponents` | mesh-deploy | 2 | Plans which components the diff touches and with which files — logs the deploy scope. |
+| `installFiles` | mesh-deploy | 2 | Copies a component's changed files to its targets — logs what was installed. |
+| `removeFiles` | mesh-deploy | 2 | Removes files the diff deleted, keeping locally edited copies — logs what was removed or kept. |
+| `restartService` | mesh-deploy | 2 | Restarts one affected service; a failed restart throws and the listener rolls back — logs each restart. |
+| `deploy` | mesh-deploy | 2 | Top-level deploy of a commit range on this node — logs the whole run's outcome. |
 
 ### 13.3 Fleet Deploy
 
@@ -738,13 +682,13 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 |--------------|-------|
 | mesh-task-daemon | 48 |
 | TaskStore | 16 |
-| PlanStore | 11 |
+| PlanStore | 6 |
 | CollabStore | 19 |
 | mesh-agent | 9 |
 | mesh-bridge | 6 |
 | exec-safety | 4 |
 | mesh-harness | 10 |
-| role-loader | 6 |
+| role-loader | 5 |
 | rule-loader | 5 |
 | llm-providers | 2 |
 | kanban-io | 3 |
@@ -761,17 +705,14 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | mcp-knowledge/core | 4 |
 | mcp-knowledge/server | varies |
 | heartbeat-detect | 2 |
-| pair-transport-teams | 15 |
 | memory-daemon | 13 |
 | obsidian-sync | 12 |
-| memory-maintenance | 14 |
-| daily-log-writer | 7 |
 | subagent-audit | 6 |
 | lane-watchdog | 3 |
 | health-publisher | 2 |
 | mesh CLI | 13 |
 | fleet-deploy | 3 |
-| mesh-deploy | 7 |
+| mesh-deploy | 5 |
 | deploy-listener | 2 |
 | mesh-join-token | 2 |
 | mesh-node-remove | 3 |
@@ -780,6 +721,6 @@ The dashboard UI includes a live feed, event timeline, and system map for real-t
 | discord-read | 1 |
 | discord-tool | 4 |
 | hyperagent CLI | 11 |
-| **Grand Total** | **~330** |
+| **Grand Total** | **~286** |
 
 > The exact count varies slightly due to MeshRegistry and MCP knowledge server having dynamic method counts. All functions listed above are wrapped by `tracer.wrapClass()`, `tracer.wrapAsync()`, or `tracer.wrap()` and emit structured trace events through the unified observability pipeline.

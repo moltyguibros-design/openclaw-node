@@ -13,7 +13,8 @@
  *   token  → authorization { token: "<OPENCLAW_NATS_TOKEN>" }   (pre-Phase-7 behaviour)
  *   nkey   → authorization { users: [ …nkeys from identity + registry…, legacy user ] }
  *            - this node's identity nkey: allow-all when OPENCLAW_NODE_ROLE=lead,
- *              worker permissions otherwise
+ *              worker permissions when it is worker; any other value, or none,
+ *              refuses the render (a guessed role silently demotes a lead)
  *            - every identity-registry peer: allow-all when its entry carries
  *              role "lead", worker permissions otherwise
  *            - a legacy { user, password: <token> } entry so clients that still
@@ -21,12 +22,16 @@
  *              dropped with --no-legacy-user (or OPENCLAW_NATS_LEGACY_USER=0)
  *
  * Worker permissions (v1, the operator's "minimal safe set"): publish DENY on
- * mesh.deploy.trigger (only the lead deploys) and $JS.API.STREAM.DELETE.>
- * (nothing in the codebase deletes streams; it is the most destructive call a
- * leaked credential could make). Everything else — JetStream/KV API, inboxes,
+ * mesh.deploy.trigger (only the lead deploys) and on the four JetStream calls
+ * that destroy stream data: STREAM.DELETE, STREAM.PURGE (empties a bucket),
+ * STREAM.UPDATE (can shrink a stream to one message) and STREAM.MSG.DELETE.
+ * No worker code makes them; the lead's own maintenance (pruneTerminal's
+ * purgeDeletes) runs allow-all. Everything else — JetStream/KV API, inboxes,
  * mesh.*, memory.*, fed.* — stays allowed: workers legitimately purge KV keys
- * and publish mesh.tasks.merged. No subscribe denies: a worker's own deploy
- * listener subscribes to mesh.deploy.trigger.
+ * (a marker publish to $KV.<bucket>.<key>, not STREAM.PURGE) and publish
+ * mesh.tasks.merged. No subscribe denies: a worker's own deploy listener
+ * subscribes to mesh.deploy.trigger. A changed set reaches a node only on a
+ * re-render with --reload.
  *
  * Usage:
  *   node bin/nats-auth-render.mjs [--out FILE] [--mode token|nkey] [--identity-dir DIR]
@@ -38,7 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createIdentityRegistry, IDENTITY_REGISTRY_FILE } from '../lib/node-identity.mjs';
 import { atomicWriteFileSync } from '../lib/atomic-write.mjs';
 import { assertLegacyNatsWriterAllowed } from '../lib/nats-writer-ownership.mjs';
@@ -47,7 +52,13 @@ import { assertLegacyNatsLockHeld, reexecUnderLegacyNatsLock } from '../lib/nats
 const require = createRequire(import.meta.url);
 const { identityToNkey, publicKeyBase64ToNkey, defaultIdentityDir } = require('../lib/nats-nkey.js');
 
-export const WORKER_PUBLISH_DENY = ['mesh.deploy.trigger', '$JS.API.STREAM.DELETE.>'];
+export const WORKER_PUBLISH_DENY = [
+  'mesh.deploy.trigger',
+  '$JS.API.STREAM.DELETE.>',
+  '$JS.API.STREAM.PURGE.>',
+  '$JS.API.STREAM.UPDATE.>',
+  '$JS.API.STREAM.MSG.DELETE.>',
+];
 export const DEFAULT_LEGACY_USER = 'openclaw';
 
 function quote(s) {
@@ -153,12 +164,18 @@ export async function syncNatsAuth({
   let self = null;
   let peers = [];
   if (effectiveMode === 'nkey') {
+    const role = resolve.resolveEnvKey('OPENCLAW_NODE_ROLE');
+    if (role !== 'lead' && role !== 'worker') {
+      throw new Error(`OPENCLAW_NODE_ROLE is ${role ? JSON.stringify(role).slice(0, 40) : 'not set'} — nkey mode ` +
+        'grants this node its own permissions from it: set OPENCLAW_NODE_ROLE=lead or OPENCLAW_NODE_ROLE=worker ' +
+        'in ~/.openclaw/openclaw.env, then render again');
+    }
     const pair = identityToNkey(identityDir);
     if (pair) {
       self = {
         nodeId: resolve.resolveEnvKey('OPENCLAW_NODE_ID') || require('../lib/node-id.js').resolveNodeId(),
         nkey: pair.publicNkey,
-        role: (resolve.resolveEnvKey('OPENCLAW_NODE_ROLE') || 'worker') === 'lead' ? 'lead' : 'worker',
+        role,
       };
     } else {
       log(`no identity.key under ${identityDir} — this node itself gets no nkey entry`);

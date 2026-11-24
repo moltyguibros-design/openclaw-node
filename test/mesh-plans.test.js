@@ -9,24 +9,7 @@
  * Run: node --test test/mesh-plans.test.js
  */
 
-// ── Mock 'nats' before any require ──
-const Module = require('module');
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const mockNats = {
-  StringCodec: () => ({
-    encode: (str) => encoder.encode(str),
-    decode: (buf) => decoder.decode(buf),
-  }),
-};
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, parent, ...rest) {
-  if (request === 'nats') return 'nats';
-  return origResolve.call(this, request, parent, ...rest);
-};
-require.cache['nats'] = {
-  id: 'nats', filename: 'nats', loaded: true, exports: mockNats,
-};
+process.env.OPENCLAW_OBS_DB = ':memory:';
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
@@ -124,6 +107,16 @@ describe('createPlan', () => {
       subtasks: [{ title: 'A', budget_minutes: 'not-a-number' }],
     });
     assert.equal(plan.subtasks[0].budget_minutes, 15); // parseInt fallback
+  });
+
+  it('a non-positive subtask budget takes the default, a fraction is kept', () => {
+    const plan = createPlan({
+      parent_task_id: 'T-005',
+      title: 'Odd budgets',
+      subtasks: [{ title: 'A', budget_minutes: -3 }, { title: 'B', budget_minutes: 2.5 }, { title: 'C', budget_minutes: 0 }],
+    });
+    assert.deepEqual(plan.subtasks.map((s) => s.budget_minutes), [15, 2.5, 15]);
+    assert.equal(plan.total_budget_minutes, 32.5);
   });
 });
 
@@ -261,6 +254,30 @@ describe('routeDelegation', () => {
     assert.equal(result.mode, DELEGATION_MODE.LOCAL);
     assert.ok(result.reason.includes('Default fallback'));
   });
+
+  // Substring matching read 'approved' as 'approve', 'explore' as 'lore', 'untrusted' as 'trust'.
+  it('matches routing keywords as whole words, not inside other words', () => {
+    const explore = routeDelegation({ title: 'Explore caching options for the API', budget_minutes: 20 });
+    assert.notEqual(explore.soul_id, 'lore-writer', explore.reason);
+    const untrusted = routeDelegation({ title: 'Fix the untrusted input parser', budget_minutes: 20 });
+    assert.notEqual(untrusted.soul_id, 'identity-architect', untrusted.reason);
+    const approved = routeDelegation({ title: 'Implement', description: 'Write the implementation following the approved architecture.', budget_minutes: 45 });
+    assert.notEqual(approved.mode, DELEGATION_MODE.HUMAN, approved.reason);
+    const proxyish = routeDelegation({ title: 'Tune the approximate search', budget_minutes: 20 });
+    assert.notEqual(proxyish.mode, DELEGATION_MODE.COLLAB_MESH, proxyish.reason);
+    assert.equal(routeDelegation({ title: 'Approve the contract changes', budget_minutes: 10 }).mode, DELEGATION_MODE.HUMAN);
+    assert.equal(routeDelegation({ title: 'Plan the proxy upgrade', budget_minutes: 20 }).mode, DELEGATION_MODE.COLLAB_MESH);
+  });
+
+  it('team-feature routes its implement step to the mesh, not to a human', () => {
+    const path = require('node:path');
+    const { loadTemplate, instantiateTemplate } = require('../lib/plan-templates');
+    const template = loadTemplate(path.join(__dirname, '..', 'config', 'plan-templates', 'team-feature.yaml'));
+    const plan = instantiateTemplate(template, 'billing export', { parent_task_id: 'T-parent' });
+    const implement = plan.subtasks.find((s) => s.subtask_id === 'implement');
+    assert.ok(implement, 'team-feature has an implement subtask');
+    assert.notEqual(implement.delegation.mode, DELEGATION_MODE.HUMAN, implement.delegation.reason);
+  });
 });
 
 // ── autoRoutePlan ─��
@@ -319,22 +336,25 @@ describe('PlanStore', () => {
     assert.equal(result, null);
   });
 
-  it('delete removes plan', async () => {
-    const store = new PlanStore(new MockKV());
-    const plan = createPlan({ parent_task_id: 'T-101', title: 'Delete me' });
+  it('a deleted plan (JetStream DEL tombstone, empty value) reads as missing', async () => {
+    const kv = new MockKV();
+    const store = new PlanStore(kv);
+    const plan = createPlan({ parent_task_id: 'T-102', title: 'Tombstoned' });
     await store.put(plan);
-    await store.delete(plan.plan_id);
+    kv.store.set(plan.plan_id, { value: new Uint8Array(0), operation: 'DEL' });
     assert.equal(await store.get(plan.plan_id), null);
+    assert.equal(await store._updateWithCAS(plan.plan_id, (p) => p), null);
+    assert.deepEqual(await store.list(), []);
   });
 
   it('list returns all plans sorted by created_at', async () => {
     const store = new PlanStore(new MockKV());
-    const p1 = createPlan({ parent_task_id: 'T-A', title: 'First' });
-    const p2 = createPlan({ parent_task_id: 'T-B', title: 'Second' });
-    await store.put(p1);
-    await store.put(p2);
+    const newer = { ...createPlan({ parent_task_id: 'T-A', title: 'Newer' }), created_at: '2026-01-02T00:00:00.000Z' };
+    const older = { ...createPlan({ parent_task_id: 'T-B', title: 'Older' }), created_at: '2026-01-01T00:00:00.000Z' };
+    await store.put(newer);
+    await store.put(older);
     const all = await store.list();
-    assert.equal(all.length, 2);
+    assert.deepEqual(all.map((p) => p.plan_id), [older.plan_id, newer.plan_id]);
   });
 
   it('list filters by status', async () => {
@@ -349,17 +369,13 @@ describe('PlanStore', () => {
     assert.equal(drafts[0].title, 'Draft plan');
   });
 
-  it('lifecycle: draft → review → approved → executing → completed', async () => {
+  it('lifecycle: draft → approved → executing', async () => {
     const store = new PlanStore(new MockKV());
     const plan = createPlan({ parent_task_id: 'T-200', title: 'Lifecycle' });
     await store.put(plan);
 
-    await store.submitForReview(plan.plan_id);
-    let p = await store.get(plan.plan_id);
-    assert.equal(p.status, PLAN_STATUS.REVIEW);
-
     await store.approve(plan.plan_id, 'gui');
-    p = await store.get(plan.plan_id);
+    let p = await store.get(plan.plan_id);
     assert.equal(p.status, PLAN_STATUS.APPROVED);
     assert.equal(p.approved_by, 'gui');
     assert.ok(p.approved_at);
@@ -368,11 +384,6 @@ describe('PlanStore', () => {
     p = await store.get(plan.plan_id);
     assert.equal(p.status, PLAN_STATUS.EXECUTING);
     assert.ok(p.started_at);
-
-    await store.markCompleted(plan.plan_id);
-    p = await store.get(plan.plan_id);
-    assert.equal(p.status, PLAN_STATUS.COMPLETED);
-    assert.ok(p.completed_at);
   });
 
   it('abort blocks pending subtasks', async () => {

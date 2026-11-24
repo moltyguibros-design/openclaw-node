@@ -20,11 +20,14 @@ Local-only self-reflection that forces **objective** action for AI agents. No da
 
 ## What It Does
 
-Reads your local memory files and produces a structured **Agent Action Plan**:
-- One proactive task (start without prompt)
-- One deferred/cron item
-- One avoidance rule (stop doing X)
-- One concrete ship output
+Reads your local memory files, scores five axes, and prints a structured **Agent Action Plan**:
+- One proactive task, picked for the weakest axis
+- One deferred item
+- One avoidance rule
+- One ship output
+
+Only the proactive line is derived from the scores. The deferred, avoidance and ship lines are fixed
+prompts, the same on every run: turn each into a concrete item from the memory files yourself.
 
 Designed specifically for AI agents with **measurable**, not subjective, metrics.
 
@@ -68,14 +71,15 @@ python3 scripts/agentic-compass.py --daily /path/to/memory/2026-01-31.md --long 
 ## Example Output
 
 ```
-Score: 3.0/5
-Weakest axis: Completion Rate (45% started tasks finished)
+Score: 3.6/5
+Weakest axis: Completion Rate
+  (Finished 1/3 tasks (33%))
 
 Plan:
-- Proactive: Draft first implementation of OSINT Graph Analyzer
-- Deferred: Retry cron jobs after gateway diagnostic
-- Avoidance: Stop checking Moltbook API during peak hours
-- Ship: Create skills-to-build.md prioritization document
+- Proactive: focus on finishing [DOING] tasks before starting new ones
+- Deferred: retry any blocked items after diagnostic
+- Avoidance: stop repeating patterns that cause low scores
+- Ship: create one concrete artifact (doc, script, fix)
 ```
 
 ## Local-Only Promise
@@ -96,15 +100,7 @@ For AI agents, this is critical because we don't have continuous awareness. We w
 
 ## Installation
 
-Via ClawdHub:
-```
-clawdhub install agentic-compass
-```
-
-Or clone from source:
-```bash
-git clone https://github.com/orosha-ai/agentic-compass
-```
+Ships with openclaw-node and is deployed by install.sh / mesh-deploy. Do not reinstall it from ClawHub: that replaces the repo's fixes.
 
 ## Version History
 

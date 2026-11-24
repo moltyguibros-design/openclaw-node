@@ -2,9 +2,9 @@
 // MEMORY.md. When the LLM path is unavailable/fails, the regex fallback must divert its
 // speaker-tagged facts to a sibling file and leave the structured index byte-intact.
 import { test } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { runFlush } from '../lib/pre-compression-flush.mjs';
 
@@ -24,7 +24,7 @@ const JSONL =
   JSON.stringify({ type: 'assistant', message: { content: "I'll wire the harness into the circling worker now" } }) + '\n';
 
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), 'flush-p0-'));
+  const dir = tmpDir('flush-p0-');
   const jsonl = join(dir, 's.jsonl');
   const memoryMd = join(dir, 'MEMORY.md');
   writeFileSync(jsonl, JSONL);
@@ -45,10 +45,40 @@ test('P0: regex fallback does NOT contaminate a structured MEMORY.md — it dive
   assert.match(readFileSync(fallback, 'utf8'), /\[user\]|\[assistant\]/, 'the speaker-tagged facts live in the fallback');
 });
 
+for (const [name, content] of [
+  ['with no entities yet', '# Memory\n\n## Recent Decisions\n- D11 — grappe workers require an advanced LLM (confidence: 0.9)\n\n## Active Themes\n- federation (3×)\n'],
+  ['that is the empty-store sentinel', '# Memory\n\nNo structured data extracted yet.\n'],
+]) {
+  test(`P0: a structured MEMORY.md ${name} is diverted too`, async () => {
+    const { jsonl, memoryMd } = setup();
+    writeFileSync(memoryMd, content);
+    const result = await runFlush(jsonl, memoryMd, { charBudget: 2200 });
+    assert.equal(readFileSync(memoryMd, 'utf8'), content);
+    assert.equal(result.mode, 'regex-diverted');
+    const fallback = memoryMd.replace(/\.md$/, '') + '.regex-fallback.md';
+    assert.match(readFileSync(fallback, 'utf8'), /\[user\]|\[assistant\]/);
+  });
+}
+
 test('P0: on a non-structured MEMORY.md the regex path writes normally (legacy preserved)', async () => {
   const { jsonl, memoryMd } = setup();
   writeFileSync(memoryMd, '# Memory\n\nsome freeform notes\n');
   const result = await runFlush(jsonl, memoryMd, { charBudget: 2200 });
   assert.equal(result.mode, 'regex');
   assert.match(readFileSync(memoryMd, 'utf8'), /\[user\]|\[assistant\]/, 'regex-only mode still merges into MEMORY.md');
+});
+
+test('P0: an extraction store that failed to open is a LOUD degradation', async () => {
+  const { jsonl, memoryMd } = setup();
+  writeFileSync(memoryMd, STRUCTURED);
+  const result = await runFlush(jsonl, memoryMd, {
+    charBudget: 2200,
+    llmClient: { generate: async () => { throw new Error('must not be called'); } },
+    extractionStore: null,
+    extractionStoreError: 'database disk image is malformed',
+  });
+  assert.equal(result.degraded, true);
+  assert.match(result.extraction_error, /extraction store unavailable: database disk image is malformed/);
+  assert.equal(result.mode, 'regex-diverted');
+  assert.equal(readFileSync(memoryMd, 'utf8'), STRUCTURED);
 });

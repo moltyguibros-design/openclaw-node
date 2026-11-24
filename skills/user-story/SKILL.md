@@ -82,7 +82,7 @@ Before writing a story, ensure you have:
 If you want a consistent Markdown stub, you can generate one from CLI inputs. This script is deterministic and does not fetch data or write files.
 
 ```bash
-python3 scripts/user-story-template.py --persona \"trial user\" --action \"log in with Google\" --outcome \"access the app without creating a new password\"
+python3 {baseDir}/scripts/user-story-template.py --persona "trial user" --action "log in with Google" --outcome "access the app without creating a new password"
 ```
 
 ---

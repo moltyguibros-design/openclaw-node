@@ -15,26 +15,30 @@
  *
  * Exit codes:
  *   0 — system supports at least the floor tier (Qwen3-8B); recommendation printed
- *   2 — system below floor (<8 GB RAM after reservations); local LLM not viable
+ *   2 — system below floor (<16 GB total RAM); local LLM not viable
  *   1 — error (Ollama check failed, etc.)
  *
  * Tier policy (operator-authored, Block 3 §0):
- *   ≥48 GB RAM   → qwen3:32b-instruct-q4_K_M   (~18 GB)
- *   ≥32 GB RAM   → qwen3:14b-instruct-q4_K_M   (~9  GB)
- *   ≥16 GB RAM   → qwen3:8b-instruct-q4_K_M    (~5  GB)
+ *   ≥48 GB RAM   → qwen3:32b   (~18 GB)
+ *   ≥32 GB RAM   → qwen3:14b   (~9  GB)
+ *   ≥16 GB RAM   → qwen3:8b    (~5  GB)
  *   <16 GB RAM   → BELOW FLOOR — operator must use cloud LLM or skip extraction
+ * Each bound allows TIER_SLACK_GB under it: Linux MemTotal is a little below the
+ * installed size (16 GB reports ~15.7 GB), macOS reports the full amount.
  *
  * 4B tier is intentionally excluded per operator decision: JSON-mode reliability
  * is too low below 8B for this task.
  */
 
 import os from 'node:os';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const GB = 1024 * 1024 * 1024;
 // Reserved RAM not available for LLM (OS + the rest of the node process + buffer).
-// Apple Silicon unified memory is more flexible; Linux/Windows need conservative reserve.
+// Informational only: the report shows it, and the tier is chosen on total RAM.
 const RESERVED_GB = 4;
 
 const TIERS = [
@@ -47,13 +51,14 @@ const TIERS = [
 ];
 
 const FLOOR_GB = 16;
+const TIER_SLACK_GB = 1;
 
-function recommend(totalGb, availGb) {
-  if (totalGb < FLOOR_GB) {
+export function recommend(totalGb) {
+  if (totalGb < FLOOR_GB - TIER_SLACK_GB) {
     return { tier: null, reason: `system has ${totalGb.toFixed(1)} GB RAM (< floor ${FLOOR_GB} GB)` };
   }
   for (const t of TIERS) {
-    if (totalGb >= t.min_gb) return { tier: t };
+    if (totalGb >= t.min_gb - TIER_SLACK_GB) return { tier: t };
   }
   return { tier: null, reason: 'no tier matched (should not happen)' };
 }
@@ -69,9 +74,7 @@ function checkOllama() {
 
 function pullModel(modelTag) {
   return new Promise((resolve) => {
-    const child = execFile('ollama', ['pull', modelTag], { timeout: 0 });
-    child.stdout?.on('data', (d) => process.stdout.write(d));
-    child.stderr?.on('data', (d) => process.stderr.write(d));
+    const child = spawn('ollama', ['pull', modelTag], { stdio: 'inherit' });
     child.on('exit', (code) => resolve({ ok: code === 0, code }));
     child.on('error', (err) => resolve({ ok: false, error: err.message }));
   });
@@ -108,7 +111,7 @@ Options:
   const arch = os.arch();
   const cpus = os.cpus().length;
 
-  const rec = recommend(totalGb, availGb);
+  const rec = recommend(totalGb);
 
   const ollama = (opts.install || opts['check-ollama']) ? await checkOllama() : null;
 
@@ -121,6 +124,8 @@ Options:
         ? { tier: rec.tier.name, model: rec.tier.model, size_gb: rec.tier.size_gb }
         : { tier: null, reason: rec.reason },
     }, null, 2));
+    // exitCode, not exit(): an immediate exit can truncate the JSON on a piped stdout
+    if (!rec.tier) { process.exitCode = 2; return; }
   } else {
     console.log('System profile');
     console.log(`  Platform:        ${platform} ${arch}`);
@@ -173,7 +178,9 @@ Options:
   }
 }
 
-main().catch((e) => {
-  console.error('Error:', e.message);
-  process.exit(1);
-});
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error('Error:', e.message);
+    process.exit(1);
+  });
+}

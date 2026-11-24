@@ -6,12 +6,12 @@
 # Usage:
 #   bash install.sh              # Full install
 #   bash install.sh --dry-run    # Show what would happen
-#   bash install.sh --update     # Re-copy scripts/configs, skip deps
+#   bash install.sh --update     # Re-copy scripts, skip deps (existing configs kept; renders go to <file>.new)
 #
 # --dry-run behavior:
-#   Echoes every command that would execute (prefixed with [DRY-RUN]) without
+#   Echoes every command that would execute (prefixed with [dry-run]) without
 #   modifying the filesystem. Also verifies that all source paths exist —
-#   a missing source prints [DRY-RUN ERROR] so path bugs (like SCRIPT_DIR)
+#   a missing source prints [dry-run] SOURCE MISSING so path bugs (like SCRIPT_DIR)
 #   are caught without running the install. Does NOT check destination
 #   writability (that requires actual fs calls). Exit code 0 on success,
 #   1 if any source path is missing.
@@ -23,6 +23,9 @@ set -euo pipefail
 # ============================================================
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Before the legacy-lock re-exec below, so a refused run takes no lock and never re-execs.
+source "$REPO_DIR/scripts/install/root-guard.sh"
+refuse_custom_openclaw_root
 if [ "$(uname -s)" = Darwin ]; then
   NATS_WRITER_LOCK=/private/var/db/openclaw-nats-writer.lock
   if [ -e "$NATS_WRITER_LOCK" ] || [ -L "$NATS_WRITER_LOCK" ]; then
@@ -40,7 +43,9 @@ if [ "$(uname -s)" = Darwin ]; then
     fi
   fi
 fi
-OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
+# Exported: the unit and NATS conf templates render their paths from it. Spelled the one
+# way the services and the harness-copy paths expect, whichever alias the check accepted.
+export OPENCLAW_ROOT="$HOME/.openclaw"
 WORKSPACE="$OPENCLAW_ROOT/workspace"
 ENV_FILE="$OPENCLAW_ROOT/openclaw.env"
 DRY_RUN=false
@@ -55,8 +60,10 @@ SANDBOX=false
 NODE_ROLE=""
 CLUSTER_PEERS=""
 CLUSTER_BIND=""
+WITH_TAILSCALE=false
 LEAD_PUBKEY=""
 PROVIDER=""
+PROJECT_DIR=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -70,39 +77,59 @@ for arg in "$@"; do
     --verify-frontend)   VERIFY_FRONTEND=true ;;
     --sandbox)           SANDBOX=true; SKIP_LLM=true; SKIP_MESH=true; SKIP_FRONTEND=true ;;
     --role=*)            NODE_ROLE="${arg#--role=}" ;;
-    --cluster-peers=*)   CLUSTER_PEERS="${arg#--cluster-peers=}" ;;
+    --cluster-peers=*)   CLUSTER_PEERS="${arg#--cluster-peers=}"; WITH_TAILSCALE=true ;;
+    --with-tailscale)    WITH_TAILSCALE=true ;;
     --cluster-bind=*)    CLUSTER_BIND="${arg#--cluster-bind=}" ;;
     --lead-pubkey=*)     LEAD_PUBKEY="${arg#--lead-pubkey=}" ;;
     --provider=*)        PROVIDER="${arg#--provider=}" ;;
+    --project=*)         PROJECT_DIR="${arg#--project=}" ;;
     --help|-h)
-      echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--enable-services]"
+      echo "Usage: bash install.sh [--dry-run] [--update] [--skip-mesh] [--skip-llm] [--skip-verify] [--role=lead|worker] [--provider=NAME] [--project=PATH] [--enable-services]"
       echo "  --dry-run           Show what would happen without making changes"
-      echo "  --update            Re-copy scripts/configs only (skip system deps)"
+      echo "  --update            Re-copy scripts and units, keep existing configs (skip system deps)"
       echo "  --skip-mesh         Skip mesh network setup (used by meta-installer)"
       echo "  --skip-llm          Skip ollama install + model pull + embedder prefetch (extraction degrades to regex)"
       echo "  --skip-verify       Skip the final acceptance gate"
       echo "  --skip-frontend     Skip agent-frontend (Claude Code) detection/install"
       echo "  --verify-frontend   Verify frontend auth with one small live call"
       echo "  --sandbox           Wiring-test mode: skip network-heavy installs (implies --skip-llm --skip-mesh)"
-      echo "  --role=lead|worker  Set node role (default: macOS=lead, Linux=worker)"
+      echo "  --role=lead|worker  Set node role. Required on the first install (no OS default);"
+      echo "                      saved in openclaw.env, so later runs may omit it"
       echo "  --cluster-peers=A,B Join a multi-MACHINE NATS cluster: A,B are the OTHER"
       echo "                      machines' addresses (Tailscale/LAN IPs). Renders THIS"
       echo "                      machine's nats.conf to cluster with them (R=3 failsafe)."
+      echo "                      Saved with the bind address in openclaw.env, so a later"
+      echo "                      --update re-renders the cluster config without the flags."
       echo "  --cluster-bind=IP   THIS machine's own tailnet/LAN address to bind (never"
       echo "                      0.0.0.0). Auto-detected from 'tailscale ip -4' if omitted."
+      echo "  --with-tailscale    Install Tailscale with the system deps (implied by"
+      echo "                      --cluster-peers). A single-node install does not need it."
       echo "  --provider=NAME     The node's mind: claude | openai | gemini | deepseek | kimi |"
       echo "                      minimax | aider | ollama | shell. Detected from PATH or asked"
       echo "                      interactively when omitted; never installed silently."
       echo "  --lead-pubkey=B64   Worker joins: the lead's raw base64 identity pubkey"
       echo "                      (openclaw-trust-peer --my-pubkey on the lead). Merged into"
       echo "                      the deploy/operator trust allowlists so lead-signed actions verify."
+      echo "  --project=PATH      Project repo to tailor: install framework rules matching it and"
+      echo "                      copy the OpenClaw git hooks into its .git/hooks. Without it,"
+      echo "                      neither happens (only universal rules are installed)."
       echo "  --enable-services   Also enable and start services after installing"
+      echo "Installs to ~/.openclaw only. A different OPENCLAW_ROOT is refused before anything is written:"
+      echo "the services read ~/.openclaw whatever it says, so the node would be half-configured."
       echo "In a VM whose host serves Ollama with the node's model, LLM_BASE_URL points at the host"
       echo "(nothing runs or downloads in the VM). OPENCLAW_LLM_HOST=0 keeps the VM on its own Ollama."
       exit 0
       ;;
   esac
 done
+
+if [ -n "$PROJECT_DIR" ]; then
+  if [ ! -d "$PROJECT_DIR" ]; then
+    echo "--project: not a directory: $PROJECT_DIR" >&2
+    exit 1
+  fi
+  PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+fi
 
 source "$REPO_DIR/scripts/install/helpers.sh"
 source "$REPO_DIR/scripts/install/llm-host.sh"
@@ -123,6 +150,11 @@ source "$REPO_DIR/scripts/install/components.sh"
 source "$REPO_DIR/scripts/install/services.sh"
 source "$REPO_DIR/scripts/install/integrations.sh"
 source "$REPO_DIR/scripts/install/verify.sh"
+
+if $DRY_RUN && [ "$DRY_RUN_ERRORS" -gt 0 ]; then
+  error "[dry-run] $DRY_RUN_ERRORS source path(s) missing (see SOURCE MISSING above)"
+  exit 1
+fi
 
 # ============================================================
 # Done!
@@ -148,7 +180,7 @@ echo ""
 
 if [ "$GATE_STATE" = "accepted" ]; then
   echo "The node is running. Useful next:"
-  echo "  Watch it:            $NODE_BIN $WORKSPACE/bin/node-watch.mjs --once"
+  echo "  Watch it:            $NODE_BIN $WORKSPACE/bin/node-watch.mjs"
   echo "  Dashboard:           http://localhost:3000"
   echo "  Grappe quickstart:   docs/NODE_SPEC.md §6 (3 local agents + one circling task)"
 else

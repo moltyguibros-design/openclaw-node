@@ -9,12 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE="${SCRIPT_DIR}/.."
 CACHE_DIR="${WORKSPACE}/.tmp"
 CACHE_FILE="${CACHE_DIR}/last-skill-audit.json"
-EVENTS_FILE="${WORKSPACE}/skills/capability-evolver/assets/gep/events.jsonl"
 
 mkdir -p "$CACHE_DIR"
 
 # Run current audit
-if ! CURRENT=$(python3 "${SCRIPT_DIR}/skill-audit" --json 2>/dev/null); then
+if ! CURRENT=$(python3 "${SCRIPT_DIR}/skill-audit" --json --skills-dir "${WORKSPACE}/skills" 2>/dev/null); then
   echo "ERROR: skill-audit failed"
   exit 1
 fi
@@ -29,8 +28,6 @@ print(' '.join(parts))
 
 # Compare against cache
 if [ -f "$CACHE_FILE" ]; then
-  PREV_AVG=$(python3 -c "import json,sys; print(json.load(sys.stdin)['average_score'])" < "$CACHE_FILE" 2>/dev/null || echo "0")
-
   # Find regressions (skills that dropped grade) — data passed via stdin, not string interpolation
   REGRESSIONS=$(python3 -c "
 import json, sys
@@ -96,35 +93,6 @@ json.dump({'prev': prev, 'curr': curr}, sys.stdout)
   echo "$REGRESSIONS"
   if [[ "${IMPROVEMENTS:-none}" != "none" ]]; then
     echo "IMPROVEMENTS: $IMPROVEMENTS"
-  fi
-
-  # Append GEP event — data passed safely via stdin
-  if [ -d "$(dirname "$EVENTS_FILE")" ]; then
-    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    python3 -c "
-import json, sys
-
-data = json.load(sys.stdin)
-event = {
-    'type': 'EvolutionEvent',
-    'timestamp': data['timestamp'],
-    'category': 'quality_audit',
-    'summary': data['summary'],
-    'changes': {
-        'regressions': data['regressions'].split(', ') if data['regressions'] != 'OK' else [],
-        'improvements': data['improvements'].split(',') if data['improvements'] != 'none' else []
-    }
-}
-print(json.dumps(event))
-" < <(python3 -c "
-import json, sys
-json.dump({
-    'timestamp': sys.argv[1],
-    'summary': sys.argv[2],
-    'regressions': sys.argv[3],
-    'improvements': sys.argv[4]
-}, sys.stdout)
-" "$TIMESTAMP" "${CURRENT_AVG}/100 (${CURRENT_DIST})" "${REGRESSIONS}" "${IMPROVEMENTS:-none}") >> "$EVENTS_FILE" 2>/dev/null || true
   fi
 else
   echo "First run — baseline captured: ${CURRENT_AVG}/100 (${CURRENT_DIST})"

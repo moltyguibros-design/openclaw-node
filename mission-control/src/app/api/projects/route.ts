@@ -4,6 +4,7 @@ import { getDb, getRawDb } from "@/lib/db";
 import { tasks } from "@/lib/db/schema";
 import { syncTasksToMarkdown } from "@/lib/sync/tasks";
 import { logActivity } from "@/lib/activity";
+import { isSafeId } from "@/lib/safe-path";
 
 /**
  * GET /api/projects
@@ -57,10 +58,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     if (!body.id || !body.title) {
+      return NextResponse.json({ error: "id and title are required" }, { status: 400 });
+    }
+    if (!isSafeId(body.id)) {
       return NextResponse.json(
-        { error: "id and title are required" },
+        { error: "id must be 1-128 letters, digits, '.', '_' or '-', starting with a letter or digit" },
         { status: 400 }
       );
+    }
+    if (db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, body.id)).get()) {
+      return NextResponse.json({ error: `project ${body.id} already exists` }, { status: 409 });
     }
 
     const now = new Date().toISOString();

@@ -7,25 +7,34 @@ step "Step 16: Install Services (role=$NODE_ROLE)"
 MANIFEST="$REPO_DIR/services/service-manifest.json"
 LAUNCHD_TEMPLATES="$REPO_DIR/services/launchd"
 SYSTEMD_TEMPLATES="$REPO_DIR/services/systemd"
-LAUNCHD_DEST="${OPENCLAW_LAUNCHD_DIR:-$HOME/Library/LaunchAgents}"
-SYSTEMD_DEST="${OPENCLAW_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
+LAUNCHD_DEST="$HOME/Library/LaunchAgents"
+SYSTEMD_DEST="$HOME/.config/systemd/user"
 INSTALLED_COUNT=0
 SKIPPED_COUNT=0
 RENDER_ERRORS=0
+# The placeholders lib/render-unit.js fills. Only these names are touched, so
+# systemd's own runtime variables ($MAINPID in the NATS units' ExecReload) survive.
+UNIT_NAMES='HOME NODE_BIN NODE_BIN_DIR OPENCLAW_ROOT OPENCLAW_WORKSPACE OPENCLAW_NATS OPENCLAW_NODE_ID OPENCLAW_NODE_ROLE OPENCLAW_DEPLOY_TRUSTED_KEYS OPENCLAW_REPO_DIR NPM_BIN OPENCLAW_GATEWAY_JS NATS_SERVER_BIN MESH_LLM_PROVIDER LLM_MODEL LLM_BASE_URL MESH_FOREMAN_ENFORCE OPENCLAW_SKIP_LLM OPENCLAW_TIMEZONE'
 
-# Fail-loud render audit — a unit shipping a live ${VAR} placeholder is broken
-# by construction (the silent-unrendered class, 2026-07-11 audit).
-check_rendered() {
-  local f="$1" left
-  left=$(grep -oE '\$\{[A-Za-z_]+\}' "$f" 2>/dev/null | sort -u | tr '\n' ' ' || true)
-  if [ -n "${left// /}" ]; then
-    error "  UNRENDERED placeholders in $(basename "$f"): $left"
+# render_unit FORMAT TEMPLATE DEST — the render (and, for a plist, plutil) must
+# accept it before it replaces DEST, so a bad value never overwrites or reloads
+# a working unit. A leftover ${VAR} placeholder fails the render (the
+# silent-unrendered class, 2026-07-11 audit).
+render_unit() {
+  local fmt="$1" tmpl="$2" dest="$3" tmp="$3.render.$$"
+  if "$NODE_BIN" "$REPO_DIR/lib/render-unit.js" "$fmt" "$UNIT_NAMES" "$tmpl" > "$tmp" \
+    && { [ "$fmt" != plist ] || plutil -lint -s "$tmp"; }; then
+    mv "$tmp" "$dest"
+  else
+    rm -f "$tmp"
+    error "  $(basename "$dest") did not render; the installed unit is left as it was"
     RENDER_ERRORS=$((RENDER_ERRORS + 1))
+    return 1
   fi
 }
 
-# Ensure log directories exist
-run mkdir -p "$OPENCLAW_ROOT/logs" "$WORKSPACE/.tmp"
+# Ensure log directories exist (the transcript-archive plist logs into its archive dir)
+run mkdir -p "$OPENCLAW_ROOT/logs" "$WORKSPACE/.tmp" "$OPENCLAW_ROOT/transcript-archive"
 
 if [ ! -f "$MANIFEST" ]; then
   warn "Service manifest not found at $MANIFEST — skipping service installation"
@@ -65,31 +74,7 @@ else
         continue
       fi
 
-      if command -v envsubst >/dev/null 2>&1; then
-        envsubst < "$TEMPLATE" > "$DEST"
-      else
-        # NOTE: sed delimiter is |. If OPENCLAW_NATS_TOKEN ever contains |
-        # (unlikely — tokens are hex/base64), this substitution will break.
-        # Prefer envsubst (above) when available; it has no delimiter issue.
-        sed \
-          -e "s|\${HOME}|$HOME|g" \
-          -e "s|\${NODE_BIN}|$NODE_BIN|g" \
-          -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
-          -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
-          -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
-          -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
-          -e "s|\${OPENCLAW_NODE_ROLE}|$OPENCLAW_NODE_ROLE|g" \
-          -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
-          -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
-          -e "s|\${NPM_BIN}|$NPM_BIN|g" \
-          -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
-          -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
-          -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
-          -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
-          -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
-          "$TEMPLATE" > "$DEST"
-      fi
-      check_rendered "$DEST"
+      render_unit plist "$TEMPLATE" "$DEST" || continue
 
       # Refresh only when this run manages the lifecycle — a bare unload
       # without a reload silently downs a running node (2026-07-11 audit).
@@ -97,6 +82,9 @@ else
         run launchctl unload "$DEST" 2>/dev/null || true
         run launchctl load "$DEST"
         info "  Installed + loaded: $SVC_NAME"
+      elif [ "$SVC_NAME" = "openclaw-mesh-agent" ]; then
+        # RunAtLoad false: a load alone starts nothing.
+        info "  Installed: $SVC_NAME (on demand — launchctl load $DEST once, then start it with: launchctl kickstart gui/\$(id -u)/ai.openclaw.mesh-agent)"
       else
         info "  Installed: $SVC_NAME (load manually: launchctl load $DEST)"
       fi
@@ -107,6 +95,7 @@ else
 
       # Handle timer-based services (service + timer)
       if [ "$SVC_TIMER" = "true" ]; then
+        TIMER_RENDERED=true
         for ext in service timer; do
           TEMPLATE="$SYSTEMD_TEMPLATES/${SVC_NAME}.${ext}"
           DEST="$SYSTEMD_DEST/${SVC_NAME}.${ext}"
@@ -118,30 +107,11 @@ else
             info "  [dry-run] would render $TEMPLATE -> $DEST"
             continue
           fi
-          if command -v envsubst >/dev/null 2>&1; then
-            envsubst < "$TEMPLATE" > "$DEST"
-          else
-            sed \
-              -e "s|\${HOME}|$HOME|g" \
-              -e "s|\${NODE_BIN}|$NODE_BIN|g" \
-              -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
-              -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
-              -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
-              -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
-              -e "s|\${OPENCLAW_NODE_ROLE}|$OPENCLAW_NODE_ROLE|g" \
-          -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
-              -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
-              -e "s|\${NPM_BIN}|$NPM_BIN|g" \
-              -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
-              -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
-              -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
-              -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
-              -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
-              "$TEMPLATE" > "$DEST"
-          fi
-          check_rendered "$DEST"
+          render_unit systemd "$TEMPLATE" "$DEST" || TIMER_RENDERED=false
         done
+        $TIMER_RENDERED || continue
         if $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.timer"
           run systemctl --user start "${SVC_NAME}.timer"
           info "  Installed + enabled: $SVC_NAME (timer)"
@@ -159,32 +129,15 @@ else
           info "  [dry-run] would render $TEMPLATE -> $DEST"
           continue
         fi
-        if command -v envsubst >/dev/null 2>&1; then
-          envsubst < "$TEMPLATE" > "$DEST"
-        else
-          sed \
-            -e "s|\${HOME}|$HOME|g" \
-            -e "s|\${NODE_BIN}|$NODE_BIN|g" \
-            -e "s|\${OPENCLAW_WORKSPACE}|$OPENCLAW_WORKSPACE|g" \
-            -e "s|\${OPENCLAW_NATS}|$OPENCLAW_NATS|g" \
-            -e "s|\${OPENCLAW_NATS_TOKEN}|$OPENCLAW_NATS_TOKEN|g" \
-            -e "s|\${OPENCLAW_NODE_ID}|$OPENCLAW_NODE_ID|g" \
-            -e "s|\${OPENCLAW_NODE_ROLE}|$OPENCLAW_NODE_ROLE|g" \
-          -e "s|\${OPENCLAW_DEPLOY_TRUSTED_KEYS}|${OPENCLAW_DEPLOY_TRUSTED_KEYS:-}|g" \
-            -e "s|\${OPENCLAW_REPO_DIR}|$OPENCLAW_REPO_DIR|g" \
-            -e "s|\${NPM_BIN}|$NPM_BIN|g" \
-            -e "s|\${NATS_SERVER_BIN}|$NATS_SERVER_BIN|g" \
-            -e "s|\${MESH_LLM_PROVIDER}|$MESH_LLM_PROVIDER|g" \
-            -e "s|\${LLM_MODEL}|$LLM_MODEL|g" \
-            -e "s|\${LLM_BASE_URL}|$LLM_BASE_URL|g" \
-            -e "s|\${MESH_FOREMAN_ENFORCE}|${MESH_FOREMAN_ENFORCE:-}|g" \
-            "$TEMPLATE" > "$DEST"
-        fi
-        check_rendered "$DEST"
+        render_unit systemd "$TEMPLATE" "$DEST" || continue
         if [ "$SVC_AUTO" = "true" ] && $ENABLE_SERVICES; then
+          run systemctl --user daemon-reload
           run systemctl --user enable "${SVC_NAME}.service"
-          run systemctl --user start "${SVC_NAME}.service"
+          # start is a no-op on a running unit; restart applies the re-rendered unit and new code, as unload/load does on macOS.
+          run systemctl --user restart "${SVC_NAME}.service"
           info "  Installed + started: $SVC_NAME"
+        elif [ "$SVC_NAME" = "openclaw-mesh-agent" ]; then
+          info "  Installed: $SVC_NAME (on demand — start it with: systemctl --user start openclaw-mesh-agent; enabling it would start it at every boot)"
         else
           info "  Installed: $SVC_NAME"
         fi
@@ -201,7 +154,7 @@ else
   fi
 
   if [ "$RENDER_ERRORS" -gt 0 ]; then
-    error "$RENDER_ERRORS unit(s) rendered with live placeholders — aborting (fix the template/render mapping)"
+    error "$RENDER_ERRORS unit(s) failed to render and kept their previous version — aborting"
     exit 1
   fi
 
@@ -209,9 +162,9 @@ else
   if ! $ENABLE_SERVICES; then
     info "Services installed but NOT started. Use --enable-services to also start them."
     if [ "$OS" = "linux" ]; then
-      info "Or start individually: systemctl --user enable --now <service-name>"
+      info "Or start individually: systemctl --user enable --now <service-name> (the on-demand mesh agent: systemctl --user start openclaw-mesh-agent)"
     else
-      info "Or load individually: launchctl load ~/Library/LaunchAgents/ai.openclaw.<name>.plist"
+      info "Or load individually: launchctl load ~/Library/LaunchAgents/ai.openclaw.<name>.plist (the on-demand mesh agent then needs: launchctl kickstart gui/\$(id -u)/ai.openclaw.mesh-agent)"
     fi
   fi
 fi
@@ -233,7 +186,7 @@ else
 fi
 
 NOTIFY_CONFIG="$OPENCLAW_ROOT/config/notify.json"
-if [ -f "$NOTIFY_CONFIG" ] && ! $UPDATE_ONLY; then
+if [ -f "$NOTIFY_CONFIG" ]; then
   info "Notification config already exists, keeping it"
 else
   write_file "$NOTIFY_CONFIG" <<'EOF'
@@ -291,7 +244,7 @@ info "Smoke test: node $REPO_DIR/bin/openclaw-notify.mjs --test"
 info "Ledger (every event, clicked or not): ~/.openclaw/notifications/ledger.jsonl · UI: Mission Control /notifications"
 
 # One-click stack launcher: a claw-icon app/desktop entry that runs
-# `openclaw-stack up` (starts every installed unit + companion-bridge, probes,
+# `openclaw-stack up` (starts the autostart units + companion-bridge, probes,
 # reports via ledgered notification).
 if $SANDBOX; then
   : # sandbox — no launcher build
@@ -306,13 +259,10 @@ elif [ "$OS" = "macos" ]; then
 elif [ "$OS" = "linux" ]; then
   DESKTOP_DIR="$HOME/.local/share/applications"
   run mkdir -p "$DESKTOP_DIR"
-  if command -v envsubst >/dev/null 2>&1; then
-    NODE_BIN="$NODE_BIN" OPENCLAW_REPO_DIR="$REPO_DIR" HOME="$HOME" \
-      envsubst < "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
-  else
-    sed -e "s|\${NODE_BIN}|$NODE_BIN|g" -e "s|\${OPENCLAW_REPO_DIR}|$REPO_DIR|g" -e "s|\${HOME}|$HOME|g" \
-      "$REPO_DIR/services/launcher/openclaw-stack.desktop" > "$DESKTOP_DIR/openclaw-stack.desktop"
+  if $DRY_RUN; then
+    echo "  [dry-run] would install $DESKTOP_DIR/openclaw-stack.desktop"
+  elif render_unit desktop "$REPO_DIR/services/launcher/openclaw-stack.desktop" "$DESKTOP_DIR/openclaw-stack.desktop"; then
+    run chmod +x "$DESKTOP_DIR/openclaw-stack.desktop"
+    info "Stack launcher installed → $DESKTOP_DIR/openclaw-stack.desktop (app menu: OpenClaw Stack)"
   fi
-  run chmod +x "$DESKTOP_DIR/openclaw-stack.desktop"
-  info "Stack launcher installed → $DESKTOP_DIR/openclaw-stack.desktop (app menu: OpenClaw Stack)"
 fi

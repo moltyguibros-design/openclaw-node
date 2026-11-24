@@ -1,0 +1,123 @@
+/**
+ * fleet-deploy-results.test.js — a listener's 'skipped' result (no component
+ * of the trigger applies to its role, or catch-up never moves a node back) is
+ * not a failure: `fleet-deploy --component mc` must not list every worker as
+ * [FAIL] and count it under Failed.
+ */
+
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { StringCodec } = require('nats');
+
+const ROOT = path.join(__dirname, '..');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-deploy-'));
+// NODE_ID, REPO_DIR and the observability DB path are read at module load.
+process.env.HOME = tmp;
+process.env.OPENCLAW_IDENTITY_DIR = path.join(tmp, '.openclaw');
+process.env.OPENCLAW_OBS_DB = path.join(tmp, 'obs.db');
+process.env.OPENCLAW_NODE_ID = 'lead-x';
+process.env.OPENCLAW_REPO_DIR = ROOT;
+
+const { fleetDeploy } = require('../bin/fleet-deploy.js');
+
+const sc = StringCodec();
+
+function memKv(entries) {
+  return {
+    async keys() {
+      return (async function* () { for (const k of Object.keys(entries)) yield k; })();
+    },
+    async get(k) {
+      const v = typeof entries === 'function' ? entries(k) : entries[k];
+      return v === undefined ? null : { value: sc.encode(JSON.stringify(v)) };
+    },
+    async put() {},
+  };
+}
+
+function fakeNc(results) {
+  const now = new Date().toISOString();
+  const buckets = {
+    MESH_NODES: memKv({
+      w1: { nodeId: 'w1', role: 'worker', lastSeen: now },
+      w2: { nodeId: 'w2', role: 'worker', lastSeen: now },
+    }),
+    MESH_DEPLOY_RESULTS: memKv((k) => results[k.slice(k.lastIndexOf('-') + 1)]),
+    MESH_DEPLOY_LATEST: memKv({}),
+  };
+  return {
+    publish() {},
+    jetstream() { return { views: { kv: async (name) => buckets[name] } }; },
+  };
+}
+
+async function captureOutput(fn) {
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try { await fn(); } finally { console.log = orig; }
+  return lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+describe('fleet-deploy result reporting', () => {
+  let savedWarn;
+  before(() => { savedWarn = console.warn; console.warn = () => {}; });
+  after(() => { console.warn = savedWarn; fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  it("a 'skipped' node is reported as skipped, not as a failure", async () => {
+    let outcome;
+    const out = await captureOutput(async () => {
+      outcome = await fleetDeploy(fakeNc({
+        w1: { nodeId: 'w1', status: 'skipped', log: 'No matching components for role worker', durationSeconds: 0 },
+        w2: { nodeId: 'w2', status: 'failed', errors: ['deploy script exited 1'], durationSeconds: 3 },
+      }), { sha: 'abc1234', branch: 'main', components: ['mc'], timeoutMs: 5000 });
+    });
+
+    assert.doesNotMatch(out, /\[FAIL\] w1/, out);
+    assert.match(out, /w1 — skipped: No matching components for role worker/);
+    assert.match(out, /\[FAIL\] w2 — failed after 3s/);
+    assert.match(out, /Skipped:\s+1\b/);
+    assert.match(out, /Failed:\s+1\b/);
+    assert.deepEqual(outcome, { expected: 2, succeeded: 0, skipped: 1, failed: 1, missing: 0, stillDeploying: 0 });
+  });
+
+  // The listener allows a deploy 20 minutes; this wait is 2.
+  it("a node last seen 'deploying' is still deploying, not offline", async () => {
+    let outcome;
+    const out = await captureOutput(async () => {
+      outcome = await fleetDeploy(fakeNc({
+        w1: { nodeId: 'w1', status: 'deploying' },
+        w2: { nodeId: 'w2', status: 'success', sha: 'abc1234', durationSeconds: 1 },
+      }), { sha: 'abc1234', branch: 'main', timeoutMs: 1000 });
+    });
+
+    assert.match(out, /w1 — still deploying/);
+    assert.doesNotMatch(out, /w1 — may be offline/);
+    assert.match(out, /Deploying:\s+1\b/);
+    assert.deepEqual(outcome, { expected: 2, succeeded: 1, skipped: 0, failed: 0, missing: 0, stillDeploying: 1 });
+  });
+
+  // Workers now build Mission Control, which outlasts a two-minute wait; the long
+  // wait must not hold the run for a node that never started (offline: it catches up).
+  it('waits for a node that is deploying past the start window, but not for one that never started', async () => {
+    const t0 = Date.now();
+    const results = {
+      get w1() {
+        return Date.now() - t0 < 1500
+          ? { nodeId: 'w1', status: 'deploying' }
+          : { nodeId: 'w1', status: 'success', sha: 'abc1234', durationSeconds: 2 };
+      },
+    };
+    let outcome;
+    const out = await captureOutput(async () => {
+      outcome = await fleetDeploy(fakeNc(results), { sha: 'abc1234', branch: 'main', timeoutMs: 20000, startWaitMs: 500 });
+    });
+    assert.ok(Date.now() - t0 < 10000, `held for ${Date.now() - t0} ms`);
+    assert.match(out, /w1 — deployed to abc1234/);
+    assert.match(out, /w2 — may be offline/);
+    assert.deepEqual(outcome, { expected: 2, succeeded: 1, skipped: 0, failed: 0, missing: 1, stillDeploying: 0 });
+  });
+});

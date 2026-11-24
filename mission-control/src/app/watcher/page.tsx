@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Activity, AlertTriangle, Bell, Database, HardDrive } from "lucide-react";
 import { useWatcher, useMemoryContent, WatcherEvent, WatcherAlert, WatcherHealth } from "@/lib/hooks";
+import { watcherViews } from "@/lib/watcher-view";
 
 function statusColor(status?: string): string {
   if (status === "error") return "text-red-400";
@@ -104,6 +105,7 @@ function alertTypeLabel(t: string): string {
   switch (t) {
     case "extraction_failure": return "extraction failure";
     case "extraction_failure_rate": return "failure rate";
+    case "memory_error": return "memory error";
     case "stalled": return "stalled";
     default: return t;
   }
@@ -220,14 +222,10 @@ function fmtVal(v: unknown, fieldKey?: string): React.ReactNode {
   return String(v);
 }
 
-// The OPENCLAW home dir (where every memory store/file lives). Mirrors the
-// server's path.dirname(WORKSPACE_ROOT). Used to build absolute on-disk paths.
-const OPENCLAW = "/Users/moltymac/.openclaw";
-
 // The actual absolute on-disk path(s) where this event's content is stored.
 // `note` annotates a DB path with the table/row that holds the content.
 type Source = { path: string; note?: string; openable?: boolean };
-function sourcesFor(event: WatcherEvent): Source[] {
+function sourcesFor(event: WatcherEvent, OPENCLAW: string): Source[] {
   const d = (event.data as Record<string, unknown>) || {};
   switch (event.op) {
     case "memory.synthesized":
@@ -303,9 +301,9 @@ function FileLink({ src }: { src: Source }) {
 }
 
 // Full detail panel for one event: the interaction spec + payload + content touched.
-function EventDetailPanel({ event }: { event: WatcherEvent }) {
+function EventDetailPanel({ event, openclawRoot }: { event: WatcherEvent; openclawRoot: string }) {
   const session = event.session || undefined;
-  const sources = sourcesFor(event);
+  const sources = sourcesFor(event, openclawRoot);
   const { decisions, entities, themes, isLoading } = useMemoryContent(undefined, session);
   const data = (event.data as Record<string, unknown> | null) || {};
   const dataKeys = Object.keys(data).filter((k) => k !== "session_id");
@@ -391,7 +389,7 @@ function EventDetailPanel({ event }: { event: WatcherEvent }) {
   );
 }
 
-function EventRow({ event }: { event: WatcherEvent }) {
+function EventRow({ event, openclawRoot }: { event: WatcherEvent; openclawRoot: string }) {
   const [open, setOpen] = useState(false);
   // Every memory.* event is drillable — the panel always shows the interaction
   // spec + payload; session content is added when the event carries a session.
@@ -425,7 +423,7 @@ function EventRow({ event }: { event: WatcherEvent }) {
           {fmtDuration(event.duration_ms)}
         </span>
       </div>
-      {open && <EventDetailPanel event={event} />}
+      {open && <EventDetailPanel event={event} openclawRoot={openclawRoot} />}
     </>
   );
 }
@@ -451,13 +449,10 @@ function AlertRow({ alert }: { alert: WatcherAlert }) {
 export default function WatcherPage() {
   const [view, setView] = useState<"stream" | "failures" | "alerts">("stream");
 
-  const { events: allEvents, alerts, health, isLoading } = useWatcher(100);
-  const { events: failureEvents } = useWatcher(100, "noop");
-  const { events: errorEvents } = useWatcher(50, "error");
-
-  const failures = [...failureEvents, ...errorEvents]
-    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-    .slice(0, 100);
+  const { events, alerts, health, isLoading, source } = useWatcher(500);
+  // The server's ~/.openclaw: watcher.jsonl sits at its root.
+  const openclawRoot = source.slice(0, source.lastIndexOf("/"));
+  const { stream: allEvents, failures } = watcherViews(events);
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
@@ -563,7 +558,7 @@ export default function WatcherPage() {
                 // Stable identity (repair 6.1): index-based keys shifted on
                 // every 3s poll and remounted all rows — expanded panels
                 // snapped shut. event_id is unique per event (envelope).
-                <EventRow key={event.event_id ?? `${event.ts}-${event.op}`} event={event} />
+                <EventRow key={event.event_id ?? `${event.ts}-${event.op}`} event={event} openclawRoot={openclawRoot} />
               ))
             );
           })()

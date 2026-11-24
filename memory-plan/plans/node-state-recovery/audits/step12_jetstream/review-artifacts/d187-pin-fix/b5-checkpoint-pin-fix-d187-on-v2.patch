@@ -1,0 +1,949 @@
+diff --git a/memory-plan/plans/node-state-recovery/DECISIONS.md b/memory-plan/plans/node-state-recovery/DECISIONS.md
+index d703055d9223c8bc96ed5c5efbdc64424758c9e1..0c27533abd979345eb3def48490de05ba42fe1ce 100644
+--- a/memory-plan/plans/node-state-recovery/DECISIONS.md
++++ b/memory-plan/plans/node-state-recovery/DECISIONS.md
+@@ -4019,3 +4019,15 @@ D185's frozen verifier is only as strong as the provenance of its checkpoint dig
+ `require_committed()` now requires that record too, so the image guard and capture worker refuse without it. It is the only source of the checkpoint digest. `verify_capture_checkpoint()` takes the commitment object it returns, not a digest string: arm digest, nonce, canonical manifest and checkpoint digest all come from host records. The host wrapper `verify_frozen_checkpoint()` obtains that object only from `require_committed()`. Owned tests drive the real journal, `capture_ready()`, `commit()`, `commit_checkpoint()` and the verifier with only host samples mocked. Refusals cover a terminal-record substitution after commitment, a regenerated manifest with a re-derived checkpoint, a foreign arm, nonce or head, non-intact records, a changed or stopped VM sample, a changing handoff file, a double commitment and every recorded field; the substitutions verify under self-input and refuse under the committed digest.
+ 
+ This does not enable production capture, which still refuses without a verified acceptance or abort controller. It commits a digest, not the record's cohort content, which is rechecked only from the journal extracted from the stopped image. That extraction (journal directory listing, node receipt and config bytes, refusing pending or unknown entries) remains an open gate. So do the serving-NATS persistent-stop producer and NATS recovery adapter, native macOS CI for the updated end-to-end capture and facade tests, and D174/D175 admission and rehearsal. D64 is unchanged; four histories stay separate; B5/1.2 stay open and B6 closed.
++
++## D187 — Pin CHECKPOINT.json in the capture record and consume it only through the pins (2026-10-15)
++
++Claude's review of the combined D185/D186 patch found that CAPTURE.json pinned the guard, COMMITTED.json and ACKED.json but not CHECKPOINT.json, whose `checkpoint_sha256` `require_committed()` checks only for format. After capture, a host rewrite of that one field passed `require_committed()`, `host_match()` and `verify_frozen_checkpoint()`: the frozen verifier then accepted a substituted terminal record and refused the authentic one, while the same rewrite of the pinned ACKED.json was caught.
++
++The capture worker now keeps the checkpoint commitment as `require_committed()` returns it at the first stopped sample (`commit_checkpoint()` needs a running VM, so no later commitment is legitimate). Under the arm lock, `publish_pinned_capture()` reads the COMMITTED, ACKED and CHECKPOINT bytes, revalidates them, requires the CHECKPOINT bytes to parse to that stopped-sample commitment and still be in place after revalidation, and the COMMITTED and ACKED digests to equal those the validated checkpoint records, and pins all three in CAPTURE.json (`guest_checkpoint_sha256` is new); anything else refuses publication. `host_match()` checks the CAPTURE.json byte pins before it consumes `require_committed()`, refuses a capture without the checkpoint pin, records the committed `checkpoint_sha256` in MATCH.json, and its end-of-match recheck compares every input's bytes, now including COMMITTED and CHECKPOINT, before revalidating the commitment, so a changed input is named rather than surfacing as its own refusal. `verify_frozen_checkpoint()` first requires the private CAPTURE.json to pin the exact COMMITTED, ACKED and CHECKPOINT bytes, refusing before `require_committed()` is called, then requires the commitment it consumes to equal those pinned bytes. No digest is taken from the extracted records; the pure verifier still takes only the commitment object.
++
++The v2 macOS end-to-end capture test, which Linux CI does not run, would have failed natively at three points: its post-capture ACKED byte change expected a capture-receipt refusal but CHECKPOINT's ACK binding refused first with another message; its mid-match ACKED change expected "input receipts changed during match" but the end recheck called `require_committed()` first; and its failed-capture flow called the guard without `commit_checkpoint()`, which the guard now requires. All three are corrected; a COMMITTED byte change now also refuses at the capture receipt, and the test adds CHECKPOINT substitution, COMMITTED and CHECKPOINT changes during the match and the MATCH digest.
++
++Owned Linux tests drive the real capture worker to publication with only VM facilities stood in (preflight samples, guard receipt, clone, immutable flag, ASIF extraction): the authentic pin and MATCH digest, substitution before and after a match, the pinned-ACK control with CHECKPOINT and its pin rebound, byte-only changes to each commitment file after capture and during a match, a checkpoint rewritten after the stop or between stopped samples, an arm rewritten after the stop, any commitment file swapped between the pin read and validation (and a substitute put back after the authentic CHECKPOINT was validated), an unpinned capture and the pin-before-provenance order. The real-`JournaledHold` control now obtains its commitment only through real `commit()`, `commit_checkpoint()`, the capture worker's pins, `host_match()` and `verify_frozen_checkpoint()`; on Linux it ran only with a simulated kqueue observer, and it stays native on macOS.
++
++The pins are tamper evidence inside one same-uid capture directory: a writer able to rewrite CAPTURE.json together with CHECKPOINT.json is not detected until an acceptance controller or protected store pins CAPTURE.json, which remains part of the open acceptance/abort gate. Production capture still refuses. D64 is unchanged; four histories stay separate; B5/1.2 stay open and B6 closed.
+diff --git a/memory-plan/plans/node-state-recovery/INVENTORY.md b/memory-plan/plans/node-state-recovery/INVENTORY.md
+index 5538c4aaae68d681547fc19bd8b8f470f738fdf5..1b2263383b24cd0ebac87291d0532291d8f38898 100644
+--- a/memory-plan/plans/node-state-recovery/INVENTORY.md
++++ b/memory-plan/plans/node-state-recovery/INVENTORY.md
+@@ -2695,8 +2695,10 @@ Checkpoint 2026-10-14 02:53 EDT: D184 local combined suite passed 50 tests in 9.
+ 
+ Checkpoint 2026-10-14: D185 local, uncommitted capture-ready slice on an owned export of exact head 3aea84ad. `Journal.capture_ready()`, a shared record-only cohort predicate and pure `verify_capture_checkpoint()` added; `guest_capture` gains an optional `journal_head`. 24 owned Linux tests pass with a `Journal.mutate` positive control; a real-`JournaledHold` control is macOS-native (Linux run only with simulated kqueue). Every certificate is bound to the published hold receipt. Remaining under the open role-binding row: a NATS persistent-stop producer (StopWatch refuses one), host commitment of the checkpoint digest with `require_committed()` provenance, stopped-ASIF extraction verifier wiring, native macOS facade CI, boot/abort admission and rehearsal. Needs review and exact-head CI; no production state changed.
+ 
+-Checkpoint 2026-10-14: D186 local, uncommitted host checkpoint commitment on the corrected combined patch. Host commit requires `journal_head`; `commit_checkpoint()` writes a separate `CHECKPOINT.json`; `require_committed()` requires it and alone supplies the frozen verifier's digest. 17 owned host tests plus 24 checkpoint tests pass on Linux; the macOS end-to-end capture and facade tests need native CI. Production capture stays disabled; no production state changed.
++Checkpoint 2026-10-14: D186 local, uncommitted host checkpoint commitment on the corrected combined patch. Host commit requires `journal_head`; `commit_checkpoint()` writes a separate `CHECKPOINT.json`; `require_committed()` requires it and alone supplies the frozen verifier's digest. 18 owned host tests plus 24 checkpoint tests pass on Linux; the macOS end-to-end capture and facade tests need native CI. Production capture stays disabled; no production state changed.
++
++Checkpoint 2026-10-15: D187 local, uncommitted incremental fix on combined v2. CAPTURE.json pins CHECKPOINT.json bytes; `host_match()` checks the pins before provenance and records `checkpoint_sha256` in MATCH.json; `verify_frozen_checkpoint()` requires the pins before `require_committed()` and consumes only the pinned commitment. Three v2 native end-to-end expectations corrected (ACK refusal order, mid-match ACK change, failed capture without `commit_checkpoint()`); the D186 checkpoint's host-test count is corrected from 17 to 18. On Linux 33 owned host tests, 24 checkpoint tests and the host capture suite pass, every D187 source mutant is killed, and the real-facade control passes only with a simulated kqueue observer; the macOS end-to-end capture and facade tests still need native CI. Production capture stays disabled; no production state changed.
+ 
+ - [ ] B5-serving-NATS persistent-stop producer: a full-node stop path that disables and unloads nats, nats-2 and nats-3 under the original hold with managed-stop receipts; `StopWatch.mutate` refuses this today. Required before any capture-ready checkpoint can be produced outside owned tests. No production state changed.
+ - [ ] B5-serving-NATS recovery adapter: an enable-capable restore for the three serving members that recovery can verify, the precondition `StopWatch` names for a persistent NATS stop. Required with the producer above; member1 stays held and is not part of it. No production state changed.
+-- [ ] B5-stopped-ASIF checkpoint extraction: read-only extraction of the user journal directory, node receipt and NATS config bytes from the stopped image, refusing pending or unknown entries, feeding `verify_frozen_checkpoint()`. No production state changed.
++- [ ] B5-stopped-ASIF checkpoint extraction: read-only extraction of the user journal directory, node receipt and NATS config bytes from the stopped image, refusing pending or unknown entries, feeding `verify_frozen_checkpoint()` after CAPTURE.json publication (it requires the D187 pins). No production state changed.
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py
+index 9ea03f50e1b939404ad8279dbad66905aa7b7ca4..23f78a493dd43d40aec3e83d71adee1095e89c37 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_guest_commit.py
+@@ -23,6 +23,9 @@ CHECKPOINT_SCOPE = 'guest capture-ready checkpoint digest committed while the ho
+ CHECKPOINT_KEYS = {'scope', 'at_utc', 'capture_nonce', 'commit_sha256', 'ack_sha256',
+                    'manifest_sha256', 'journal_head', 'checkpoint_sha256', 'started_sample'}
+ HEX = re.compile(r'[0-9a-f]{64}')
++# CAPTURE.json field -> the commitment file whose exact bytes it pins.
++CAPTURE_PINS = {'guest_commit_sha256': 'COMMITTED.json', 'guest_ack_sha256': 'ACKED.json',
++                'guest_checkpoint_sha256': 'CHECKPOINT.json'}
+ 
+ 
+ def private_bytes(path):
+@@ -279,9 +282,30 @@ def commit_checkpoint(host_spec, capture_dir, guest_checkpoint):
+         return require_committed(capture_dir)
+ 
+ 
++def require_captured(capture_dir):
++    """The exact commitment bytes the published CAPTURE.json pins; refuses any unpinned file."""
++    capture_dir = pathlib.Path(capture_dir)
++    capture = json.loads(private_bytes(capture_dir / 'CAPTURE.json'))
++    pinned = {name: private_bytes(capture_dir / name) for name in CAPTURE_PINS.values()}
++    require(isinstance(capture, dict)
++            and all(capture.get(key) == hashlib.sha256(pinned[name]).hexdigest()
++                    for key, name in CAPTURE_PINS.items()),
++            'capture record does not pin this checkpoint commitment')
++    return pinned
++
++
+ def verify_frozen_checkpoint(capture_dir, records, *, table, configs, binary, home):
+-    """Verify a journal extracted from the stopped image against the host's own commitment only."""
+-    return verify_capture_checkpoint(records, require_committed(capture_dir),
++    """Verify a journal extracted from the stopped image against the host's own commitment only.
++
++    The CAPTURE.json pins are required before require_committed() provenance is consumed, and
++    that provenance must be the pinned bytes, not a file swapped in between the two reads.
++    """
++    pinned = require_captured(capture_dir)
++    commitment = require_committed(capture_dir)
++    require(commitment == {**json.loads(pinned['COMMITTED.json']),
++                           'checkpoint': json.loads(pinned['CHECKPOINT.json'])},
++            'capture commitment differs from the pinned capture record')
++    return verify_capture_checkpoint(records, commitment,
+                                      table=table, configs=configs, binary=binary, home=home)
+ 
+ 
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_capture.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_capture.py
+index 02d023f07fcde5e894b59f6327cd2d39ba969060..407ab919ea804a3e3ae1d2fc9fa9d5b63c44516e 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_capture.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/host_vm_capture.py
+@@ -18,7 +18,7 @@ import sys
+ import time
+ 
+ from host_asif_extract import extract
+-from host_guest_commit import require_committed
++from host_guest_commit import CAPTURE_PINS, require_committed
+ from host_image_immutable import change_immutable
+ from host_vm_preflight import owned_directory, preflight, require, write_record
+ 
+@@ -63,6 +63,30 @@ def publish_capture_record(output, result):
+     fsync_parent(output)
+ 
+ 
++def publish_pinned_capture(output, result, stopped_checkpoint):
++    """Publish CAPTURE.json pinning the exact COMMITTED, ACKED and CHECKPOINT bytes.
++
++    commit_checkpoint() needs a running VM, so only the checkpoint commitment first seen once the
++    VM stopped may be pinned; host_match and the frozen verifier consume it through these pins.
++    """
++    with (output / 'ARMED.json').open('rb') as armed:
++        fcntl.flock(armed, fcntl.LOCK_EX)
++        pinned = {key: (output / name).read_bytes() for key, name in CAPTURE_PINS.items()}
++        digests = {key: hashlib.sha256(raw).hexdigest() for key, raw in pinned.items()}
++        checkpoint = require_committed(output)['checkpoint']
++        # The validated checkpoint records the COMMITTED and ACKED digests, so equal digests bind
++        # those pins byte for byte to what require_committed() just accepted. CHECKPOINT itself
++        # must parse to that commitment and still hold the pinned bytes once it was accepted.
++        require(checkpoint == json.loads(pinned['guest_checkpoint_sha256']) == stopped_checkpoint
++                and (output / 'CHECKPOINT.json').read_bytes() == pinned['guest_checkpoint_sha256']
++                and checkpoint['commit_sha256'] == digests['guest_commit_sha256']
++                and checkpoint['ack_sha256'] == digests['guest_ack_sha256'],
++                'guest capture commitment changed after the VM stopped')
++        result = {**result, **digests}
++        publish_capture_record(output, result)
++    return result
++
++
+ def clone_only(source, target):
+     library = ctypes.CDLL(None, use_errno=True)
+     function = library.clonefile
+@@ -169,6 +193,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
+         saw_stopped = False
+         clean_stopped = False
+         guard_observed = False
++        stopped_checkpoint = None
+         while time.monotonic() < deadline:
+             observation = capture_preflight(host_spec_path, output,
+                                             output / f'power-{sequence:04d}',
+@@ -177,7 +202,9 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
+                     'host boot, VM image or vmstate identity changed while waiting')
+             if observation['state'] == 'stopped':
+                 saw_stopped = True
+-                require_committed(output)
++                committed = require_committed(output)
++                if stopped_checkpoint is None:
++                    stopped_checkpoint = committed['checkpoint']
+                 if observation['holders_consistent']:
+                     clean_stopped = True
+                     stopped_count += 1
+@@ -252,8 +279,6 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
+             'vm_uuid': host['uuid'], 'host_boot_session': first['host_boot_session'],
+             'source_image_sha256': source_sha, 'clone_image_sha256': clone_sha,
+             'guard_receipt_sha256': guard_sha,
+-            'guest_commit_sha256': file_hash(output / 'COMMITTED.json'),
+-            'guest_ack_sha256': file_hash(output / 'ACKED.json'),
+             'source_size': first['image_size'], 'clone_size': clone_info.st_size,
+             'vmstate_at_arm': first['vmstate'],
+             'vmstate_at_final_check': after_extract['vmstate'],
+@@ -265,10 +290,7 @@ def capture(host_spec_path, store_spec_path, output, wait_seconds, fixture=False
+             'store_roles': sorted(extracted['stores']),
+             'vm_state_at_final_check': 'stopped',
+         }
+-        with (output / 'ARMED.json').open('rb') as armed:
+-            fcntl.flock(armed, fcntl.LOCK_EX)
+-            publish_capture_record(output, result)
+-        return result
++        return publish_pinned_capture(output, result, stopped_checkpoint)
+     except Exception as error:
+         if os.path.lexists(output / 'ARMED.json'):
+             with (output / 'ARMED.json').open('rb') as armed:
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py
+index 1e38a2bb45d9f4b31f0f4be7ba6add268d47153d..9ec831e03c3237ccf6d01a9c488874a5fbd1c0c0 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/stopped_tree_match.py
+@@ -192,22 +192,22 @@ def host_match(guest_path, extracted, output):
+     host_bytes = manifest_path.read_bytes()
+     capture_bytes = capture_path.read_bytes()
+     guard_bytes = guard_path.read_bytes()
++    committed_bytes = (extracted.parent / 'COMMITTED.json').read_bytes()
+     ack_bytes = (extracted.parent / 'ACKED.json').read_bytes()
++    checkpoint_bytes = (extracted.parent / 'CHECKPOINT.json').read_bytes()
+     host = json.loads(host_bytes)
+     capture = json.loads(capture_bytes)
+     guard = json.loads(guard_bytes)
+     new_output(output)
+     try:
+-        committed = require_committed(extracted.parent)
+-        require(committed['manifest_sha256'] == hashlib.sha256(guest_bytes).hexdigest()
+-                and committed['manifest'] == guest,
+-                'guest manifest differs from the running-VM commitment')
++        # The capture record's byte pins come first: the commitment is consumed only as captured.
+         require(capture['scope'] == CAPTURE_SCOPE
+                 and capture['vm_state_at_final_check'] == 'stopped'
+                 and capture['source_image_sha256'] == capture['clone_image_sha256']
+                 and capture['guard_receipt_sha256'] == sha256(guard_path)
+-                and capture['guest_commit_sha256'] == sha256(extracted.parent / 'COMMITTED.json')
+-                and capture['guest_ack_sha256'] == sha256(extracted.parent / 'ACKED.json')
++                and capture['guest_commit_sha256'] == hashlib.sha256(committed_bytes).hexdigest()
++                and capture['guest_ack_sha256'] == hashlib.sha256(ack_bytes).hexdigest()
++                and capture.get('guest_checkpoint_sha256') == hashlib.sha256(checkpoint_bytes).hexdigest()
+                 and capture['clone_image_sha256'] == host['image_sha256']
+                 and capture['extraction_manifest_sha256'] == sha256(manifest_path)
+                 and capture['data_volume_uuid'] == host['data_volume_uuid']
+@@ -215,6 +215,10 @@ def host_match(guest_path, extracted, output):
+                 and capture['clone_size'] == image_path.stat().st_size
+                 and sha256(image_path) == capture['clone_image_sha256'],
+                 'capture receipt, cloned image and extracted stores differ')
++        committed = require_committed(extracted.parent)
++        require(committed['manifest_sha256'] == hashlib.sha256(guest_bytes).hexdigest()
++                and committed['manifest'] == guest,
++                'guest manifest differs from the running-VM commitment')
+         require(guest['scope'] == 'guest stopped-tree content observation; writer exclusion external',
+                 'guest stopped-tree scope differs')
+         require(guest['spec_sha256'] == capture['store_spec_sha256'],
+@@ -263,17 +267,21 @@ def host_match(guest_path, extracted, output):
+                 'guest_path': store_paths[role],
+                 'sha256': hashlib.sha256(json.dumps(rows, ensure_ascii=False,
+                     separators=(',', ':')).encode()).hexdigest()}
++        # Bytes first, so a changed commitment file names the change instead of its own refusal.
+         require(guest_path.read_bytes() == guest_bytes
+-                and require_committed(extracted.parent) == committed
++                and (extracted.parent / 'COMMITTED.json').read_bytes() == committed_bytes
+                 and (extracted.parent / 'ACKED.json').read_bytes() == ack_bytes
++                and (extracted.parent / 'CHECKPOINT.json').read_bytes() == checkpoint_bytes
+                 and manifest_path.read_bytes() == host_bytes
+                 and capture_path.read_bytes() == capture_bytes
+-                and guard_path.read_bytes() == guard_bytes,
++                and guard_path.read_bytes() == guard_bytes
++                and require_committed(extracted.parent) == committed,
+                 'stopped-tree input receipts changed during match')
+         result = {'scope': 'content match and read-only mode; not historical master acceptance',
+                   'at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                   'guest_manifest_sha256': hashlib.sha256(guest_bytes).hexdigest(),
+                   'capture_sha256': hashlib.sha256(capture_bytes).hexdigest(),
++                  'checkpoint_sha256': committed['checkpoint']['checkpoint_sha256'],
+                   'extraction_manifest_sha256': hashlib.sha256(host_bytes).hexdigest(),
+                   'image_sha256': host['image_sha256'],
+                   'data_volume_uuid': guest['data_volume_uuid'], 'matched': matched,
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+index 930adcf882be63ab0e4545cf2d05a42822a22072..e387fdb08060fe4f331807f1230a561bb08e98e5 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_capture_checkpoint_facade.py
+@@ -3,6 +3,9 @@
+ The hold, gate, full-node journal opener and checkpoint are the real code; only launchd and the
+ stop evidence are owned stand-ins. Serving NATS stops go through JournaledHold.mutate directly:
+ StopWatch refuses a persistent full-node NATS stop until a NATS recovery adapter exists.
++The host side is the real commit(), commit_checkpoint(), capture worker publication, host_match()
++and frozen verifier, with only the VM facilities of drive_capture_worker stood in: the frozen
++verifier receives its commitment through the CAPTURE.json pins, never from the journal itself.
+ """
+ import contextlib
+ import copy
+@@ -10,7 +13,6 @@ import hashlib
+ import json
+ import os
+ import pathlib
+-import secrets
+ import sys
+ import tempfile
+ import unittest
+@@ -24,8 +26,11 @@ from full_node_baseline import open_full_node_journal  # noqa: E402
+ from journal_hold import ANCHOR, JournaledHold, describe  # noqa: E402
+ from nats_identity import ROLES  # noqa: E402
+ from preservation_checks import STOP_ORDER  # noqa: E402
+-from preservation_journal import (ARM_SCOPE, MANIFEST_SCOPE, SERVING_NATS, TIMER_UNITS, Refused,  # noqa: E402
+-                                  verify_capture_checkpoint)
++from host_guest_commit import commit, commit_checkpoint, verify_frozen_checkpoint  # noqa: E402
++from host_vm_preflight import write_record  # noqa: E402
++from preservation_journal import MANIFEST_SCOPE, SERVING_NATS, TIMER_UNITS, Refused  # noqa: E402
++from stopped_tree_match import host_match  # noqa: E402
++from test_host_checkpoint_commit import ROWS, drive_capture_worker, write_private  # noqa: E402
+ from test_journal_hold import gate_module, gated_identity  # noqa: E402
+ from test_preservation_journal import (full_entrypoint_evidence, full_node_inventory,  # noqa: E402
+                                        listener_stop_evidence, timer_stop_evidence)
+@@ -96,20 +101,39 @@ class RealFacadeCheckpoint(unittest.TestCase):
+             self.assertEqual(events[:4], ['baseline', 'intent', 'hold-published', 'verified'])
+             self.assertEqual(events[4:], ['intent', 'verified'] * (len(STOP_ORDER) + len(SERVING_NATS)))
+ 
+-            nonce = secrets.token_hex(32)
+-            armed = canonical({'scope': ARM_SCOPE, 'capture_nonce': nonce})
++            bindings = {'table': table, 'configs': configs,
++                    'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
++            store_spec = root / 'stores.json'
++            write_record(store_spec, {'data_volume_uuid': 'A' * 36, 'stores': [
++                {'role': role, 'relative_path': identity_fixture.STORES[UNIT_OF[role]][1:]}
++                for role in sorted(UNIT_OF)]})
+             head = journal.records[-1]['sha256']
+-            manifest = canonical({
+-                'scope': MANIFEST_SCOPE, 'at_utc': '2026-10-14T15:00:00+00:00', 'capture_nonce': nonce,
+-                'journal_head': head, 'data_volume_uuid': 'A' * 36, 'spec_sha256': '5' * 64,
+-                'stores': {role: [{'path': 'stream.dat', 'type': 'file'}] for role in UNIT_OF},
+-                'store_paths': {role: identity_fixture.STORES[UNIT_OF[role]] for role in UNIT_OF},
+-                'store_relative_paths': {role: identity_fixture.STORES[UNIT_OF[role]][1:]
+-                                         for role in UNIT_OF}})
+-            inputs = {'armed': armed, 'manifest': manifest, 'table': table, 'configs': configs,
+-                      'binary': identity_fixture.BINARY, 'home': identity_fixture.HOME}
+-            record = journal.capture_ready(
+-                hold, lambda unit, saved: {**copy.deepcopy(current[unit]), 'verified': True}, **inputs)
++            flow = {}
++
++            def while_running(output):
++                """Guest manifest, host commit, guest checkpoint and host checkpoint commitment."""
++                armed = (output / 'ARMED.json').read_bytes()
++                nonce = json.loads(armed)['capture_nonce']
++                flow['manifest'] = canonical({
++                    'scope': MANIFEST_SCOPE, 'at_utc': '2026-10-14T15:00:00+00:00', 'capture_nonce': nonce,
++                    'journal_head': head, 'data_volume_uuid': 'A' * 36,
++                    'spec_sha256': hashlib.sha256(store_spec.read_bytes()).hexdigest(),
++                    'stores': {role: ROWS for role in UNIT_OF},
++                    'store_paths': {role: identity_fixture.STORES[UNIT_OF[role]] for role in UNIT_OF},
++                    'store_relative_paths': {role: identity_fixture.STORES[UNIT_OF[role]][1:]
++                                             for role in UNIT_OF}})
++                flow['guest'] = root / 'guest-manifest.json'
++                write_private(flow['guest'], flow['manifest'])
++                commit(output.parent / 'host.json', store_spec, output, flow['guest'])
++                flow['record'] = journal.capture_ready(
++                    hold, lambda unit, saved: {**copy.deepcopy(current[unit]), 'verified': True},
++                    armed=armed, manifest=flow['manifest'], **bindings)
++                commit_checkpoint(output.parent / 'host.json', output,
++                                  root / 'journals' / 'window' / ('%06d.json' % flow['record']['sequence']))
++
++            output, error = drive_capture_worker(root / 'host', store_spec, while_running)
++            self.assertIsNone(error)
++            record = flow['record']
+             self.assertEqual(record['pre_head'], head)
+             self.assertEqual(record['hold_evidence']['watch_session_id'], hold.original_session)
+             self.assertTrue(record['hold_evidence']['kernel_file_watch'])
+@@ -119,15 +143,14 @@ class RealFacadeCheckpoint(unittest.TestCase):
+             self.assertEqual(record['hold_evidence']['receipt'], publication)
+             self.assertTrue(all(row['evidence']['execution_hold']['receipt'] == publication
+                                 for row in journal.records[5:-1:2]))
+-            nonce_sha = hashlib.sha256(manifest).hexdigest()
+-            commitment = {'capture_nonce': nonce, 'arm_sha256': hashlib.sha256(armed).hexdigest(),
+-                          'manifest_sha256': nonce_sha, 'manifest': json.loads(manifest),
+-                          'checkpoint': {'capture_nonce': nonce, 'manifest_sha256': nonce_sha,
+-                                         'journal_head': head, 'checkpoint_sha256': record['sha256']}}
+-            summary = verify_capture_checkpoint(journal._read(), commitment, table=table, configs=configs,
+-                                                binary=identity_fixture.BINARY, home=identity_fixture.HOME)
+-            self.assertEqual(summary['session'], hold.original_session)
+-            self.assertEqual(hashlib.sha256(manifest).hexdigest(), record['manifest_sha256'])
++            matches = root / 'matches'
++            matches.mkdir(mode=0o700)
++            matched = host_match(flow['guest'], output / 'extracted-stores', matches / 'match')
++            self.assertEqual(matched['checkpoint_sha256'], record['sha256'])
++            summary = verify_frozen_checkpoint(output, journal._read(), **bindings)
++            self.assertEqual((summary['session'], summary['checkpoint_sha256']),
++                             (hold.original_session, record['sha256']))
++            self.assertEqual(hashlib.sha256(flow['manifest']).hexdigest(), record['manifest_sha256'])
+             with self.assertRaisesRegex(Refused, 'capture checkpoint ended forward work'):
+                 hold.mutate('nats', 'disable-and-unload', lambda: self.fail('applied'),
+                             lambda: self.fail('verified'))
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+index d193a63372737e3b8e214d61b1c216337414fa1d..9722de20c0708f39a78a1bd99dbdda6b023c0482 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_checkpoint_commit.py
+@@ -1,8 +1,10 @@
+-"""Owned tests for the host's separate capture-ready checkpoint commitment (B5, D186).
++"""Owned tests for the host's separate capture-ready checkpoint commitment (B5, D186, D187).
+ 
+ The guest journal, manifest and checkpoint are produced by the real Journal and checkpoint code;
+-the host records are written by the real commit()/commit_checkpoint(). Only host VM samples
+-(preflight) are owned stand-ins. No VM, launchd job, NATS server or store is touched.
++the host records are written by the real commit()/commit_checkpoint(), CAPTURE.json by the real
++capture worker's pinned publication, and MATCH.json by the real host_match(). Only host-side VM
++facilities are owned stand-ins (see drive_capture_worker). No VM, launchd job, NATS server or
++store is touched.
+ """
+ import copy
+ import fcntl
+@@ -11,17 +13,24 @@ import json
+ import os
+ import pathlib
+ import secrets
++import shutil
+ import sys
++import threading
++import time
++import types
+ import unittest
+ from unittest import mock
+ 
+ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+ 
++import host_guest_commit  # noqa: E402
++import host_vm_capture  # noqa: E402
+ import host_vm_guard  # noqa: E402
++import stopped_tree_match  # noqa: E402
+ import test_capture_checkpoint as guest  # noqa: E402
+ import test_nats_identity as identity_fixture  # noqa: E402
+-from host_guest_commit import (CHECKPOINT_KEYS, commit, commit_checkpoint, require_acked,  # noqa: E402
+-                               require_committed, verify_frozen_checkpoint)
++from host_guest_commit import (CAPTURE_PINS, CHECKPOINT_KEYS, commit, commit_checkpoint,  # noqa: E402
++                               require_acked, require_committed, verify_frozen_checkpoint)
+ from host_vm_preflight import write_record  # noqa: E402
+ from preservation_journal import (ARM_SCOPE, CAPTURE_EVENT, CAPTURE_SCOPE, Refused,  # noqa: E402
+                                   encoded as journal_encoded)
+@@ -30,6 +39,12 @@ PRIOR = {'state': 'started', 'vm_uuid': '00000000-0000-0000-0000-000000000002',
+          'host_boot_session': 'boot', 'image_device': 1, 'image_inode': 2, 'image_size': 3,
+          'vmstate': None}
+ STARTED = dict(PRIOR, holders_consistent=True, image_holders=[42])
++# Every stand-in extracted store holds one file with these bytes; guest manifests list ROWS.
++STORE_BYTES = b'owned stopped store'
++ROWS = [{'path': 'stream.dat', 'type': 'file', 'size': len(STORE_BYTES),
++         'sha256': hashlib.sha256(STORE_BYTES).hexdigest()}]
++# Clone/extraction fields of a published capture: the frozen verifier reads only the pins.
++UNREAD = {'scope': host_vm_capture.CAPTURE_SCOPE, 'vm_state_at_final_check': 'stopped'}
+ 
+ 
+ def sha(raw):
+@@ -56,6 +71,93 @@ def write_checkpoint_record(path, committed, **changes):
+     return record
+ 
+ 
++def drive_capture_worker(parent, store_spec, while_running, during_extract=None, second_stop=None):
++    """Run the real host_vm_capture.capture() worker to CAPTURE.json publication without a VM.
++
++    Owned stand-ins, all host-side and not under test here: VM power/holder samples (preflight,
++    shared with host_guest_commit), the image guard receipt (the real guard needs macOS
++    st_flags), the APFS clone, the immutable flag and the ASIF store extraction, whose stores
++    each hold STORE_BYTES. `while_running(output)` runs while the worker samples the VM started
++    and must leave the real COMMITTED/ACKED/CHECKPOINT records; `second_stop(output)` runs as
++    the worker takes its second stopped sample, after it handled the first; `during_extract(output)`
++    runs after the stop and before publication. Returns (output, worker exception or None).
++    """
++    parent.mkdir(mode=0o700)
++    source = parent / 'source.img'
++    write_private(source, b'owned stand-in image bytes')
++    info = source.stat()
++    host = parent / 'host.json'
++    write_record(host, {'package': str(parent / 'Owned.utm'), 'name': 'Owned',
++                        'uuid': host_vm_capture.FIXTURE_UUID, 'image_name': source.name,
++                        'config_sha256': '0' * 64, 'utmctl': '/usr/bin/false', 'utmctl_sha256': '0' * 64})
++    running = dict(STARTED, image=str(source), image_device=info.st_dev, image_inode=info.st_ino,
++                   image_size=info.st_size)
++    output = parent / 'capture'
++    stopped = threading.Event()
++    stops = []
++
++    def sampled(_spec, destination, **_options):
++        # Like the real preflight, every sample is recorded in its own new directory.
++        value = dict(running, state='stopped', image_holders=[]) if stopped.is_set() else running
++        if stopped.is_set():
++            stops.append(destination.name)
++            if len(stops) == 2 and second_stop:
++                second_stop(output)
++        destination.mkdir(mode=0o700)
++        write_record(destination / 'preflight.json', value)
++        return value
++
++    def extracted(clone, spec_path, destination):
++        if during_extract:
++            during_extract(output)
++        destination.mkdir(mode=0o700)
++        for role in stopped_tree_match.ROLES:
++            (destination / role).mkdir(mode=0o700)
++            write_private(destination / role / 'stream.dat', STORE_BYTES)
++        spec = json.loads(spec_path.read_bytes())
++        stores = {role: ROWS for role in stopped_tree_match.ROLES}
++        write_record(destination / 'manifest.json', {'image_sha256': spec['image_sha256'],
++                                                     'data_volume_uuid': spec['data_volume_uuid'],
++                                                     'stores': stores})
++        return {'stores': stores}
++
++    errors = []
++
++    def worker():
++        try:
++            host_vm_capture.capture(host, store_spec, output, 30, fixture=True)
++        except Exception as error:  # the caller asserts on it
++            errors.append(error)
++
++    pause = time.sleep
++    with mock.patch.object(host_vm_capture, 'preflight', sampled), \
++            mock.patch.object(host_guest_commit, 'preflight', sampled), \
++            mock.patch.object(host_vm_capture, 'time',
++                              types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _: pause(.005))), \
++            mock.patch.object(host_vm_capture, 'shutil',
++                              types.SimpleNamespace(disk_usage=lambda _: types.SimpleNamespace(free=30 << 30))), \
++            mock.patch.object(host_vm_capture, 'guarded_source',
++                              lambda capture_dir, *_: host_vm_capture.file_hash(capture_dir / 'GUARD.json')), \
++            mock.patch.object(host_vm_capture, 'clone_only', shutil.copyfile), \
++            mock.patch.object(host_vm_capture, 'change_immutable', lambda *_: None), \
++            mock.patch.object(host_vm_capture, 'extract', extracted):
++        thread = threading.Thread(target=worker)
++        thread.start()
++        deadline = time.monotonic() + 10
++        while not (output / 'power-0000').exists() and thread.is_alive() and time.monotonic() < deadline:
++            pause(.005)
++        if thread.is_alive():
++            try:
++                while_running(output)
++                write_record(output / 'GUARD.json', {'scope': 'stopped source image guarded; no clone or VM start'})
++            finally:
++                stopped.set()
++        thread.join(30)
++    if thread.is_alive():
++        raise AssertionError('capture worker did not finish')
++    return output, (errors[0] if errors else None)
++
++
+ class HostCheckpoint(guest.CaptureCheckpoint):
+     def setUp(self):
+         super().setUp()
+@@ -112,6 +214,23 @@ class HostCheckpoint(guest.CaptureCheckpoint):
+             self.host_checkpoint(path, **options)
+         self.assertFalse((self.capture / 'CHECKPOINT.json').exists())
+ 
++    def publish(self):
++        """The worker's real pinned publication; only the clone/extraction fields are stand-ins."""
++        return host_vm_capture.publish_pinned_capture(self.capture, dict(UNREAD),
++                                                      require_committed(self.capture)['checkpoint'])
++
++    def rewrite(self, name, **changes):
++        """A same-uid host rewrite of one capture-directory record, in write_record's format."""
++        path = self.capture / name
++        value = json.loads(path.read_bytes())
++        path.unlink()
++        write_record(path, {**value, **changes})
++
++    def repin(self):
++        """A forger who also rewrites the CAPTURE.json pins to the current commitment files."""
++        self.rewrite('CAPTURE.json', **{key: sha((self.capture / name).read_bytes())
++                                        for key, name in CAPTURE_PINS.items()})
++
+ 
+ class Authentic(HostCheckpoint):
+     def test_commitment_chain_verifies_the_frozen_journal_from_host_records_only(self):
+@@ -128,6 +247,9 @@ class Authentic(HostCheckpoint):
+         self.assertEqual(commitment, require_committed(self.capture))
+         self.assertEqual({key: value for key, value in commitment.items() if key != 'checkpoint'},
+                          require_acked(self.capture)[0])
++        published = self.publish()
++        self.assertEqual({key: published[key] for key in CAPTURE_PINS},
++                         {key: sha((self.capture / name).read_bytes()) for key, name in CAPTURE_PINS.items()})
+         self.journal.close()
+         with guest.Journal(self.root, boot='boot-a', node_lock=self.node_lock) as reopened:
+             frozen = reopened._read()
+@@ -291,6 +413,8 @@ class HostRefusals(HostCheckpoint):
+     def test_recorded_checkpoint_commitment_fields_are_rechecked(self):
+         _, committed, record = self.committed_flow()
+         self.host_checkpoint(self.journal_file(record))
++        self.publish()
++        published = (self.capture / 'CAPTURE.json').read_bytes()
+         original = json.loads((self.capture / 'CHECKPOINT.json').read_bytes())
+         for label, change in (
+                 ('scope', {'scope': 'other'}), ('nonce', {'capture_nonce': '0' * 64}),
+@@ -305,8 +429,14 @@ class HostRefusals(HostCheckpoint):
+                 write_record(self.capture / 'CHECKPOINT.json', {**original, **change})
+                 with self.assertRaisesRegex(RuntimeError, 'not committed to this guest manifest'):
+                     require_committed(self.capture)
++                # The CAPTURE.json pin refuses first; a forger who re-pins still meets the field check.
++                with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++                    self.frozen()
++                self.repin()
+                 with self.assertRaisesRegex(RuntimeError, 'not committed to this guest manifest'):
+                     self.frozen()
++                (self.capture / 'CAPTURE.json').unlink()
++                write_private(self.capture / 'CAPTURE.json', published)
+         (self.capture / 'CHECKPOINT.json').unlink()
+         write_record(self.capture / 'CHECKPOINT.json', original)
+         self.frozen()
+@@ -322,6 +452,7 @@ class FrozenSubstitution(HostCheckpoint):
+     def test_terminal_checkpoint_substitution_refuses_only_via_the_committed_digest(self):
+         manifest, committed, record = self.committed_flow()
+         self.host_checkpoint(self.journal_file(record))
++        self.publish()
+         records = self.journal._read()
+         swapped = self.substituted(records, at='2026-10-14T16:00:00+00:00')
+         # Self-input would accept the substitute: the record's own digest pins nothing.
+@@ -333,6 +464,7 @@ class FrozenSubstitution(HostCheckpoint):
+     def test_regenerated_manifest_with_rederived_checkpoint_refuses(self):
+         manifest, committed, record = self.committed_flow()
+         self.host_checkpoint(self.journal_file(record))
++        self.publish()
+         records = self.journal._read()
+         regenerated = self.host_manifest(json.loads(manifest)['journal_head'], at_utc='2026-10-14T16:00:00+00:00')
+         swapped = self.substituted(records, manifest_sha256=sha(regenerated))
+@@ -344,6 +476,7 @@ class FrozenSubstitution(HostCheckpoint):
+     def test_rows_after_the_committed_checkpoint_refuse(self):
+         _, committed, record = self.committed_flow()
+         self.host_checkpoint(self.journal_file(record))
++        self.publish()
+         self.journal.append('recovery-started')
+         with self.assertRaisesRegex(Refused, 'not the terminal record'):
+             self.frozen()
+@@ -351,6 +484,7 @@ class FrozenSubstitution(HostCheckpoint):
+     def test_checkpoint_from_another_capture_refuses(self):
+         _, committed, record = self.committed_flow()
+         self.host_checkpoint(self.journal_file(record))
++        self.publish()
+         records = self.journal._read()
+         other = self.substituted(records, capture_nonce=secrets.token_hex(32))
+         with self.assertRaisesRegex(Refused, 'differs from the committed digest'):
+@@ -379,5 +513,261 @@ class FrozenSubstitution(HostCheckpoint):
+                          record['sha256'])
+ 
+ 
++class CapturePin(HostCheckpoint):
++    """CAPTURE.json pins CHECKPOINT.json; host_match and the frozen verifier consume it pinned (D187)."""
++
++    def captured(self, during_extract=None, second_stop=None):
++        """Real guest journal and checkpoint, real commit()/commit_checkpoint(), real capture worker."""
++        flow = {}
++
++        def while_running(output):
++            self.capture = output
++            self.armed = (output / 'ARMED.json').read_bytes()
++            self.nonce = json.loads(self.armed)['capture_nonce']
++            self.build()
++            manifest = self.host_manifest(stores={role: ROWS for role in stopped_tree_match.ROLES})
++            flow['guest'] = self.temp / 'guest-manifest.json'
++            write_private(flow['guest'], manifest)
++            commit(self.host, self.spec, output, flow['guest'])
++            flow['record'] = self.checkpoint(manifest=manifest)
++            commit_checkpoint(self.host, output, self.journal_file(flow['record']))
++
++        output, error = drive_capture_worker(self.temp / 'worker', self.spec, while_running,
++                                             during_extract, second_stop)
++        return output, error, flow
++
++    def match(self, flow, name):
++        matches = self.temp / 'matches'
++        if not matches.exists():
++            matches.mkdir(mode=0o700)
++        return stopped_tree_match.host_match(flow['guest'], self.capture / 'extracted-stores', matches / name)
++
++    def substitute(self):
++        """A guest-forged terminal record, then a host rewrite of only the committed digest."""
++        records = self.journal._read()
++        swapped = copy.deepcopy(records)
++        swapped[-1]['at'] = '2026-10-14T16:30:00+00:00'
++        swapped = guest.rechain(swapped, len(swapped) - 1)
++        self.rewrite('CHECKPOINT.json', checkpoint_sha256=swapped[-1]['sha256'])
++        # The rewritten commitment still validates on its own: only the CAPTURE.json pin refuses it.
++        require_committed(self.capture)
++        return records, swapped
++
++    def test_worker_pins_the_checkpoint_seen_stopped_and_match_records_its_digest(self):
++        output, error, flow = self.captured()
++        self.assertIsNone(error)
++        published = json.loads((output / 'CAPTURE.json').read_bytes())
++        for key, name in CAPTURE_PINS.items():
++            self.assertEqual(published[key], sha((output / name).read_bytes()))
++        result = self.match(flow, 'authentic')
++        recorded = json.loads((self.temp / 'matches' / 'authentic' / 'MATCH.json').read_bytes())
++        self.assertEqual((result['checkpoint_sha256'], recorded['checkpoint_sha256']),
++                         (flow['record']['sha256'], flow['record']['sha256']))
++        self.assertEqual(self.frozen()['checkpoint_sha256'], flow['record']['sha256'])
++
++    def test_substituted_checkpoint_before_match_refuses_at_the_capture_pin(self):
++        _, error, flow = self.captured()
++        self.assertIsNone(error)
++        records, swapped = self.substitute()
++        with self.assertRaisesRegex(RuntimeError, 'capture receipt, cloned image and extracted stores differ'):
++            self.match(flow, 'substituted')
++        self.assertFalse((self.temp / 'matches' / 'substituted' / 'MATCH.json').exists())
++        for rows in (swapped, records):
++            with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++                self.frozen(rows)
++
++    def test_substituted_checkpoint_after_match_refuses_frozen_verification(self):
++        _, error, flow = self.captured()
++        self.assertIsNone(error)
++        matched = self.match(flow, 'authentic')
++        records, swapped = self.substitute()
++        self.assertEqual(matched['checkpoint_sha256'], records[-1]['sha256'])
++        for rows in (swapped, records):
++            with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++                self.frozen(rows)
++        with self.assertRaisesRegex(RuntimeError, 'capture receipt, cloned image and extracted stores differ'):
++            self.match(flow, 'rematch')
++
++    def test_control_pinned_ack_refuses_with_checkpoint_and_its_pin_rebound(self):
++        output, error, flow = self.captured()
++        self.assertIsNone(error)
++        self.rewrite('ACKED.json', at_utc='2026-10-14T16:30:00+00:00')
++        self.rewrite('CHECKPOINT.json', ack_sha256=sha((output / 'ACKED.json').read_bytes()))
++        self.rewrite('CAPTURE.json', guest_checkpoint_sha256=sha((output / 'CHECKPOINT.json').read_bytes()))
++        require_committed(output)
++        with self.assertRaisesRegex(RuntimeError, 'capture receipt, cloned image and extracted stores differ'):
++            self.match(flow, 'ack-rewrite')
++        with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++            self.frozen()
++
++    def test_commitment_bytes_changed_after_capture_refuse_at_the_pins(self):
++        output, error, flow = self.captured()
++        self.assertIsNone(error)
++        for name in CAPTURE_PINS.values():
++            with self.subTest(changed=name):
++                original = (output / name).read_bytes()
++                # Parses identically, so only a byte pin can see it.
++                (output / name).write_bytes(original + b' ')
++                with self.assertRaisesRegex(RuntimeError, 'capture receipt, cloned image and extracted stores differ'):
++                    self.match(flow, 'changed-' + name)
++                with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++                    self.frozen()
++                (output / name).write_bytes(original)
++        unpinned = json.loads((output / 'CAPTURE.json').read_bytes())
++        del unpinned['guest_checkpoint_sha256']
++        (output / 'CAPTURE.json').unlink()
++        write_record(output / 'CAPTURE.json', unpinned)
++        with self.assertRaisesRegex(RuntimeError, 'capture receipt, cloned image and extracted stores differ'):
++            self.match(flow, 'unpinned')
++        with self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++            self.frozen()
++
++    def test_commitment_changed_during_match_names_the_change(self):
++        output, error, flow = self.captured()
++        self.assertIsNone(error)
++        freeze = stopped_tree_match.freeze
++        for name in CAPTURE_PINS.values():
++            with self.subTest(changed=name):
++                path = output / name
++                original = path.read_bytes()
++                changed = []
++
++                def after_validation(root, path=path, original=original, changed=changed):
++                    freeze(root)
++                    if not changed:
++                        path.write_bytes(original + b' ')
++                        changed.append(True)
++                try:
++                    with mock.patch.object(stopped_tree_match, 'freeze', side_effect=after_validation):
++                        with self.assertRaisesRegex(RuntimeError, 'input receipts changed during match'):
++                            self.match(flow, 'during-' + name)
++                    self.assertTrue(changed)
++                finally:
++                    path.write_bytes(original)
++        self.match(flow, 'restored')
++
++    def test_checkpoint_rewritten_after_the_stop_refuses_publication(self):
++        # The digest is well-formed, so the rewritten commitment still validates on its own.
++        output, error, _ = self.captured(
++            during_extract=lambda output: self.rewrite('CHECKPOINT.json', checkpoint_sha256='0' * 64))
++        self.assertRegex(str(error), 'guest capture commitment changed after the VM stopped')
++        self.assertTrue((output / 'FAILED.json').exists())
++        self.assertFalse((output / 'CAPTURE.json').exists())
++
++    def test_checkpoint_first_seen_stopped_is_the_one_pinned(self):
++        # Rewritten after the worker handled its first stopped sample: the later sample is not pinned.
++        output, error, _ = self.captured(
++            second_stop=lambda output: self.rewrite('CHECKPOINT.json', checkpoint_sha256='0' * 64))
++        self.assertRegex(str(error), 'guest capture commitment changed after the VM stopped')
++        self.assertFalse((output / 'CAPTURE.json').exists())
++
++    def test_arm_rewritten_after_the_stop_refuses_publication(self):
++        # The pinned files are unchanged; only revalidation at publication sees the arm.
++        def rearmed(output):
++            armed = output / 'ARMED.json'
++            armed.write_bytes(armed.read_bytes() + b' ')
++        output, error, _ = self.captured(during_extract=rearmed)
++        self.assertRegex(str(error), 'guest manifest is not committed to this host arm')
++        self.assertFalse((output / 'CAPTURE.json').exists())
++
++    def swapped_at_publication(self, name):
++        """`name` differs when the pins are read and is restored before require_committed() runs."""
++        held = {}
++
++        def alter(output):
++            held['bytes'] = (output / name).read_bytes()
++            (output / name).write_bytes(held['bytes'] + b' ')
++
++        def validate(capture_dir):
++            if held:
++                (capture_dir / name).write_bytes(held.pop('bytes'))
++            return require_committed(capture_dir)
++
++        with mock.patch.object(host_vm_capture, 'require_committed', validate):
++            output, error, _ = self.captured(during_extract=alter)
++        self.assertRegex(str(error), 'guest capture commitment changed after the VM stopped')
++        self.assertFalse((output / 'CAPTURE.json').exists())
++
++    def test_committed_bytes_swapped_at_publication_refuse(self):
++        self.swapped_at_publication('COMMITTED.json')
++
++    def test_ack_bytes_swapped_at_publication_refuse(self):
++        self.swapped_at_publication('ACKED.json')
++
++    def test_checkpoint_bytes_swapped_at_publication_refuse(self):
++        # Parses like the validated commitment, so only the re-read after validation sees it.
++        self.swapped_at_publication('CHECKPOINT.json')
++
++    def test_checkpoint_validated_between_two_substitutes_refuses(self):
++        """A substitute is pinned and back in place afterwards; only the authentic one is validated."""
++        held = {}
++
++        def substitute(output):
++            path = output / 'CHECKPOINT.json'
++            held['authentic'] = path.read_bytes()
++            self.rewrite('CHECKPOINT.json', checkpoint_sha256='0' * 64)
++            held['substitute'] = path.read_bytes()
++
++        def validate(capture_dir):
++            if not held:
++                return require_committed(capture_dir)
++            path = capture_dir / 'CHECKPOINT.json'
++            path.write_bytes(held['authentic'])
++            try:
++                return require_committed(capture_dir)
++            finally:
++                path.write_bytes(held.pop('substitute'))
++                held.clear()
++
++        with mock.patch.object(host_vm_capture, 'require_committed', validate):
++            output, error, _ = self.captured(during_extract=substitute)
++        self.assertRegex(str(error), 'guest capture commitment changed after the VM stopped')
++        self.assertFalse((output / 'CAPTURE.json').exists())
++
++
++class FrozenPinOrder(HostCheckpoint):
++    def test_capture_pin_is_required_before_provenance_is_consumed(self):
++        _, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        unread = mock.patch.object(host_guest_commit, 'require_committed',
++                                   side_effect=AssertionError('provenance consumed before the pin'))
++        with unread, self.assertRaisesRegex(RuntimeError, 'CAPTURE.json'):
++            self.frozen()
++        self.publish()
++        published = (self.capture / 'CAPTURE.json').read_bytes()
++        value = json.loads(published)
++        cases = {'unpinned v2 capture': {key: item for key, item in value.items()
++                                         if key != 'guest_checkpoint_sha256'},
++                 **{'wrong ' + key: {**value, key: '0' * 64} for key in CAPTURE_PINS}}
++        for label, changed in cases.items():
++            with self.subTest(capture=label):
++                (self.capture / 'CAPTURE.json').unlink()
++                write_record(self.capture / 'CAPTURE.json', changed)
++                with unread, self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++                    self.frozen()
++        (self.capture / 'CAPTURE.json').unlink()
++        write_private(self.capture / 'CAPTURE.json', b'[]')
++        with unread, self.assertRaisesRegex(RuntimeError, 'does not pin this checkpoint commitment'):
++            self.frozen()
++        (self.capture / 'CAPTURE.json').unlink()
++        write_private(self.capture / 'CAPTURE.json', published)
++        self.assertEqual(self.frozen()['checkpoint_sha256'], record['sha256'])
++
++    def test_provenance_must_be_the_pinned_bytes(self):
++        """A commitment file swapped between the pin read and require_committed() refuses."""
++        _, committed, record = self.committed_flow()
++        self.host_checkpoint(self.journal_file(record))
++        self.publish()
++        real = require_committed(self.capture)
++        for label, swapped in (
++                ('checkpoint', {**real, 'checkpoint': {**real['checkpoint'], 'checkpoint_sha256': '0' * 64}}),
++                ('manifest', {**real, 'manifest': {**real['manifest'], 'at_utc': 'later'}})):
++            with self.subTest(swapped=label):
++                with mock.patch.object(host_guest_commit, 'require_committed', return_value=swapped):
++                    with self.assertRaisesRegex(RuntimeError, 'differs from the pinned capture record'):
++                        self.frozen()
++        self.assertEqual(self.frozen()['checkpoint_sha256'], record['sha256'])
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+index d5bc64cc59d198855e2c90c0ef820ffdbf9cb339..60b85fa26c2fe82b78911c5bc1867acecbdd3f41 100644
+--- a/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
++++ b/memory-plan/plans/node-state-recovery/audits/step12_jetstream/test_host_vm_capture.py
+@@ -26,6 +26,7 @@ from host_vm_guard import guard
+ from host_image_immutable import change_immutable
+ from host_vm_preflight import preflight, vmstate_identity, write_record
+ from host_vm_reconcile import reconcile
++from test_host_checkpoint_commit import write_checkpoint_record
+ 
+ 
+ HERE = pathlib.Path(__file__).resolve().parent
+@@ -818,7 +819,6 @@ class HostCaptureTest(unittest.TestCase):
+         write_record(guest_output / 'manifest.json', observed)
+         committed = commit(spec, store_spec, output, guest_output / 'manifest.json')
+         # The guard below needs the separately committed capture-ready digest (D186).
+-        from test_host_checkpoint_commit import write_checkpoint_record
+         write_checkpoint_record(self.root / 'guest-checkpoint.json', committed)
+         commit_checkpoint(spec, output, self.root / 'guest-checkpoint.json')
+         ack_path = output / 'ACKED.json'
+@@ -884,6 +884,8 @@ class HostCaptureTest(unittest.TestCase):
+                          hashlib.sha256((output / 'COMMITTED.json').read_bytes()).hexdigest())
+         self.assertEqual(result['guest_ack_sha256'],
+                          hashlib.sha256((output / 'ACKED.json').read_bytes()).hexdigest())
++        self.assertEqual(result['guest_checkpoint_sha256'],
++                         hashlib.sha256((output / 'CHECKPOINT.json').read_bytes()).hexdigest())
+         self.assertEqual(result['store_spec_sha256'],
+                          hashlib.sha256(store_spec.read_bytes()).hexdigest())
+         self.assertEqual(result['vmstate_at_arm']['size'], len(b'old suspend state'))
+@@ -929,6 +931,8 @@ class HostCaptureTest(unittest.TestCase):
+         host_match(guest_output / 'manifest.json', output / 'extracted-stores', matched)
+         self.assertTrue((matched / 'MATCH.json').exists())
+         match = json.loads((matched / 'MATCH.json').read_text())
++        self.assertEqual(match['checkpoint_sha256'],
++                         json.loads((output / 'CHECKPOINT.json').read_text())['checkpoint_sha256'])
+         guest_manifest = json.loads((guest_output / 'manifest.json').read_text())
+         guest_rows = guest_manifest['stores']
+         for role in ('standalone', 'member1', 'member2', 'member3'):
+@@ -960,7 +964,9 @@ class HostCaptureTest(unittest.TestCase):
+                 ('capture', output / 'CAPTURE.json'),
+                 ('extract', output / 'extracted-stores' / 'manifest.json'),
+                 ('guard', output / 'GUARD.json'),
+-                ('ack', output / 'ACKED.json')):
++                ('committed', output / 'COMMITTED.json'),
++                ('ack', output / 'ACKED.json'),
++                ('checkpoint', output / 'CHECKPOINT.json')):
+             original_bytes = input_path.read_bytes()
+             changed = False
+             def mutate_after_validation(root):
+@@ -990,7 +996,8 @@ class HostCaptureTest(unittest.TestCase):
+         def match_claimed(candidate, destination):
+             data = candidate.read_bytes()
+             claim = {'manifest_sha256': hashlib.sha256(data).hexdigest(),
+-                     'manifest': json.loads(data)}
++                     'manifest': json.loads(data),
++                     'checkpoint': require_committed(output)['checkpoint']}
+             with mock.patch.object(stopped_tree_match, 'require_committed', return_value=claim):
+                 return host_match(candidate, output / 'extracted-stores', destination)
+         with self.assertRaisesRegex(RuntimeError, 'guest store specification differs'):
+@@ -1034,7 +1041,7 @@ class HostCaptureTest(unittest.TestCase):
+         committed_path = output / 'COMMITTED.json'
+         committed_bytes = committed_path.read_bytes()
+         committed_path.write_bytes(committed_bytes + b' ')
+-        with self.assertRaisesRegex(RuntimeError, 'matching post-commit host sample'):
++        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+             host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                        self.root / 'changed-guest-commit')
+         committed_path.write_bytes(committed_bytes)
+@@ -1045,6 +1052,16 @@ class HostCaptureTest(unittest.TestCase):
+             host_match(guest_output / 'manifest.json', output / 'extracted-stores',
+                        self.root / 'changed-guest-ack')
+         ack_path.write_bytes(ack_bytes)
++        checkpoint_path = output / 'CHECKPOINT.json'
++        checkpoint_bytes = checkpoint_path.read_bytes()
++        substituted = dict(json.loads(checkpoint_bytes), checkpoint_sha256='0' * 64)
++        checkpoint_path.unlink()
++        write_record(checkpoint_path, substituted)
++        require_committed(output)
++        with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
++            host_match(guest_output / 'manifest.json', output / 'extracted-stores',
++                       self.root / 'substituted-checkpoint')
++        checkpoint_path.write_bytes(checkpoint_bytes)
+         original_guard_receipt = guard_receipt.read_bytes()
+         guard_receipt.write_bytes(original_guard_receipt + b' ')
+         with self.assertRaisesRegex(RuntimeError, 'capture receipt'):
+@@ -1177,7 +1194,9 @@ class HostCaptureTest(unittest.TestCase):
+                            data_volume_uuid='00000000-0000-0000-0000-000000000000')
+         wrong_claim_path = self.root / 'wrong-volume-claim.json'
+         write_record(wrong_claim_path, wrong_claim)
+-        commit(spec, wrong_store_spec, failed_capture, wrong_claim_path)
++        failed_committed = commit(spec, wrong_store_spec, failed_capture, wrong_claim_path)
++        write_checkpoint_record(self.root / 'failed-guest-checkpoint.json', failed_committed)
++        commit_checkpoint(spec, failed_capture, self.root / 'failed-guest-checkpoint.json')
+         third_holder.terminate()
+         third_holder.wait(timeout=5)
+         state.write_text('stopped\n')

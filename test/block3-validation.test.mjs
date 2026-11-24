@@ -135,9 +135,7 @@ describe('runLlmExtraction', () => {
         { name: 'SQLite', type: 'technology', salience: 0.7 },
       ],
       themes: [{ label: 'messaging', hierarchy: ['infrastructure', 'messaging'] }],
-      actions: ['implementing'],
       decisions: [{ decision: 'Use NATS', rationale: 'Best fit for mesh', confidence: 0.85 }],
-      friction_signals: [],
       relationships: [{ source: 'NATS', target: 'SQLite', type: 'depends_on' }],
     };
 
@@ -156,8 +154,9 @@ describe('runLlmExtraction', () => {
     assert.equal(result.metrics.entityCount, 2);
     assert.equal(result.metrics.themeCount, 1);
     assert.equal(result.metrics.decisionCount, 1);
-    assert.equal(result.metrics.frictionCount, 0);
     assert.equal(result.metrics.relationshipCount, 1);
+    assert.deepEqual(Object.keys(result.metrics).sort(),
+      ['charLength', 'decisionCount', 'entityCount', 'relationshipCount', 'themeCount']);
     assert.ok(result.memoryContent.includes('NATS'), 'MEMORY.md includes extracted entity');
     assert.ok(result.memoryContent.length > 0);
   });
@@ -171,12 +170,12 @@ describe('aggregateMetrics', () => {
       {
         sessionId: 's1',
         regex: { metrics: { factCount: 4, charLength: 200, categories: ['preference', 'decision'] } },
-        llm: { metrics: { entityCount: 3, themeCount: 2, decisionCount: 1, frictionCount: 0, relationshipCount: 1, actionCount: 1, charLength: 300 } },
+        llm: { metrics: { entityCount: 3, themeCount: 2, decisionCount: 1, relationshipCount: 1, charLength: 300 } },
       },
       {
         sessionId: 's2',
         regex: { metrics: { factCount: 6, charLength: 400, categories: ['environment', 'reference'] } },
-        llm: { metrics: { entityCount: 5, themeCount: 3, decisionCount: 2, frictionCount: 1, relationshipCount: 0, actionCount: 2, charLength: 500 } },
+        llm: { metrics: { entityCount: 5, themeCount: 3, decisionCount: 2, relationshipCount: 0, charLength: 500 } },
       },
     ];
 
@@ -227,9 +226,9 @@ describe('formatComparison', () => {
           metrics: { factCount: 1, addedCount: 1, mergedCount: 0, skippedCount: 0, charLength: 30, categories: ['preference'] },
         },
         llm: {
-          result: { entities: [{ name: 'Test', type: 'concept', salience: 0.8 }], themes: [], actions: [], decisions: [], friction_signals: [], relationships: [] },
+          result: { entities: [{ name: 'Test', type: 'concept', salience: 0.8 }], themes: [], decisions: [], relationships: [] },
           memoryContent: '# Memory\n\n## Active Entities\n- Test (concept, mentioned 1x)\n',
-          metrics: { entityCount: 1, themeCount: 0, decisionCount: 0, frictionCount: 0, relationshipCount: 0, actionCount: 0, charLength: 55 },
+          metrics: { entityCount: 1, themeCount: 0, decisionCount: 0, relationshipCount: 0, charLength: 55 },
         },
       },
     ];

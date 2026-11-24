@@ -1,23 +1,23 @@
 ---
-name: clawdbot-self-security-audit
-description: "Read-only security audit of Clawdbot config: checks gateway exposure, DM policies, credentials, file permissions, and 13 security domains. Use when asked to audit Clawdbot security, check hardening, or find configuration vulnerabilities."
+name: clawdbot-security-check
+description: "Read-only security audit of the OpenClaw config (~/.openclaw/openclaw.json): checks gateway exposure, DM policies, credentials, file permissions, and 13 security domains. Use when asked to audit OpenClaw security, check hardening, or find configuration vulnerabilities."
 triggers:
   - "run a security check"
-  - "audit clawdbot security"
+  - "audit openclaw security"
   - "check security hardening"
-  - "what vulnerabilities does my clawdbot have"
-  - "is my clawdbot secure"
+  - "what vulnerabilities does my openclaw have"
+  - "is my openclaw secure"
 negative_triggers:
   - "audit my smart contracts"
   - "check my code for security bugs"
   - "run a penetration test"
 homepage: https://github.com/TheSethRose/Clawdbot-Security-Check
-metadata: {"clawdbot":{"emoji":"🔒","os":["darwin","linux"],"requires":{"files":["read"],"tools":["exec","bash"]},"install":[{"id":"read-skill","kind":"skill","name":"clawdbot-self-security-audit","label":"Install security audit skill","bins":["SKILL.md"]}]}}
+metadata: {"clawdbot":{"emoji":"🔒","os":["darwin","linux"],"requires":{"files":["read"],"tools":["exec","bash"]},"install":[{"id":"read-skill","kind":"skill","name":"clawdbot-security-check","label":"Install security audit skill","bins":["SKILL.md"]}]}}
 ---
 
-# Clawdbot Self-Security Audit Framework
+# OpenClaw Self-Security Audit Framework
 
-This skill empowers Clawdbot to audit its own security posture using first-principles reasoning. Rather than relying on a static script, Clawdbot learns the framework and applies it dynamically to detect vulnerabilities, understand their impact, and recommend specific remediations.
+This skill lets the agent audit the node's OpenClaw security posture using first-principles reasoning. Rather than relying on a static script, the agent learns the framework and applies it dynamically to detect vulnerabilities, understand their impact, and recommend specific remediations.
 
 > "Security through transparency and self-awareness." — Inspired by Daniel Miessler
 
@@ -42,9 +42,13 @@ Start with the smallest access possible and widen it as you gain confidence.
 
 ## Audit Commands
 
-- `clawdbot security audit` — Standard audit of common issues
-- `clawdbot security audit --deep` — Comprehensive audit with all checks
-- `clawdbot security audit --fix` — Apply guardrail remediations
+- `openclaw security audit` — Standard audit of common issues (config and filesystem, read-only)
+- `openclaw security audit --deep` — Adds live gateway and plugin checks
+- `openclaw security audit --json` — Structured output for the report
+
+State and config live under `~/.openclaw` (config: `~/.openclaw/openclaw.json`). If that file is
+missing or the CLI errors, report that the audit could not run. Never report a clean result from
+checks that found nothing to read. This skill never passes `--fix`: remediation is the operator's call.
 
 ## The 13 Security Domains
 
@@ -52,10 +56,10 @@ See [references/audit-checks.md](references/audit-checks.md) for full audit chec
 
 | # | Domain | Severity | Key Config |
 |---|--------|----------|------------|
-| 1 | Gateway Exposure | Critical | `gateway.bind`, `gateway.auth_token` |
+| 1 | Gateway Exposure | Critical | `gateway.bind`, `gateway.auth.token` |
 | 2 | DM Policy | High | `dmPolicy`, `allowFrom` |
 | 3 | Group Access Control | High | `groupPolicy`, `groups` |
-| 4 | Credentials Security | Critical | `~/.clawdbot/credentials/` permissions |
+| 4 | Credentials Security | Critical | `~/.openclaw/credentials/` permissions |
 | 5 | Browser Control | High | `browser.remoteControlToken`, `controlUi` |
 | 6 | Gateway Bind & Network | High | `gateway.bind`, `trustedProxies`, `tailscale` |
 | 7 | Tool Access & Sandboxing | Medium | `restrict_tools`, `mcp_tools`, `workspaceAccess` |
@@ -65,15 +69,6 @@ See [references/audit-checks.md](references/audit-checks.md) for full audit chec
 | 11 | Prompt Injection Protection | Medium | `wrap_untrusted_content`, `mentionGate` |
 | 12 | Dangerous Command Blocking | Medium | `blocked_commands` |
 | 13 | Secret Scanning Readiness | Medium | `detect-secrets`, `.secrets.baseline` |
-
-## Audit Fix Actions
-
-The `--fix` flag applies these guardrails:
-
-- Changes `groupPolicy` from `open` to `allowlist` for common channels
-- Resets `logging.redactSensitive` from `off` to `tools`
-- Tightens local permissions: `.clawdbot` directory to `700`, config files to `600`
-- Secures state files including credentials and auth profiles
 
 ## Priority Checklist
 
@@ -112,34 +107,33 @@ Slash commands are only available to authorized senders based on channel allowli
 ## Incident Response
 
 ### Containment
-1. Stop the gateway process — `clawdbot daemon stop`
-2. Set gateway.bind to loopback — `"bind": "127.0.0.1"`
+1. Stop the gateway process — `openclaw gateway stop`
+2. Set gateway.bind to loopback — `"bind": "loopback"`
 3. Disable risky DMs and groups — set to `disabled`
 
 ### Rotation
-1. Change the gateway auth token — `clawdbot doctor --generate-gateway-token`
+1. Change the gateway auth token — `openclaw doctor --generate-gateway-token`
 2. Rotate browser control and hook tokens
 3. Revoke and rotate API keys for model providers
 
 ### Review
-1. Check gateway logs and session transcripts — `~/.clawdbot/logs/`
+1. Check gateway logs and session transcripts — `~/.openclaw/logs/`
 2. Review recent config changes — Git history or backups
-3. Re-run the security audit — `clawdbot security audit --deep`
+3. Re-run the security audit — `openclaw security audit --deep`
 
 ## Core Principles
 
-- **Zero modification** — This skill only reads; never changes configuration
+- **Zero modification** — This skill only reads; it recommends changes and never applies them
 - **Defense in depth** — Multiple checks catch different attack vectors
 - **Actionable output** — Every finding includes a concrete remediation
 - **Extensible design** — New checks integrate naturally
 
 ## References
 
-- Official docs: https://docs.clawd.bot/gateway/security
+- Official docs: https://docs.openclaw.ai/gateway/security and https://docs.openclaw.ai/cli/security
 - Original framework: [Daniel Miessler on X](https://x.com/DanielMiessler/status/2015865548714975475)
 - Repository: https://github.com/TheSethRose/Clawdbot-Security-Check
-- Report vulnerabilities: security@clawd.bot
 
 ---
 
-**Remember:** This skill exists to make Clawdbot self-aware of its security posture. Use it regularly, extend it as needed, and never skip the audit.
+**Remember:** This skill exists to make OpenClaw self-aware of its security posture. Use it regularly, extend it as needed, and never skip the audit.

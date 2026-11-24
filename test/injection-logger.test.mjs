@@ -1,8 +1,8 @@
 /**
  * injection-logger.test.mjs — Unit tests for lib/injection-logger.mjs
  *
- * Covers: logInjection (append + ensure dir + rotate), channelStats math,
- * promptExcerpt truncation, getLogPath, INJECTION_LOG_DISABLED env opt-out.
+ * Covers: logInjection (append + ensure dir + rotate), promptExcerpt
+ * truncation, INJECTION_LOG_DISABLED env opt-out.
  *
  * Run: node --test test/injection-logger.test.mjs
  */
@@ -20,28 +20,10 @@ process.env.INJECTION_LOG_PATH = LOG_PATH;
 process.env.INJECTION_LOG_ROTATE_BYTES = '1024';  // small for rotation tests
 delete process.env.INJECTION_LOG_DISABLED;
 
-const { logInjection, flushInjectionLog, channelStats, promptExcerpt, getLogPath } = await import('../lib/injection-logger.mjs');
+const { logInjection, flushInjectionLog, promptExcerpt, scrubSecrets } = await import('../lib/injection-logger.mjs');
 
 after(() => {
   rmSync(TMP, { recursive: true, force: true });
-});
-
-describe('getLogPath', () => {
-  it('returns the configured path', () => {
-    assert.equal(getLogPath(), LOG_PATH);
-  });
-});
-
-describe('channelStats', () => {
-  it('returns {candidates, kept} object', () => {
-    assert.deepEqual(channelStats(5, 2), { candidates: 5, kept: 2 });
-  });
-
-  it('defaults missing values to 0', () => {
-    assert.deepEqual(channelStats(), { candidates: 0, kept: 0 });
-    assert.deepEqual(channelStats(7), { candidates: 7, kept: 0 });
-    assert.deepEqual(channelStats(null, null), { candidates: 0, kept: 0 });
-  });
 });
 
 describe('promptExcerpt', () => {
@@ -76,6 +58,55 @@ describe('promptExcerpt', () => {
   it('stringifies non-string input', () => {
     assert.equal(promptExcerpt(42), '42');
   });
+});
+
+describe('scrubSecrets', () => {
+  it('redacts key-shaped text and keeps the rest, newlines included', () => {
+    assert.equal(scrubSecrets('export OPENAI_KEY=sk-' + 'A'.repeat(40)), 'export OPENAI_KEY=[REDACTED]');
+    assert.equal(scrubSecrets('line1\nline2'), 'line1\nline2');
+  });
+
+  // Built at runtime so the committed file holds no secret-shaped line.
+  const modernKeys = {
+    anthropic: 'sk-' + 'ant-api03-' + 'Ab1'.repeat(30) + '-_AA',
+    openaiProject: 'sk-' + 'proj-' + 'Ab1'.repeat(14),
+    openrouter: 'sk-' + 'or-v1-' + 'a1'.repeat(16),
+    githubFineGrained: 'github_' + 'pat_' + 'A1b'.repeat(10),
+    githubOauth: 'gh' + 'o_' + 'A'.repeat(36),
+    slackUser: 'xox' + 'p-' + '1234567890-' + 'a1'.repeat(16),
+    aws: 'AK' + 'IA' + 'ABCDEFGHIJ234567',
+  };
+  for (const [shape, k] of Object.entries(modernKeys)) {
+    it(`redacts the ${shape} key shape whole`, () => {
+      assert.equal(scrubSecrets(`key ${k} end`), 'key [REDACTED] end');
+    });
+  }
+
+  it('leaves kebab identifiers that merely contain sk- alone', () => {
+    const text = 'sk-folding-cube and task-' + 'abcdefghijklmnopqrstuvwxyz';
+    assert.equal(scrubSecrets(text), text);
+  });
+
+  it('redacts a key glued after - or _, and a token run from its first sk-', () => {
+    const k = 'sk-' + 'proj-' + 'Ab1'.repeat(14);
+    assert.equal(scrubSecrets(`id-${k} x_${k}`), 'id-[REDACTED] x_[REDACTED]');
+    assert.equal(scrubSecrets(`a sk-short-${k} b`), 'a [REDACTED] b');
+    assert.equal(scrubSecrets(`sk-short and x ${k}`), 'sk-short and x [REDACTED]');
+  });
+
+  // Each `sk-` in one long token run used to rescan the rest of the run: seconds at 100 KB.
+  for (const [shape, text] of [
+    ['-sk- tokens', ('-sk-' + 'a'.repeat(19)).repeat(5000)],
+    ['bare sk- repeats', 'sk-'.repeat(35000)],
+  ]) {
+    it(`scrubs a 100 KB run of ${shape} in linear time`, () => {
+      const t0 = performance.now();
+      const out = scrubSecrets(text);
+      const ms = performance.now() - t0;
+      assert.equal(out, text);
+      assert.ok(ms < 250, `scrubSecrets took ${ms.toFixed(0)} ms`);
+    });
+  }
 });
 
 describe('logInjection', () => {

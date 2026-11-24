@@ -4,18 +4,18 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${NODE_BIN} ${OPENCLAW_REPO_DIR}/bin/mesh-task-daemon.js
+ExecStart="${NODE_BIN}" "${OPENCLAW_REPO_DIR}/bin/mesh-task-daemon.js"
 Restart=always
 RestartSec=5
-Environment=HOME=${HOME}
-Environment=PATH=${HOME}/.openclaw/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-Environment=NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_REPO_DIR}/lib
-Environment=OPENCLAW_NATS=${OPENCLAW_NATS}
-Environment=OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}
-Environment=OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}
-Environment=OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}
-Environment=MESH_CIRCLING_STEP_TIMEOUT_MS=1800000
-Environment=TZ=America/Montreal
+Environment="HOME=${HOME}"
+Environment="PATH=${OPENCLAW_ROOT}/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="NODE_PATH=${OPENCLAW_REPO_DIR}/node_modules:${OPENCLAW_REPO_DIR}/lib"
+Environment="OPENCLAW_NATS=${OPENCLAW_NATS}"
+Environment="OPENCLAW_WORKSPACE=${OPENCLAW_WORKSPACE}"
+Environment="OPENCLAW_NODE_ID=${OPENCLAW_NODE_ID}"
+Environment="OPENCLAW_REPO_DIR=${OPENCLAW_REPO_DIR}"
+Environment="MESH_CIRCLING_STEP_TIMEOUT_MS=1800000"
+Environment="TZ=${OPENCLAW_TIMEZONE}"
 WorkingDirectory=${OPENCLAW_REPO_DIR}
 StandardOutput=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-task-daemon.log
 StandardError=append:${OPENCLAW_WORKSPACE}/.tmp/openclaw-mesh-task-daemon.err

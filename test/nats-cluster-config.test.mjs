@@ -5,6 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   parsePeers, peerToRoute, renderClusterRoutes,
   replicasForPeers, clampReplicas, resolveKvReplicas, CLUSTER_PORT,
@@ -61,4 +62,49 @@ test('item 9: routes carry cluster credentials when provided', () => {
     '    nats-route://openclaw-route:pw@100.64.0.2:6222\n    nats-route://openclaw-route:pw@100.64.0.3:6222');
   // no credentials → unchanged legacy form
   assert.equal(peerToRoute('100.64.0.2'), 'nats-route://100.64.0.2:6222');
+});
+
+test('cluster docs show the authenticated own-address config the template renders', () => {
+  const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  const template = read('services/nats/nats-cluster-node.conf');
+  assert.match(template, /^http: 127\.0\.0\.1:8222$/m);
+  assert.match(template, /^include "nats-auth\.conf"$/m);
+  for (const doc of ['docs/MULTI_NODE_DEPLOY.md', 'docs/NATS_CLUSTER.md']) {
+    const blocks = [...read(doc).matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]).filter((b) => /\bcluster\s*\{/.test(b));
+    assert.ok(blocks.length > 0, doc);
+    for (const b of blocks) {
+      assert.doesNotMatch(b, /listen:\s*0\.0\.0\.0/, doc);
+      assert.doesNotMatch(b, /http_port:\s*8222/, doc);
+      assert.match(b, /^http: 127\.0\.0\.1:8222$/m, doc);
+      assert.match(b, /include "nats-auth\.conf"/, doc);
+      assert.match(b, /authorization\s*\{/, doc);
+      assert.match(b, /nats-route:\/\/openclaw-route:/, doc);
+    }
+  }
+  assert.doesNotMatch(read('docs/MULTI_NODE_DEPLOY.md'), /binds `0\.0\.0\.0`/);
+});
+
+test('both read-only NATS census CLIs are documented in docs/NATS_CLUSTER.md with their real flags', () => {
+  const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+  const doc = read('docs/NATS_CLUSTER.md');
+  for (const [cli, flags] of [
+    ['bin/nats-live-census.py', ['--uid', '--home']],
+    ['bin/nats-store-holder-census.py', ['--home']],
+  ]) {
+    const usage = doc.split('\n').find((line) => line.includes(`/usr/bin/python3 ${cli}`));
+    assert.ok(usage, `${cli} has a usage line`);
+    const source = read(cli);
+    for (const flag of flags) {
+      assert.ok(source.includes(`'${flag}'`), `${cli} takes ${flag}`);
+      assert.ok(usage.includes(flag), `the ${cli} usage line names ${flag}`);
+    }
+    assert.match(source, /parser\.exit\(2,/, `${cli} exits 2 on refusal, as documented`);
+  }
+  assert.match(doc, /exit 2 when the census is\s+refused/);
+  const start = doc.indexOf('**Who holds the NATS install?');
+  const section = doc.slice(start, doc.indexOf('\n**', start + 2));
+  assert.match(section, /jetstream-3/, 'names all four stores the census requires');
+  assert.match(section, /legacy four-server/i, 'scopes the census to the legacy layout');
+  assert.match(section, /`include`/, 'names the include refusal');
+  assert.match(section, /nats-auth\.conf/, 'says current rendered configs include nats-auth.conf');
 });

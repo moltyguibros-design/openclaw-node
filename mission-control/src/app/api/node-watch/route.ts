@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
-import os from "os";
 import path from "path";
+import { OPENCLAW_ROOT } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 // The watcher (bin/node-watch.mjs) writes this snapshot on every run/tick.
 // MC is a pure viewer — it reads the file, it does not probe the node itself.
 const JSON_PATH =
-  process.env.NODE_WATCH_JSON || path.join(os.homedir(), ".openclaw", ".node-watch.json");
+  process.env.NODE_WATCH_JSON || path.join(OPENCLAW_ROOT, ".node-watch.json");
 
 const EMPTY_COUNTS = { WORKING: 0, BROKEN: 0, OFF: 0, UNKNOWN: 0 };
 

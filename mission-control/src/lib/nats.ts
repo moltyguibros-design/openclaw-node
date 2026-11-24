@@ -1,8 +1,5 @@
 import { connect, NatsConnection, StringCodec, type KV } from "nats";
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-import { natsAuthOptions, resolveNatsAuthMode } from "./nats-auth";
+import { natsAuthOptions, resolveEnvKey, resolveNatsAuthMode } from "./nats-auth";
 
 // ── Singleton state (globalThis survives Next.js hot-reload) ─────────────
 // In dev mode, Turbopack re-evaluates modules on change, wiping module-level
@@ -10,7 +7,8 @@ import { natsAuthOptions, resolveNatsAuthMode } from "./nats-auth";
 
 interface NatsGlobals {
   __nats_nc?: NatsConnection | null;
-  __nats_connectingSince?: number | null;
+  __nats_connecting?: Promise<NatsConnection | null> | null;
+  __nats_failedAt?: number | null;
   __nats_healthKv?: KV | null;
   __nats_collabKv?: KV | null;
   __nats_tasksKv?: KV | null;
@@ -20,53 +18,39 @@ const g = globalThis as unknown as NatsGlobals;
 
 const sc = StringCodec();
 
-const CONNECT_TIMEOUT_MS = 10_000;
+// Every traced call asks for the connection; while NATS is down each one would
+// otherwise open a fresh TCP connect and log the failure again.
+const RETRY_AFTER_FAIL_MS = 5_000;
 const NATS_FALLBACK = "nats://127.0.0.1:4222";
 
 /**
- * Resolve NATS URL using the same 3-step chain as mesh.js and agent.js:
- *   1. $OPENCLAW_NATS env var (set by launchd/systemd service definitions)
- *   2. ~/.openclaw/openclaw.env file (user-editable, persists across sessions)
- *   3. Hardcoded IP fallback (not hostname — MagicDNS is unreliable)
+ * env → $OPENCLAW_HOME/openclaw.env → fixed IP (not a hostname: MagicDNS is unreliable).
+ * Same resolver as the auth mode (nats-auth.ts), so URL, token and mode always come from one file.
  */
 function resolveNatsUrl(): string {
-  if (process.env.OPENCLAW_NATS) return process.env.OPENCLAW_NATS;
-  try {
-    const envFile = join(homedir(), ".openclaw", "openclaw.env");
-    if (existsSync(envFile)) {
-      const content = readFileSync(envFile, "utf8");
-      const match = content.match(/^\s*OPENCLAW_NATS\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch {
-    // File unreadable — fall through
-  }
-  return NATS_FALLBACK;
+  return resolveEnvKey("OPENCLAW_NATS") || NATS_FALLBACK;
 }
 
 /**
- * Resolve the NATS auth token using the same chain (env → openclaw.env → none).
- * Returns null when no token is configured (auth disabled — backward compatible).
- * Without this, MC connects tokenless and an authenticated bus rejects it with an
- * Authorization Violation, so every KV read silently returns natsAvailable:false.
+ * Null when no token is configured (auth disabled). Without it, an authenticated bus
+ * rejects MC with an Authorization Violation and every KV read returns natsAvailable:false.
  */
 function resolveNatsToken(): string | null {
-  if (process.env.OPENCLAW_NATS_TOKEN) return process.env.OPENCLAW_NATS_TOKEN;
-  try {
-    const envFile = join(homedir(), ".openclaw", "openclaw.env");
-    if (existsSync(envFile)) {
-      const content = readFileSync(envFile, "utf8");
-      const match = content.match(/^\s*OPENCLAW_NATS_TOKEN\s*=\s*(.+)/m);
-      if (match && match[1].trim()) return match[1].trim();
-    }
-  } catch {
-    // File unreadable — fall through
-  }
-  return null;
+  return resolveEnvKey("OPENCLAW_NATS_TOKEN");
 }
 
 const NATS_URL = resolveNatsUrl();
 const NATS_TOKEN = resolveNatsToken();
+
+/**
+ * OPENCLAW_KV_REPLICAS, clamped to [1, 5] like lib/nats-cluster-config.js. views.kv applies it only
+ * when it creates the bucket, so MC passes it too in case it opens a bucket before the daemons do.
+ * A council still forming refuses the create; the getter returns null and the next call retries.
+ */
+function kvReplicas(): number {
+  const n = Math.trunc(Number(resolveEnvKey("OPENCLAW_KV_REPLICAS") ?? 1));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), 5) : 1;
+}
 
 // KV bucket name — nodes write here, MC reads
 const HEALTH_BUCKET = "MESH_NODE_HEALTH";
@@ -78,15 +62,16 @@ const TASKS_BUCKET = "MESH_TASKS";
  */
 export async function getNats(): Promise<NatsConnection | null> {
   if (g.__nats_nc && !g.__nats_nc.isClosed()) return g.__nats_nc;
+  if (g.__nats_connecting) return g.__nats_connecting;
+  if (g.__nats_failedAt && Date.now() - g.__nats_failedAt < RETRY_AFTER_FAIL_MS) return null;
 
-  // Reset stale guard (self-heal if previous attempt hung)
-  if (g.__nats_connectingSince && Date.now() - g.__nats_connectingSince > CONNECT_TIMEOUT_MS) {
-    console.warn("[nats] connecting guard stale, resetting");
-    g.__nats_connectingSince = null;
-  }
-  if (g.__nats_connectingSince) return null;
+  g.__nats_connecting = connectNats().finally(() => {
+    g.__nats_connecting = null;
+  });
+  return g.__nats_connecting;
+}
 
-  g.__nats_connectingSince = Date.now();
+async function connectNats(): Promise<NatsConnection | null> {
   try {
     // Phase 7: token, this host's identity nkey, or the legacy user — nats-auth.ts.
     g.__nats_nc = await connect({
@@ -100,6 +85,7 @@ export async function getNats(): Promise<NatsConnection | null> {
       timeout: 5000,
     });
     console.log("[nats] connected to", NATS_URL, `(auth: ${resolveNatsAuthMode()})`);
+    g.__nats_failedAt = null;
 
     // Reset KV handles on reconnect so they're re-fetched fresh
     g.__nats_healthKv = null;
@@ -123,9 +109,8 @@ export async function getNats(): Promise<NatsConnection | null> {
   } catch (err) {
     console.error("[nats] connection failed:", (err as Error).message);
     g.__nats_nc = null;
+    g.__nats_failedAt = Date.now();
     return null;
-  } finally {
-    g.__nats_connectingSince = null;
   }
 }
 
@@ -149,6 +134,7 @@ export async function getHealthKv(): Promise<KV | null> {
     g.__nats_healthKv = await js.views.kv(HEALTH_BUCKET, {
       history: 1,
       ttl: 120_000,
+      replicas: kvReplicas(),
     });
     return g.__nats_healthKv;
   } catch (err) {
@@ -177,6 +163,7 @@ export async function getCollabKv(): Promise<KV | null> {
     const js = conn.jetstream();
     g.__nats_collabKv = await js.views.kv(COLLAB_BUCKET, {
       history: 1,
+      replicas: kvReplicas(),
     });
     return g.__nats_collabKv;
   } catch (err) {
@@ -205,6 +192,7 @@ export async function getTasksKv(): Promise<KV | null> {
     const js = conn.jetstream();
     g.__nats_tasksKv = await js.views.kv(TASKS_BUCKET, {
       history: 1,
+      replicas: kvReplicas(),
     });
     return g.__nats_tasksKv;
   } catch (err) {

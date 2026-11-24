@@ -78,6 +78,6 @@ Parent: Daedalus
 
 ## Review Cadence
 
-- After each identity system design: update learnings in evolution/events.jsonl
+- After each identity system design: record learnings as an evolution event with `bin/mc-api POST /api/souls/identity-architect/evolution '<event json>'` (MULTI_SOUL_GUIDE.md, Soul Evolution)
 - Quarterly: review cryptographic standards for deprecation notices
 - When new agent souls are created: verify their identity integration with existing chains

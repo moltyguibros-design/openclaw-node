@@ -18,7 +18,12 @@ describe('registry', () => {
     assert.equal(MEMORY_TYPES.entity.fields.name, MERGE_OPS.IMMUTABLE);
     assert.equal(MEMORY_TYPES.entity.fields.aliases, MERGE_OPS.UNION);
     assert.equal(MEMORY_TYPES.decision.fields.superseded_by, MERGE_OPS.IMMUTABLE);
-    assert.equal(MEMORY_TYPES.theme.fields.mention_count, MERGE_OPS.SUM);
+    assert.equal('mention_count' in MEMORY_TYPES.theme.fields, false, 'derived from theme_mentions, never summed');
+  });
+  it('declares only the merge ops a field uses', () => {
+    assert.deepEqual(Object.values(MERGE_OPS).sort(), ['immutable', 'replace', 'union']);
+    const used = new Set(Object.values(MEMORY_TYPES).flatMap((k) => Object.values(k.fields)));
+    assert.deepEqual([...used].sort(), Object.values(MERGE_OPS).sort());
   });
 });
 
@@ -45,9 +50,9 @@ describe('mergeFields', () => {
     assert.equal(merged.confidence, 0.8);
     assert.equal(merged.superseded_by, 9);
   });
-  it('theme: mention_count sums, hierarchy replaces', () => {
+  it('theme: hierarchy replaces, mention_count is left to the store', () => {
     const { merged } = mergeFields('theme', { mention_count: 3, hierarchy_path: '["a"]' }, { mention_count: 1, hierarchy_path: '["a","b"]' });
-    assert.equal(merged.mention_count, 4);
+    assert.equal(merged.mention_count, 3);
     assert.equal(merged.hierarchy_path, '["a","b"]');
   });
   it('union is case-insensitive and bounded', () => {
@@ -65,7 +70,16 @@ describe('newAliases / canonicalAlias', () => {
   it('drops the display name itself and already-known spellings', () => {
     assert.deepEqual(newAliases('NATS JetStream', ['jetstream'], ['nats_jetstream', 'JetStream', 'JS', ' js ']), ['JS']);
   });
-  it('canonicalAlias mirrors canonicalizeName', () => {
+  it('canonicalAlias is the entity/alias identity', async () => {
     assert.equal(canonicalAlias('  THE_HIDDEN  Truth '), 'the hidden truth');
+    assert.equal(canonicalAlias('CLAUDE.md'), 'claude.md');
+    const store = await import('../lib/extraction-store.mjs');
+    assert.equal(store.canonicalizeName, undefined, 'no second copy of the canonical-name function');
+  });
+  it('adds nothing once the record already holds ALIAS_CAP aliases', () => {
+    const full = Array.from({ length: ALIAS_CAP }, (_, i) => `alias ${i}`);
+    assert.deepEqual(newAliases('Name', full, ['brand new']), []);
+    const oneShort = full.slice(1);
+    assert.deepEqual(newAliases('Name', oneShort, ['first', 'second']), ['first']);
   });
 });

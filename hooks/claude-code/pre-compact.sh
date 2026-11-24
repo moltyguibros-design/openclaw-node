@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # pre-compact.sh — OpenClaw extraction trigger for Claude Code.
 #
-# Fires a mesh.memory.extract_request NATS event before context compaction.
+# Fires a mesh.memory.extract_request.<nodeId> NATS event before context compaction.
 # This hook is called by Claude Code's PreCompact lifecycle event.
 #
 # Requires: Node.js, nats npm package (installed with openclaw-nodedev).
-# Env: NATS_URL (default nats://localhost:4222), OPENCLAW_NODE_ID (default hostname).
+# Env: NATS_URL (default nats://localhost:4222), OPENCLAW_NODE_ID (default openclaw.env, then hostname).
 
 set -euo pipefail
 

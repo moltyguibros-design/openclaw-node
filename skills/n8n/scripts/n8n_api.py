@@ -22,6 +22,8 @@ class N8nClient:
         
         if not self.api_key:
             raise ValueError("N8N_API_KEY not found in environment")
+        if not self.base_url:
+            raise ValueError("N8N_BASE_URL not found in environment (e.g. http://localhost:5678)")
         
         self.session = requests.Session()
         self.session.headers.update({
@@ -68,11 +70,11 @@ class N8nClient:
     
     def activate_workflow(self, workflow_id: str) -> Dict:
         """Activate workflow"""
-        return self._request('PATCH', f'workflows/{workflow_id}', json={'active': True})
+        return self._request('POST', f'workflows/{workflow_id}/activate')
     
     def deactivate_workflow(self, workflow_id: str) -> Dict:
         """Deactivate workflow"""
-        return self._request('PATCH', f'workflows/{workflow_id}', json={'active': False})
+        return self._request('POST', f'workflows/{workflow_id}/deactivate')
     
     # Executions
     def list_executions(self, workflow_id: str = None, limit: int = 20) -> List[Dict]:
@@ -89,26 +91,17 @@ class N8nClient:
     def delete_execution(self, execution_id: str) -> Dict:
         """Delete execution"""
         return self._request('DELETE', f'executions/{execution_id}')
-    
-    # Manual execution
-    def execute_workflow(self, workflow_id: str, data: Dict = None) -> Dict:
-        """Manually trigger workflow execution"""
-        payload = {'workflowId': workflow_id}
-        if data:
-            payload['data'] = data
-        return self._request('POST', f'workflows/{workflow_id}/execute', json=payload)
 
 
 def main():
     parser = argparse.ArgumentParser(description='n8n API Client')
     parser.add_argument('action', choices=[
         'list-workflows', 'get-workflow', 'activate', 'deactivate',
-        'list-executions', 'get-execution', 'execute'
+        'list-executions', 'get-execution'
     ])
     parser.add_argument('--id', help='Workflow or execution ID')
     parser.add_argument('--active', type=lambda x: x.lower() == 'true', help='Filter by active status')
     parser.add_argument('--limit', type=int, default=20, help='Limit results')
-    parser.add_argument('--data', help='JSON data for execution')
     parser.add_argument('--pretty', action='store_true', help='Pretty print JSON output')
     
     args = parser.parse_args()
@@ -137,11 +130,6 @@ def main():
             if not args.id:
                 raise ValueError("--id required for get-execution")
             result = client.get_execution(args.id)
-        elif args.action == 'execute':
-            if not args.id:
-                raise ValueError("--id required for execute")
-            data = json.loads(args.data) if args.data else None
-            result = client.execute_workflow(args.id, data=data)
         
         # Output
         if args.pretty:

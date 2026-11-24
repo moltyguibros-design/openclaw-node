@@ -1,4 +1,4 @@
-import { createViewerClient } from '/viewer-session.mjs';
+import { createViewerClient, registryStatusClass } from '/viewer-session.mjs';
 const viewerClient = createViewerClient({ onUnauthorized: () => location.reload() });
 
 const $ = (id) => document.getElementById(id);
@@ -135,8 +135,13 @@ function showDock() {
   document.querySelectorAll('.dock-pane').forEach(p =>
     p.classList.toggle('active', p.id === (state.gtab === 'gprogress' ? 'pane-progress' : 'pane-live')));
   $('live-controls').style.display = state.gtab === 'glive' ? '' : 'none';
-  if (state.gtab === 'glive') connectActivityLive();
-  else connectActivityProgress();
+  if (state.gtab === 'glive') {
+    if (state.progressSource) { state.progressSource.close(); state.progressSource = null; }
+    connectActivityLive();
+  } else {
+    if (state.evtSource) { state.evtSource.close(); state.evtSource = null; }
+    connectActivityProgress();
+  }
 }
 
 // ── Master Plan tab ─────────────────────────────────────────────────────────────
@@ -153,11 +158,7 @@ async function renderPlan() {
     for (const fam of registry.families) {
       html += '<div class="reg-family">' + esc(fam.family) + '</div>';
       for (const c of fam.components) {
-        const s = (c.status || '').toUpperCase();
-        let cls = 'idle';
-        if (s.includes('ABSENT') || s.includes('INERT')) cls = 'bad';
-        else if (s.includes('STALE') || s.includes('DEGRADED')) cls = 'warn';
-        else if (s.includes('LIVE')) cls = 'ok';
+        const cls = registryStatusClass(c.status);
         html += '<div class="reg-row"><span class="reg-name">' + esc(c.title) + '</span>' +
           '<span class="badge ' + cls + '">' + esc(c.status || '?') + '</span></div>';
       }
@@ -219,7 +220,7 @@ setInterval(refreshState, 10000);
 // Header pause/resume button.
 $('header-pause-btn').addEventListener('click', async () => {
   if (state.lastBlocked) {
-    if (!confirm('Resume the plan?\\n\\nDeletes BLOCKED.md so the next tick runs.')) return;
+    if (!confirm('Resume the plan?\n\nDeletes BLOCKED.md so the next tick runs.')) return;
     await doUnblock();
   } else {
     // Quick pause: prompt for trigger, use simple defaults.
@@ -555,7 +556,7 @@ async function renderBlock() {
       (state.lastLocked
         ? '<div class="note"><strong>Note:</strong> a tick is currently still running. Pausing only prevents future ticks — the in-flight tick will finish on its own (it does not check the block file mid-run).</div>'
         : '') +
-      '<div class="meta-row">file: memory-plan/BLOCKED.md · trigger: ' + esc(trigger) + '</div>' +
+      '<div class="meta-row">file: memory-plan/plans/' + esc(state.planId) + '/BLOCKED.md · trigger: ' + esc(trigger) + '</div>' +
       '<div class="actions">' +
         '<button class="primary" id="btn-resume">▶ Resume (delete BLOCKED.md)</button>' +
         '<button class="danger" id="btn-edit-block">Edit reason</button>' +
@@ -563,7 +564,7 @@ async function renderBlock() {
       '<div id="block-toast"></div>' +
       '<div class="doc-render">' + esc(data.content || '(empty)') + '</div>';
     $('btn-resume').addEventListener('click', async () => {
-      if (!confirm('Resume the plan?\\n\\nDeletes BLOCKED.md so the next tick runs. If the scheduler was auto-unloaded by a previous fast-exit, it will also be reloaded.')) return;
+      if (!confirm('Resume the plan?\n\nDeletes BLOCKED.md so the next tick runs. A scheduler that paused itself is reloaded; one you stopped stays stopped.')) return;
       const res = await doUnblock();
       if (res.error) showToast('block-toast', 'Error: ' + res.error, true);
       else {
@@ -592,7 +593,7 @@ async function renderBlock() {
     $('btn-pause').addEventListener('click', async () => {
       const trigger = $('block-trigger').value.trim() || 'operator pause';
       const detail  = $('block-detail').value;
-      if (!confirm('Pause future ticks?\n\nWrites memory-plan/BLOCKED.md. The current tick (if any) continues.')) return;
+      if (!confirm('Pause future ticks?\n\nWrites memory-plan/plans/' + state.planId + '/BLOCKED.md. The current tick (if any) continues.')) return;
       const res = await doBlock({ trigger, detail });
       showToast('block-toast', res.error ? 'Error: ' + res.error : 'Paused — BLOCKED.md written.', !!res.error);
     });
@@ -814,10 +815,12 @@ async function renderAutomation() {
   // ── Section: Actions ──
   html += '<div class="section"><h3>Actions</h3>';
   if (state.lastLocked) {
-    html += '<div class="note">A tick is currently running. Watch the Live tab. Most actions will refuse while the lock is held.</div>';
+    html += '<div class="note">A tick is currently running. Watch the Live tab. "Run one tick" refuses until it exits; while the scheduler\'s own tick runs, "Fire scheduled tick now" and schedule changes refuse too, and "Stop scheduler" stops that tick.</div>';
   }
   html += '<div class="actions">';
-  if (loaded) {
+  if (s.scheduler_supported === false) {
+    html += '<button type="button" class="secondary" id="btn-run-once" title="Spawn one tick directly">▶ Run one tick (manual)</button>';
+  } else if (loaded) {
     html += '<button type="button" class="primary" id="btn-kickstart" title="launchctl kickstart -k">▶ Fire scheduled tick now</button>';
     html += '<button type="button" class="secondary" id="btn-run-once" title="Spawn one tick directly (independent of launchd)">▶ Run one tick (manual)</button>';
     html += '<button type="button" class="danger" id="btn-unload" title="launchctl bootout">⏹ Stop scheduler (unload)</button>';
@@ -828,7 +831,9 @@ async function renderAutomation() {
     html += '<button type="button" class="secondary" id="btn-run-once" title="Spawn one tick directly without involving launchd. Useful for one-off testing.">▶ Run one tick (manual)</button>';
   }
   html += '</div>';
-  if (!loaded) {
+  if (s.scheduler_supported === false) {
+    html += '<div class="note" style="margin-top:14px;">Automatic chains run on macOS only (launchd); on this node, tick with "Run one tick".</div>';
+  } else if (!loaded) {
     html += '<div style="margin-top:14px;font-size:11px;color:var(--dim);">' +
       '<strong>What "Start scheduler" does:</strong> writes <code>' + esc(cfg.plist_path) + '</code>, ' +
       'then runs <code>launchctl bootstrap</code>. In ' + (cfg.mode === 'chain' ? 'chain' : 'interval') + ' mode, ' +
@@ -849,6 +854,8 @@ async function renderAutomation() {
   html += '<div class="k">working dir</div><div class="v">' + esc(cfg.working_dir) + '</div>';
   html += '<div class="k">stdout log</div><div class="v">' + esc(cfg.stdout_path) + '</div>';
   html += '<div class="k">stderr log</div><div class="v">' + esc(cfg.stderr_path) + '</div>';
+  html += '<div class="k">close check</div><div class="v">' + esc(cfg.close_check || 'npm test (default)') + '</div>';
+  html += '<div class="k">agent CLI</div><div class="v">' + esc(cfg.agent_provider || 'claude (default)') + '</div>';
   html += '<div class="k">env</div><div class="v">' + esc(Object.entries(cfg.env || {}).map(([k,v]) => k + '=' + v).join('  ')) + '</div>';
   html += '</div>';
   html += '<div style="margin-top:14px;font-size:11px;color:var(--dim);">Stored at <code>' + esc(state.planId) + '/automation.json</code>. Hand-edit then re-save from the UI to apply.</div>';
@@ -877,8 +884,8 @@ async function renderAutomation() {
       const newMode = btn.dataset.mode;
       if (newMode === effMode) return;
       const msg = newMode === 'chain'
-        ? 'Switch to CHAIN mode? Next tick fires as soon as the previous one exits (min ' + esc(currentThrottle) + 's gap).\\n\\nThe scheduler will reload now.'
-        : 'Switch to INTERVAL mode? Next tick fires every ' + Math.round(currentInterval / 60) + ' min on a fixed cadence.\\n\\nThe scheduler will reload now.';
+        ? 'Switch to CHAIN mode? Next tick fires as soon as the previous one exits (min ' + esc(currentThrottle) + 's gap).\n\nThe scheduler will reload now.'
+        : 'Switch to INTERVAL mode? Next tick fires every ' + Math.round(currentInterval / 60) + ' min on a fixed cadence.\n\nThe scheduler will reload now.';
       if (!confirm(msg)) return;
       const r2 = await viewerClient.request('/api/plans/' + state.planId + '/automation/config', {
         method: 'PUT',
@@ -955,7 +962,7 @@ async function renderAutomation() {
   });
   const unloadBtn = $('btn-unload');
   if (unloadBtn) unloadBtn.addEventListener('click', async () => {
-    if (!confirm('Unload the scheduler? No more automated ticks will fire until you load it again.')) return;
+    if (!confirm('Unload the scheduler? No more automated ticks will fire until you start it again (its plist is removed; Start rebuilds it from the saved config).')) return;
     const r2 = await viewerClient.request('/api/plans/' + state.planId + '/automation/unload', { method: 'POST' });
     const res = await r2.json();
     if (res.error) showToast('action-toast', 'Error: ' + res.error, true);
@@ -975,7 +982,7 @@ async function renderAutomation() {
   });
   const runOnceBtn = $('btn-run-once');
   if (runOnceBtn) runOnceBtn.addEventListener('click', async () => {
-    if (!confirm('Run one tick now?\\n\\nSpawns the wrapper directly (no launchd involvement). Use this to cold-start without committing to a schedule.')) return;
+    if (!confirm('Run one tick now?\n\nSpawns the wrapper directly (no launchd involvement). Use this to cold-start without committing to a schedule.')) return;
     const r2 = await viewerClient.request('/api/plans/' + state.planId + '/automation/run-once', { method: 'POST' });
     const res = await r2.json();
     if (res.error) showToast('action-toast', 'Error: ' + res.error, true);

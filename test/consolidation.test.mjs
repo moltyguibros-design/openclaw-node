@@ -1,4 +1,5 @@
 import { describe, it, before, after } from 'node:test';
+import { tmpDir } from './helpers/tmp-dir.cjs';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {
@@ -16,13 +17,33 @@ import {
   evaluatePromotionCandidates,
 } from '../lib/consolidation.mjs';
 import { runConsolidationCycle } from '../bin/consolidate.mjs';
-import { mkdtempSync } from 'node:fs';
+import { createExtractionStore } from '../lib/extraction-store.mjs';
+import { raceWorkers } from './helpers/worker-race.mjs';
+import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // Never let a cycle default to the REAL vault (getVaultPath) — fixture notes
 // were landing in production ~/.openclaw/obsidian-local (memory review 2026-07-04).
-const TEST_VAULT = mkdtempSync(join(tmpdir(), 'consolidation-vault-'));
+const TEST_VAULT = tmpDir('consolidation-vault-');
+// The values config/promotion-policy.yaml ships with.
+const POLICY = { mentionThreshold: 10, confidenceThreshold: 0.95 };
+
+describe('consolidate CLI --dry-run', () => {
+  it('refuses instead of running a writing cycle against state.db', () => {
+    const dir = tmpDir('consolidate-dry-');
+    const dbPath = join(dir, 'state.db');
+    const r = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../bin/consolidate.mjs', import.meta.url)),
+      '--dry-run', '--no-events', '--db', dbPath, '--vault-path', join(dir, 'vault'),
+    ], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /--dry-run is not implemented/);
+    assert.equal(existsSync(dbPath), false);
+  });
+});
 
 describe('consolidation event publication lifetime', () => {
   it('awaits both actual cycle publications before returning, retaining best-effort rejection', async () => {
@@ -131,6 +152,7 @@ function createTestDb() {
       decision TEXT NOT NULL,
       rationale TEXT NOT NULL,
       confidence REAL NOT NULL DEFAULT 0.5,
+      superseded_by INTEGER,
       created_at TEXT NOT NULL,
       salience REAL DEFAULT 0.5,
       last_recalled TEXT,
@@ -442,6 +464,28 @@ describe('detectClusters', () => {
 
     db.close();
   });
+
+  it('derives the same clusters from the pairs reinforceCoOccurrence already fetched', () => {
+    const db = createTestDb();
+    const five = ['s1', 's2', 's3', 's4', 's5'];
+    insertEntity(db, 'hub-a', 'concept', { sessions: [...five, 's6'] });
+    insertEntity(db, 'hub-b', 'concept', { sessions: five });
+    insertEntity(db, 'hub-c', 'concept', { sessions: [...five, 's6'] });
+    insertEntity(db, 'weak-a', 'concept', { sessions: ['s7', 's8', 's9'] });
+    insertEntity(db, 'weak-b', 'concept', { sessions: ['s7', 's8', 's9'] });
+
+    const own = detectClusters(db).clusters;
+    const { candidatePairs } = reinforceCoOccurrence(db);
+    assert.ok(Array.isArray(candidatePairs));
+    assert.ok(candidatePairs.some((p) => p.entity_a === 'weak-a' && p.shared_sessions === 3),
+      'reinforce sees the 3-session pair the cluster threshold drops');
+    const fromPairs = detectClusters(db, { pairs: candidatePairs }).clusters;
+
+    const key = (cs) => cs.map((c) => `${c.entities.join('+')}:${c.sessions}`).sort();
+    assert.deepEqual(key(fromPairs), key(own));
+    assert.deepEqual(key(own), ['hub-a+hub-b+hub-c:6']);
+    db.close();
+  });
 });
 
 describe('detectContradictions', () => {
@@ -494,7 +538,7 @@ describe('P5-2: pruneStale — decay is terminal, and what it removes is not des
                 VALUES ('s', 'dead', 'r', 0.99, ?, 0.01, 'local'), ('s', 'alive', 'r', 0.99, ?, 0.4, 'local')`).run(iso(1), iso(1));
     db.prepare(`INSERT INTO themes (label, first_seen, last_seen, mention_count) VALUES ('stale', ?, ?, 1), ('fresh', ?, ?, 1)`).run(iso(400), iso(300), iso(5), iso(5));
 
-    const r = pruneStale(db, { now, backupDir: mkdtempSync(join(tmpdir(), 'consolidation-backup-')) });
+    const r = pruneStale(db, { now, backupDir: tmpDir('consolidation-backup-') });
     assert.equal(r.archivedDecisions, 1);
     assert.equal(r.prunedThemes, 1);
     assert.equal(r.themesSkipped, null);
@@ -511,7 +555,7 @@ describe('P5-2: pruneStale — decay is terminal, and what it removes is not des
     const db = createTestDb();
     db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
                 VALUES ('s', 'planted', 'r', 0.99, ?, 0.0, 'local')`).run(new Date().toISOString());
-    assert.equal(evaluatePromotionCandidates(db).decisionCandidates.length, 0);
+    assert.equal(evaluatePromotionCandidates(db, POLICY).decisionCandidates.length, 0);
     db.close();
   });
 });
@@ -523,7 +567,7 @@ describe('evaluatePromotionCandidates', () => {
     insertEntity(db, 'popular', 'concept', { mentionCount: 15, sourceType: 'local' });
     insertEntity(db, 'unpopular', 'concept', { mentionCount: 3, sourceType: 'local' });
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.equal(result.entityCandidates.length, 1);
     assert.equal(result.entityCandidates[0].name, 'popular');
@@ -544,11 +588,90 @@ describe('evaluatePromotionCandidates', () => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run('s2', 'Low-conf decision', 'Weak reasons', 0.5, new Date().toISOString(), 0.5, 'local');
 
-    const result = evaluatePromotionCandidates(db);
+    const result = evaluatePromotionCandidates(db, POLICY);
 
     assert.equal(result.decisionCandidates.length, 1);
     assert.equal(result.decisionCandidates[0].decision, 'High-conf decision');
 
+    db.close();
+  });
+
+  it('a superseded decision is not a promotion candidate', () => {
+    const db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insert.run('s1', 'old plan', 'first take', 0.99, new Date().toISOString(), 0.5, 'local');
+    insert.run('s2', 'new plan', 'revised', 0.99, new Date().toISOString(), 0.5, 'local');
+    db.prepare(`
+      UPDATE decisions SET superseded_by = (SELECT id FROM decisions WHERE decision = 'new plan')
+      WHERE decision = 'old plan'
+    `).run();
+
+    const result = evaluatePromotionCandidates(db, POLICY);
+
+    assert.deepEqual(result.decisionCandidates.map(d => d.decision), ['new plan']);
+    db.close();
+  });
+});
+
+describe('promotion thresholds come from the policy file', () => {
+  const policyWith = (mentions) => {
+    const dir = tmpDir('promotion-policy-');
+    const file = join(dir, 'promotion-policy.yaml');
+    const shipped = readFileSync(fileURLToPath(new URL('../config/promotion-policy.yaml', import.meta.url)), 'utf8');
+    writeFileSync(file, shipped.replace(/concept_mention_count: \d+/, `concept_mention_count: ${mentions}`));
+    return file;
+  };
+
+  it('editing concept_mention_count changes the cycle\'s candidate set', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'five-mentions', 'concept', { mentionCount: 5, sourceType: 'local' });
+    const shipped = await runConsolidationCycle({ vaultPath: TEST_VAULT, db });
+    assert.equal(shipped.promotionCandidates.entityCandidates.length, 0);
+    const tuned = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, promotionPolicyPath: policyWith(3) });
+    assert.deepEqual(tuned.promotionCandidates.entityCandidates.map(e => e.name), ['five-mentions']);
+    db.close();
+  });
+
+  it('without an explicit path the cycle resolves $PROMOTION_POLICY first', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'five-mentions', 'concept', { mentionCount: 5, sourceType: 'local' });
+    const saved = process.env.PROMOTION_POLICY;
+    process.env.PROMOTION_POLICY = policyWith(3);
+    try {
+      const result = await runConsolidationCycle({ vaultPath: TEST_VAULT, db });
+      assert.deepEqual(result.promotionCandidates.entityCandidates.map(e => e.name), ['five-mentions']);
+    } finally {
+      if (saved === undefined) delete process.env.PROMOTION_POLICY; else process.env.PROMOTION_POLICY = saved;
+      db.close();
+    }
+  });
+
+  it('a missing policy file fails the cycle instead of falling back to built-in values', async () => {
+    const db = createTestDb();
+    await assert.rejects(
+      runConsolidationCycle({ vaultPath: TEST_VAULT, db, promotionPolicyPath: join(tmpdir(), 'no-such-policy.yaml') }),
+      /promotion step: cannot load promotion policy/,
+    );
+    db.close();
+  });
+
+  it('evaluatePromotionCandidates has no built-in thresholds of its own', () => {
+    const db = createTestDb();
+    assert.throws(() => evaluatePromotionCandidates(db), /needs mentionThreshold and confidenceThreshold/);
+    db.close();
+  });
+
+  it('candidates carry their row id, so the fingerprint keys same-named entities apart', () => {
+    const db = createTestDb();
+    insertEntity(db, 'popular', 'concept', { mentionCount: 15, sourceType: 'local' });
+    db.prepare(`INSERT INTO decisions (session_id, decision, rationale, confidence, created_at, salience, source_type)
+                VALUES ('s', 'sure', 'r', 0.99, ?, 0.5, 'local')`).run(new Date().toISOString());
+    const { entityCandidates, decisionCandidates } = evaluatePromotionCandidates(db, POLICY);
+    assert.ok(Number.isInteger(entityCandidates[0].id));
+    assert.ok(Number.isInteger(decisionCandidates[0].id));
     db.close();
   });
 });
@@ -581,6 +704,42 @@ describe('runConsolidationCycle', () => {
     db.close();
   });
 
+  it('reports wall time for every phase it ran, and none for phases it skipped', async () => {
+    const db = createTestDb();
+    insertEntity(db, 'timed-entity', 'concept', { mentionCount: 2 });
+
+    const result = await runConsolidationCycle({ vaultPath: tmpDir('cycle-phases-'), db });
+    assert.deepEqual(Object.keys(result.phaseMs), ['init', 'decay', 'prune', 'reinforce', 'clusters',
+      'vault-surfaces', 'summaries', 'contradictions', 'promotion']);
+    for (const ms of Object.values(result.phaseMs)) assert.ok(Number.isInteger(ms) && ms >= 0);
+
+    const ac = new AbortController();
+    ac.abort(new Error('hard cap'));
+    const aborted = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, signal: ac.signal });
+    assert.deepEqual(Object.keys(aborted.phaseMs), ['init']);
+    db.close();
+  });
+
+  it('runs the mentions self-join once per cycle; clusters reuse the reinforce pairs', async () => {
+    const db = createTestDb();
+    const sessions = ['s1', 's2', 's3', 's4', 's5'];
+    insertEntity(db, 'join-a', 'concept', { sessions });
+    insertEntity(db, 'join-b', 'concept', { sessions });
+
+    const prepare = db.prepare.bind(db);
+    let selfJoins = 0;
+    db.prepare = (sql) => {
+      if (/FROM mentions m1\s+JOIN mentions m2/.test(sql)) selfJoins++;
+      return prepare(sql);
+    };
+    const result = await runConsolidationCycle({ vaultPath: tmpDir('cycle-selfjoin-'), db });
+    db.prepare = prepare;
+
+    assert.equal(selfJoins, 1);
+    assert.deepEqual(result.clusters.clusters.map((c) => c.entities), [['join-a', 'join-b']]);
+    db.close();
+  });
+
   it('the cycle backfills session notes for DB sessions lacking one (memory review V1-2)', async () => {
     const db = createTestDb();
     insertEntity(db, 'backfilled-concept', 'concept', {
@@ -588,7 +747,7 @@ describe('runConsolidationCycle', () => {
       sessions: ['cafe0001-1111-2222-3333-444455556666'],
     });
 
-    const vault = mkdtempSync(join(tmpdir(), 'cycle-vault-'));
+    const vault = tmpDir('cycle-vault-');
     const result = await runConsolidationCycle({ vaultPath: vault, db });
 
     assert.ok(result.vaultSurfaces, 'cycle reports vault surfaces');
@@ -602,6 +761,27 @@ describe('runConsolidationCycle', () => {
     // Second cycle: nothing new to backfill — idempotent.
     const again = await runConsolidationCycle({ vaultPath: vault, db });
     assert.equal(again.vaultSurfaces.sessionNotes, 0);
+
+    db.close();
+  });
+
+  it('writes the weekly digest on the first cycle of each ISO week only', async () => {
+    const db = createTestDb();
+    const vault = tmpDir('cycle-weekly-');
+    const { readdirSync } = await import('node:fs');
+    const weekly = () => readdirSync(join(vault, 'daily')).filter((f) => f.endsWith('-weekly.md')).sort();
+
+    const monday = Date.parse('2026-06-08T10:00:00Z');
+    const first = await runConsolidationCycle({ vaultPath: vault, db, now: monday });
+    assert.equal(first.vaultSurfaces.weeklyDigest, 1);
+    assert.deepEqual(weekly(), ['2026-06-07-weekly.md'], 'the ISO week that just ended');
+
+    const later = await runConsolidationCycle({ vaultPath: vault, db, now: monday + 2 * 86400000 });
+    assert.equal(later.vaultSurfaces.weeklyDigest, 0, 'same ISO week: skipped');
+
+    const nextWeek = await runConsolidationCycle({ vaultPath: vault, db, now: monday + 7 * 86400000 });
+    assert.equal(nextWeek.vaultSurfaces.weeklyDigest, 1);
+    assert.deepEqual(weekly(), ['2026-06-07-weekly.md', '2026-06-14-weekly.md']);
 
     db.close();
   });
@@ -629,25 +809,18 @@ describe('runConsolidationCycle', () => {
     insertEntity(db, 'e1', 'concept', { mentionCount: 1 });
 
     const ac = new AbortController();
-    // Fire abort on next microtask — the first checkpoint will catch it after
-    // decay runs (because checkpoints fire BEFORE each step, the cycle runs
-    // init+decay synchronously before yielding).
+    // With no eventLog, decay..clusters run synchronously; the queued abort
+    // fires during the first await (backfillSessionNotes) and is caught at the
+    // next 'vault-surfaces' checkpoint.
     queueMicrotask(() => ac.abort(new Error('mid-cycle hard cap')));
 
     const result = await runConsolidationCycle({ vaultPath: TEST_VAULT, db, signal: ac.signal });
 
-    // Either aborted at one of the checkpoints, or completed before microtask
-    // depending on scheduling — both are valid. The key assertion: when
-    // aborted, abortedAt is set and downstream steps didn't run.
-    if (result.aborted) {
-      // F-Q307 added 'summaries-midloop' as a valid abortedAt value when the
-      // per-concept summary loop catches the signal mid-iteration (vs. the
-      // between-step checkpoints).
-      assert.ok(['decay', 'prune', 'reinforce', 'clusters', 'summaries',
-                 'summaries-midloop', 'vault-surfaces',
-                 'contradictions', 'promotion'].includes(result.abortedAt),
-        `abortedAt should be a known step, got: ${result.abortedAt}`);
-    }
+    assert.equal(result.aborted, true);
+    assert.equal(result.abortedAt, 'vault-surfaces');
+    assert.deepEqual(result.summariesRegenerated, { regenerated: 0 }, 'summaries never ran');
+    assert.equal(result.contradictions, undefined, 'contradictions never ran');
+    assert.equal(result.promotionCandidates, undefined, 'promotion never ran');
     db.close();
   });
 });
@@ -768,5 +941,38 @@ describe('R20 (repair 5.3): promotion emits on change only', () => {
       'a changed candidate set must emit');
 
     db.close();
+  });
+});
+
+describe('initConsolidationTables under concurrent cycles', () => {
+  it('two processes adding the missing column at once both finish', async () => {
+    const dir = tmpDir('consolidation-race-');
+    const consolidationUrl = new URL('../lib/consolidation.mjs', import.meta.url).href;
+    const sqliteStoreUrl = new URL('../lib/sqlite-store.mjs', import.meta.url).href;
+    for (let trial = 0; trial < 10; trial++) {
+      const dbPath = join(dir, `race-${trial}.db`);
+      const ex = createExtractionStore({ dbPath, integrityCheck: false });
+      initConsolidationTables(ex.db);
+      ex.close();
+      const raw = new Database(dbPath);
+      raw.exec('ALTER TABLE entities DROP COLUMN last_decayed_at');
+      raw.close();
+
+      const results = await raceWorkers({
+        setup: `
+          const { initConsolidationTables } = await import(workerData.consolidationUrl);
+          const { openStore } = await import(workerData.sqliteStoreUrl);`,
+        act: `
+          const db = openStore(workerData.dbPath, { integrityCheck: false });
+          try { initConsolidationTables(db); } finally { db.close(); }`,
+        data: { consolidationUrl, sqliteStoreUrl, dbPath },
+      });
+      assert.deepEqual(results, [{ ok: true }, { ok: true }], `trial ${trial}`);
+
+      const check = new Database(dbPath, { readonly: true });
+      const cols = check.pragma('table_info(entities)').filter((c) => c.name === 'last_decayed_at');
+      check.close();
+      assert.equal(cols.length, 1);
+    }
   });
 });

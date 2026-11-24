@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { QueuedIteratorImpl } from "nats/lib/nats-base-client/queued_iterator";
 import { MockKV } from "./mocks/mock-kv";
 
 const encoder = new TextEncoder();
@@ -38,9 +39,6 @@ vi.mock("@/lib/config", () => ({
 import {
   listMeshTasks,
   getMeshTask,
-  putMeshTask,
-  updateMeshTaskCAS,
-  proposeMeshTask,
   watchMeshTasks,
   mergeTasks,
   type MeshTaskEntry,
@@ -73,17 +71,22 @@ function task(over: Partial<MeshTaskEntry> = {}): MeshTaskEntry {
   };
 }
 
+/** What the task daemon does: MC itself never writes MESH_TASKS. */
+async function seed(t: MeshTaskEntry): Promise<number> {
+  return kv!.put(t.task_id, encoder.encode(JSON.stringify(t)));
+}
+
 beforeEach(() => {
   kv = new MockKV();
   cfg.nodeId = "worker-1";
   cfg.nodeRole = "worker";
 });
 
-// ── Read/write roundtrip ──
+// ── Reads ──
 
-describe("put/get/list roundtrip (production)", () => {
-  it("putMeshTask stores what getMeshTask reads back", async () => {
-    const rev = await putMeshTask(task({ task_id: "rt1", title: "Roundtrip" }));
+describe("get/list (production)", () => {
+  it("getMeshTask reads back a stored task with its revision", async () => {
+    const rev = await seed(task({ task_id: "rt1", title: "Roundtrip" }));
     expect(rev).toBeGreaterThan(0);
     const got = await getMeshTask("rt1");
     expect(got?.task.title).toBe("Roundtrip");
@@ -91,8 +94,8 @@ describe("put/get/list roundtrip (production)", () => {
   });
 
   it("listMeshTasks returns every stored task", async () => {
-    await putMeshTask(task({ task_id: "a" }));
-    await putMeshTask(task({ task_id: "b" }));
+    await seed(task({ task_id: "a" }));
+    await seed(task({ task_id: "b" }));
     const all = await listMeshTasks();
     expect(all.map((t) => t.task_id).sort()).toEqual(["a", "b"]);
   });
@@ -103,75 +106,9 @@ describe("put/get/list roundtrip (production)", () => {
   });
 });
 
-// ── Authority model (production rule in updateMeshTaskCAS) ──
-
-describe("authority model (production)", () => {
-  it("lead can update a task originated elsewhere", async () => {
-    cfg.nodeRole = "lead";
-    cfg.nodeId = "lead-node";
-    const rev = await putMeshTask(task({ origin: "worker-9" }));
-    const newRev = await updateMeshTaskCAS("t1", { status: "running" }, rev);
-    expect(newRev).toBeGreaterThan(rev);
-    expect((await getMeshTask("t1"))?.task.status).toBe("running");
-  });
-
-  it("worker can update its OWN task", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await updateMeshTaskCAS("t1", { status: "running" }, rev);
-    expect((await getMeshTask("t1"))?.task.status).toBe("running");
-  });
-
-  it("worker is DENIED updating a foreign-origin task", async () => {
-    const rev = await putMeshTask(task({ origin: "lead-node" }));
-    await expect(updateMeshTaskCAS("t1", { status: "running" }, rev)).rejects.toThrow(
-      /Authority denied: worker worker-1/
-    );
-    expect((await getMeshTask("t1"))?.task.status).toBe("queued");
-  });
-});
-
-// ── CAS semantics ──
-
-describe("CAS update (production)", () => {
-  it("succeeds on the expected revision and merges partial updates", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1", priority: 1 }));
-    await updateMeshTaskCAS("t1", { priority: 5 }, rev);
-    const got = await getMeshTask("t1");
-    expect(got?.task.priority).toBe(5);
-    expect(got?.task.title).toBe("Test task"); // untouched fields survive
-  });
-
-  it("throws on a stale revision (another node wrote since our read)", async () => {
-    const rev = await putMeshTask(task({ origin: "worker-1" }));
-    await updateMeshTaskCAS("t1", { status: "running" }, rev);
-    await expect(updateMeshTaskCAS("t1", { status: "done" }, rev)).rejects.toThrow(
-      /wrong last sequence/
-    );
-  });
-
-  it("throws when the task does not exist", async () => {
-    await expect(updateMeshTaskCAS("nope", { status: "x" }, 1)).rejects.toThrow(/not found/);
-  });
-});
-
-// ── Proposal lifecycle ──
-
-describe("proposeMeshTask (production)", () => {
-  it("a worker proposal lands as status=proposed with the worker's origin", async () => {
-    const proposed = await proposeMeshTask(task({ task_id: "p1" }));
-    expect(proposed.status).toBe("proposed");
-    expect(proposed.origin).toBe("worker-1");
-    expect((await getMeshTask("p1"))?.task.status).toBe("proposed");
-  });
-
-  it("a lead proposal is queued directly", async () => {
-    cfg.nodeRole = "lead";
-    cfg.nodeId = "lead-node";
-    const proposed = await proposeMeshTask(task({ task_id: "p2" }));
-    expect(proposed.status).toBe("queued");
-    expect(proposed.origin).toBe("lead-node");
-  });
-});
+// Task creation and edits (with their authority, CAS and editable-field rules)
+// moved to the task daemon: test/daemon-task-update.test.js and
+// mesh-tasks-route.test.ts cover them.
 
 // ── Watcher ──
 
@@ -181,7 +118,7 @@ describe("watchMeshTasks (production)", () => {
     expect(watch).not.toBeNull();
     const iter = watch!.events[Symbol.asyncIterator]();
     const pending = iter.next();
-    await putMeshTask(task({ task_id: "w1", title: "Watched" }));
+    await seed(task({ task_id: "w1", title: "Watched" }));
     const ev = await pending;
     expect(ev.done).toBe(false);
     expect(ev.value.operation).toBe("PUT");
@@ -193,6 +130,32 @@ describe("watchMeshTasks (production)", () => {
   it("returns null when NATS is unavailable", async () => {
     kv = null;
     expect(await watchMeshTasks()).toBeNull();
+  });
+
+  // MockKV's watcher reuses one iterator, which hid that nats.js builds a new
+  // generator per [Symbol.asyncIterator]() call and throws "already yielding"
+  // on the second; a real KV delete also carries an empty (truthy) value.
+  it("keeps delivering past the first event on a real nats watcher, and reports DEL", async () => {
+    const watcher = new QueuedIteratorImpl<{
+      key: string;
+      value: Uint8Array;
+      revision: number;
+      operation: "PUT" | "DEL" | "PURGE";
+    }>();
+    kv = { watch: async () => watcher } as unknown as MockKV;
+    const watch = await watchMeshTasks();
+    const iter = watch!.events[Symbol.asyncIterator]();
+
+    watcher.push({ key: "w1", value: encoder.encode(JSON.stringify(task({ task_id: "w1" }))), revision: 1, operation: "PUT" });
+    watcher.push({ key: "w1", value: new Uint8Array(0), revision: 2, operation: "DEL" });
+    watcher.push({ key: "w2", value: new Uint8Array(0), revision: 3, operation: "PURGE" });
+
+    const first = await iter.next();
+    expect(first.value).toMatchObject({ key: "w1", operation: "PUT", revision: 1 });
+    expect(first.value.task?.task_id).toBe("w1");
+    expect((await iter.next()).value).toEqual({ key: "w1", operation: "DEL", task: null, revision: 2 });
+    expect((await iter.next()).value).toEqual({ key: "w2", operation: "DEL", task: null, revision: 3 });
+    watcher.stop();
   });
 });
 

@@ -4,20 +4,16 @@
   "_usage": [
     "Copy this file to your Continue config directory (~/.continue/config.json).",
     "The 'on_model_response' hook triggers extraction after each LLM response.",
-    "Requires: openclaw-nodedev installed, NATS running on localhost:4222."
+    "Requires: openclaw-node installed; the CLI reads the node's bus and id from ~/.openclaw/openclaw.env."
   ],
   "openclaw": {
     "enabled": true,
     "extraction_trigger": {
       "command": "node",
       "args": ["bin/openclaw-extract-now.mjs", "--triggered-by=continue-ide"],
-      "cwd": "{{OPENCLAW_REPO_PATH}}",
+      "cwd": "{{OPENCLAW_REPO_DIR}}",
       "on_events": ["model_response"],
       "fire_and_forget": true
-    },
-    "env": {
-      "NATS_URL": "nats://localhost:4222",
-      "OPENCLAW_NODE_ID": "{{hostname}}"
     }
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-const AGENT_NAME = process.env.NEXT_PUBLIC_AGENT_NAME || "Daedalus";
+import { AGENT_NAME } from "@/lib/client-agent-name";
 
 import { useState, useMemo } from "react";
 import { formatDistanceToNow } from "date-fns";
@@ -25,6 +25,8 @@ import {
   Layers,
 } from "lucide-react";
 import { createTask, updateTask, deleteTask, type Task } from "@/lib/hooks";
+import { extractEstimate } from "@/lib/task-description";
+import { isCheckedOff, checkOffToggle } from "@/lib/done-gate";
 
 function isMetaTask(task: Task): boolean {
   return task.type === "project" || task.type === "pipeline" || task.type === "phase";
@@ -35,16 +37,6 @@ const TYPE_ICONS: Record<string, typeof FolderKanban> = {
   pipeline: GitBranch,
   phase: Layers,
 };
-
-/** Extract estimated hours from description (e.g. "DEV · 5.0h · M1/D3" → "5.0h") */
-function extractEstimate(description: string | null): string | null {
-  if (!description) return null;
-  const parts = description.split(" · ");
-  for (const p of parts) {
-    if (/^\d+(\.\d+)?h$/.test(p.trim())) return p.trim();
-  }
-  return null;
-}
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-orange-500/20 text-orange-400",
@@ -101,13 +93,13 @@ export function TaskCard({
   const colIdx = COLUMNS_ORDER.indexOf(currentColumn);
   const isLive = task.id === "__LIVE_SESSION__";
   const isActive = !isLive && task.status === "running";
-  const isDaedalusWorking = isActive && task.owner?.toLowerCase() === AGENT_NAME.toLowerCase() && !!task.acknowledgedAt;
+  const isAgentWorking = isActive && task.owner?.toLowerCase() === AGENT_NAME.toLowerCase() && !!task.acknowledgedAt;
   const isMeta = isMetaTask(task);
   const metaColor = task.color || '#7c3aed';
   const MetaIcon = isMeta ? TYPE_ICONS[task.type || ''] || null : null;
 
   const doneCount = subItems.filter(
-    (s) => s.status === "done" || s.status === "cancelled"
+    (s) => isCheckedOff(s.status) || s.status === "cancelled"
   ).length;
   const hasSubItems = subItems.length > 0;
   const estimate = extractEstimate(task.description);
@@ -122,8 +114,9 @@ export function TaskCard({
   }
 
   const toggleSubItem = async (sub: Task) => {
-    const newStatus = sub.status === "done" ? "queued" : "done";
-    await updateTask(sub.id, { status: newStatus } as Record<string, unknown>);
+    await updateTask(sub.id, { status: checkOffToggle(sub.status) } as Record<string, unknown>).catch((err) =>
+      alert(`Update failed: ${(err as Error).message}`),
+    );
   };
 
   const handleAddSubItem = async () => {
@@ -138,6 +131,8 @@ export function TaskCard({
       });
       setNewItemTitle("");
       setAddingItem(false);
+    } catch (err) {
+      alert(`Add failed: ${(err as Error).message}`);
     } finally {
       setSaving(false);
     }
@@ -158,7 +153,7 @@ export function TaskCard({
       className={`group rounded-lg border p-3 transition-all hover:shadow-md hover:shadow-black/20 ${
         selected
           ? "border-primary ring-2 ring-primary/30 bg-primary/5"
-          : isDaedalusWorking
+          : isAgentWorking
           ? "border-red-500/50 bg-red-500/5"
           : isLive
           ? "border-green-500/30 bg-green-500/5"
@@ -169,7 +164,7 @@ export function TaskCard({
           : "border-border bg-card"
       } ${bulkMode ? "cursor-pointer" : isLive ? "" : "cursor-grab active:cursor-grabbing"}`}
       style={
-        isDaedalusWorking && !selected
+        isAgentWorking && !selected
           ? {
               borderColor: 'rgba(239, 68, 68, 0.5)',
               boxShadow: '0 0 12px rgba(239, 68, 68, 0.3), 0 0 4px rgba(239, 68, 68, 0.2)',
@@ -203,7 +198,7 @@ export function TaskCard({
             onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Delete "${task.title}"?`)) {
-                deleteTask(task.id);
+                deleteTask(task.id).catch((err) => alert(`Delete failed: ${(err as Error).message}`));
               }
             }}
             className="shrink-0 mt-0.5 p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all"
@@ -361,8 +356,9 @@ export function TaskCard({
                       toggleSubItem(sub);
                     }}
                     className="shrink-0"
+                    title={isCheckedOff(sub.status) ? "Back to queued" : "Send to review"}
                   >
-                    {sub.status === "done" ? (
+                    {isCheckedOff(sub.status) ? (
                       <Check className="h-3 w-3 text-green-400" />
                     ) : (
                       <Circle className="h-3 w-3 text-muted-foreground/50 hover:text-foreground transition-colors" />
@@ -374,7 +370,7 @@ export function TaskCard({
                       onTaskClick(sub);
                     }}
                     className={`text-[11px] truncate cursor-pointer hover:text-foreground transition-colors ${
-                      sub.status === "done"
+                      isCheckedOff(sub.status)
                         ? "text-muted-foreground/50 line-through"
                         : "text-foreground/80"
                     }`}

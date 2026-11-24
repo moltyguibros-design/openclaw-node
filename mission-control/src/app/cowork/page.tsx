@@ -7,15 +7,13 @@ import {
   useClusters,
   useTasks,
   addClusterMember,
+  fetcher,
 } from "@/lib/hooks";
 import { SessionCard } from "@/components/cowork/session-card";
 import { ClusterCard } from "@/components/cowork/cluster-card";
 import { CreateClusterDialog } from "@/components/cowork/create-cluster-dialog";
 import { DispatchForm } from "@/components/cowork/dispatch-form";
 import useSWR from "swr";
-import { RolePicker } from "@/components/cowork/role-picker";
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 type Tab = "sessions" | "clusters" | "dispatch";
 
@@ -23,6 +21,7 @@ export default function CoworkPage() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [createOpen, setCreateOpen] = useState(false);
   const [addNodeTarget, setAddNodeTarget] = useState<string | null>(null);
+  const [dispatchClusterId, setDispatchClusterId] = useState<string | null>(null);
 
   const { sessions: activeSessions, natsAvailable } = useCollabSessions(
     "recruiting,active",
@@ -30,7 +29,8 @@ export default function CoworkPage() {
   );
   const { sessions: recentSessions } = useCollabSessions(
     "converged,completed,aborted",
-    30000
+    30000,
+    8
   );
   const { clusters } = useClusters();
   const { tasks } = useTasks();
@@ -42,7 +42,8 @@ export default function CoworkPage() {
     return map;
   }, [tasks]);
 
-  const handleDispatchFromCluster = (_clusterId: string) => {
+  const handleDispatchFromCluster = (clusterId: string) => {
+    setDispatchClusterId(clusterId);
     setTab("dispatch");
   };
 
@@ -112,7 +113,7 @@ export default function CoworkPage() {
                   Recent Sessions
                 </h2>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  {recentSessions.slice(0, 8).map((s) => (
+                  {recentSessions.map((s) => (
                     <SessionCard key={s.session_id} session={s} linkedTask={taskMap.get(s.task_id)} />
                   ))}
                 </div>
@@ -189,7 +190,7 @@ export default function CoworkPage() {
         )}
 
         {/* Dispatch tab */}
-        {tab === "dispatch" && <DispatchForm />}
+        {tab === "dispatch" && <DispatchForm key={dispatchClusterId ?? "none"} initialClusterId={dispatchClusterId} />}
       </main>
     </div>
   );
@@ -211,10 +212,13 @@ function AddNodeDialog({
     (n) => !existingNodeIds.includes(n.nodeId)
   );
 
-  const [selectedRole, setSelectedRole] = useState("worker");
-
   const handleAdd = async (nodeId: string) => {
-    await addClusterMember(clusterId, nodeId, selectedRole);
+    try {
+      await addClusterMember(clusterId, nodeId);
+    } catch (err) {
+      alert(`Add failed: ${(err as Error).message}`);
+      return;
+    }
     onClose();
   };
 
@@ -231,10 +235,6 @@ function AddNodeDialog({
           </button>
         </div>
         <div className="px-4 py-3 space-y-2">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs text-muted-foreground">Role:</span>
-            <RolePicker value={selectedRole} onChange={setSelectedRole} />
-          </div>
           {meshNodes.map((node) => (
             <button
               key={node.nodeId}

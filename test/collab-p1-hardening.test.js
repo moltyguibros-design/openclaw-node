@@ -10,7 +10,7 @@ const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const daemon = require('../bin/mesh-task-daemon.js');
-const { createSession, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
+const { createSession, issueMemberToken, CollabStore, COLLAB_STATUS } = require('../lib/mesh-collab');
 const { isOpenClawWorkerProvider } = require('../lib/llm-providers');
 
 class MockKV {
@@ -28,7 +28,7 @@ class MockKV {
   async keys() { return this.store.keys(); }
 }
 
-function makeContext() {
+function makeContext({ alive = new Set() } = {}) {
   const collabStore = new CollabStore(new MockKV());
   const failed = [], completed = [], released = [];
   const tasks = new Map();
@@ -43,9 +43,18 @@ function makeContext() {
     _tasks: tasks,
   };
   const published = [];
-  const nc = { publish(subject) { published.push(subject); }, request: async () => ({}) };
+  const payloads = [];
+  // An agent answers the alive check only when it is still working on that task.
+  const nc = {
+    publish(subject, data) { published.push(subject); payloads.push({ subject, data }); },
+    request: async (subject) => {
+      const node = /^mesh\.agent\.(.+)\.alive$/.exec(subject)?.[1];
+      if (node && alive.has(node)) return { data: new TextEncoder().encode(JSON.stringify({ alive: true })) };
+      return {};
+    },
+  };
   daemon.__test.setContext({ collabStore, store, nc, planStore: { list: async () => [] } });
-  return { collabStore, store, failed, completed, released, published };
+  return { collabStore, store, failed, completed, released, published, payloads };
 }
 
 async function activeSession(collabStore, spec, nodeIds, { setup } = {}) {
@@ -177,7 +186,8 @@ describe('P1 #3 — collaborative merge-review votes are BINDING', () => {
 });
 
 describe('P1 #5 — cooperative rotation skips the dead; degraded is loud', () => {
-  it('next integrator in order is dead → rotation lands on the next ALIVE node', async () => {
+  it('next integrator in order is dead → rotation lands on the next ALIVE node', async (t) => {
+    const logs = t.mock.method(console, 'log', () => {});
     const ctx = makeContext();
     const s = await activeSession(ctx.collabStore, { mode: 'cooperative' }, ['a', 'b', 'c'], {
       setup: (sess) => {
@@ -191,6 +201,8 @@ describe('P1 #5 — cooperative rotation skips the dead; degraded is loud', () =
     await daemon.__test.evaluateRound(s.session_id);
     const after = await ctx.collabStore.get(s.session_id);
     assert.equal(after.cooperative.current_integrator, 'c', 'skipped dead b → c');
+    // The log line used the pre-rotation snapshot and named the previous integrator.
+    assert.ok(logs.mock.calls.some(c => /COOPERATIVE .*: next integrator=c,/.test(String(c.arguments[0]))));
   });
 
   it('missing integrator reflection → integration marked degraded (never silent)', async () => {
@@ -237,6 +249,143 @@ describe('P1 #4 — round timeout: sessions can no longer hang forever', () => {
     await daemon.__test.sweepCollabRoundTimeouts();
     const after = await ctx.collabStore.get(s.session_id);
     assert.equal(after.status, COLLAB_STATUS.ACTIVE);
+  });
+});
+
+describe('round timeout for parallel / review / sequential (mesh-core #9)', () => {
+  const stale = () => new Date(Date.now() - 20 * 60_000).toISOString();
+  const quiet = (t) => t.mock.method(console, 'log', () => {});
+  const msg = (payload) => ({ data: new TextEncoder().encode(JSON.stringify(payload)), respond() {} });
+
+  for (const mode of ['parallel', 'review']) {
+    it(`${mode}: a silent member is marked dead at the limit and the round evaluates with the quorum`, async (t) => {
+      quiet(t);
+      const ctx = makeContext();
+      const s = await activeSession(ctx.collabStore, { mode, min_nodes: 2, max_rounds: 5 }, ['a', 'b', 'c'], {
+        setup: (sess) => { sess.rounds[0].started_at = stale(); },
+      });
+      for (const n of ['a', 'b']) await ctx.collabStore.submitReflection(s.session_id, reflect(n));
+      await daemon.__test.sweepCollabRoundTimeouts();
+      const after = await ctx.collabStore.get(s.session_id);
+      const timeout = after.audit_log.find(a => a.event === 'round_timeout');
+      assert.deepEqual(timeout?.marked_dead, ['c']);
+      assert.equal(after.rounds[0].evaluated, true, 'the round no longer hangs on c');
+      assert.ok(!after.nodes.some(n => n.node_id === 'c' && n.status !== 'dead'), 'c is dead or pruned by the next round');
+    });
+  }
+
+  it('a member still working past the limit is kept: the limit does not cap a long work round', async (t) => {
+    quiet(t);
+    const ctx = makeContext({ alive: new Set(['c']) });
+    const s = await activeSession(ctx.collabStore, { mode: 'parallel', min_nodes: 2 }, ['a', 'b', 'c'], {
+      setup: (sess) => { sess.rounds[0].started_at = stale(); },
+    });
+    for (const n of ['a', 'b']) await ctx.collabStore.submitReflection(s.session_id, reflect(n));
+    await daemon.__test.sweepCollabRoundTimeouts();
+    const after = await ctx.collabStore.get(s.session_id);
+    assert.equal(after.nodes.find(n => n.node_id === 'c').status, 'active');
+    assert.ok(!after.rounds[0].evaluated, 'the round waits for c');
+  });
+
+  it('a dead member beside a working one is dropped, and the round still waits for the worker', async (t) => {
+    quiet(t);
+    const ctx = makeContext({ alive: new Set(['c']) });
+    const s = await activeSession(ctx.collabStore, { mode: 'parallel', min_nodes: 2 }, ['a', 'b', 'c'], {
+      setup: (sess) => { sess.rounds[0].started_at = stale(); },
+    });
+    await ctx.collabStore.submitReflection(s.session_id, reflect('a'));
+    await daemon.__test.sweepCollabRoundTimeouts();
+    const after = await ctx.collabStore.get(s.session_id);
+    assert.equal(after.nodes.find(n => n.node_id === 'b').status, 'dead');
+    assert.equal(after.nodes.find(n => n.node_id === 'c').status, 'active');
+    assert.ok(!after.rounds[0].evaluated);
+  });
+
+  async function sequentialSession(ctx, turnStartedAt) {
+    return activeSession(ctx.collabStore, { mode: 'sequential', min_nodes: 2, max_rounds: 5 }, ['a', 'b', 'c'], {
+      setup: (sess) => {
+        sess.current_turn = 'b';
+        sess.turn_started_at = turnStartedAt;
+        sess.rounds[0].reflections.push({ node_id: 'a', summary: 'a', artifacts: [], confidence: 0.9, vote: 'continue' });
+      },
+    });
+  }
+
+  it('sequential: a silent turn holder past the per-turn limit is marked dead and the turn moves on', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await sequentialSession(ctx, stale());
+    await daemon.__test.sweepCollabRoundTimeouts();
+    const after = await ctx.collabStore.get(s.session_id);
+    assert.equal(after.nodes.find(n => n.node_id === 'b').status, 'dead');
+    assert.equal(after.current_turn, 'c');
+    assert.ok(Date.now() - Date.parse(after.turn_started_at) < 60_000, 'c gets a fresh turn clock');
+    assert.ok(ctx.published.includes(`mesh.collab.${s.session_id}.node.c.round`), 'c is notified');
+    assert.ok(after.audit_log.some(a => a.event === 'turn_timeout'));
+  });
+
+  it('sequential: members waiting for their turn are not timed by the round clock', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await sequentialSession(ctx, new Date().toISOString());
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.rounds[0].started_at = stale(); return sess; });
+    await daemon.__test.sweepCollabRoundTimeouts();
+    const after = await ctx.collabStore.get(s.session_id);
+    assert.equal(after.current_turn, 'b');
+    assert.ok(after.nodes.every(n => n.status === 'active'), 'c, still waiting its turn, is not marked dead');
+  });
+
+  it('sequential: a turn holder still working past the limit keeps its turn', async (t) => {
+    quiet(t);
+    const ctx = makeContext({ alive: new Set(['b']) });
+    const s = await sequentialSession(ctx, stale());
+    await daemon.__test.sweepCollabRoundTimeouts();
+    const after = await ctx.collabStore.get(s.session_id);
+    assert.equal(after.current_turn, 'b');
+    assert.equal(after.nodes.find(n => n.node_id === 'b').status, 'active');
+  });
+
+  it('sequential: the turn holder leaving hands the turn to the next member', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await sequentialSession(ctx, new Date().toISOString());
+    const { token, hash } = issueMemberToken();
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.nodes.find(n => n.node_id === 'b').token_hash = hash; return sess; });
+    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', member_token: token, reason: 'worktree isolation failed' }));
+    const after = await ctx.collabStore.get(s.session_id);
+    assert.equal(after.current_turn, 'c');
+    assert.deepEqual(after.turn_order, ['a', 'c']);
+    assert.ok(ctx.published.includes(`mesh.collab.${s.session_id}.node.c.round`));
+  });
+
+  it('a leave that drops an active session below min_nodes fails the parent task and announces it', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await activeSession(ctx.collabStore, { mode: 'parallel' }, ['a', 'b', 'c']);
+    const { token, hash } = issueMemberToken();
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.nodes.find(n => n.node_id === 'b').token_hash = hash; return sess; });
+    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', member_token: token, reason: 'gone' }));
+    assert.equal((await ctx.collabStore.get(s.session_id)).status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(ctx.failed.map(f => f.id), [s.task_id]);
+    assert.ok(ctx.published.includes('mesh.events.failed'), 'the bridge hears the failure');
+    const aborted = ctx.payloads.find(p => p.subject === 'mesh.events.collab.aborted');
+    assert.equal(JSON.parse(new TextDecoder().decode(aborted.data)).session.status, COLLAB_STATUS.ABORTED);
+  });
+
+  // Every other early end of a circling session releases its parent for another
+  // try; the leave path alone failed it.
+  it('a leave that drops a circling session below min_nodes releases the parent, like the other circling aborts', async (t) => {
+    quiet(t);
+    const ctx = makeContext();
+    const s = await activeSession(ctx.collabStore, { mode: 'circling_strategy', min_nodes: 2, max_nodes: 2 }, ['a', 'b']);
+    const { token, hash } = issueMemberToken();
+    await ctx.collabStore._updateWithCAS(s.session_id, (sess) => { sess.nodes.find(n => n.node_id === 'b').token_hash = hash; return sess; });
+    await daemon.__test.handleCollabLeave(msg({ session_id: s.session_id, node_id: 'b', member_token: token, reason: 'gone' }));
+    assert.equal((await ctx.collabStore.get(s.session_id)).status, COLLAB_STATUS.ABORTED);
+    assert.deepEqual(ctx.released.map(r => r.id), [s.task_id]);
+    assert.match(ctx.released[0].reason, /^Circling session aborted: too few active nodes \(1 < 2\)$/);
+    assert.deepEqual(ctx.failed, []);
+    assert.ok(ctx.published.includes('mesh.events.released'), 'the bridge hears the release');
   });
 });
 

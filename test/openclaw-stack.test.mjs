@@ -4,8 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   scanLaunchdUnits, scanSystemdUnits, probePort, classify, shortId, PORTS, PERIODIC,
+  selectUnitsToStart, readNatsCohort, summarize,
 } from '../bin/openclaw-stack.mjs';
 
 let tmp;
@@ -31,6 +34,12 @@ describe('unit discovery', () => {
     const units = scanSystemdUnits(exec);
     assert.deepEqual(units.map(u => [u.id, u.disabled]), [
       ['mission-control', false], ['mesh-agent', true], ['log-rotate', false],
+    ]);
+  });
+  it('marks the oneshot .service behind a timer as its job, not a unit to start or report', () => {
+    const exec = () => 'openclaw-observer.service static\nopenclaw-observer.timer enabled\nopenclaw-node-watch.service enabled\n';
+    assert.deepEqual(scanSystemdUnits(exec).map(u => [u.label, u.timerJob]), [
+      ['openclaw-observer.service', true], ['openclaw-observer.timer', false], ['openclaw-node-watch.service', false],
     ]);
   });
   it('shortId strips both platform prefixes', () => {
@@ -70,4 +79,95 @@ describe('classify — the honesty rules', () => {
       assert.equal(id, shortId(`ai.openclaw.${id}.plist`));
     }
   });
+});
+
+describe('selectUnitsToStart — up starts what the installer starts', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../services/service-manifest.json', import.meta.url), 'utf8'));
+  const installed = [
+    'nats', 'nats-1', 'nats-2', 'nats-3', 'gateway', 'mesh-agent', 'mesh-tool-discord',
+    'memory-daemon', 'mission-control', 'node-watch', 'observer',
+  ];
+  const leftOff = new Set(['gateway', 'mesh-agent', 'mesh-tool-discord', 'nats-1', 'nats-2', 'nats-3']);
+  const macUnits = () => {
+    for (const id of installed) fs.writeFileSync(path.join(tmp, `ai.openclaw.${id}.plist`), 'x');
+    return scanLaunchdUnits(tmp);
+  };
+  const linuxUnits = () => scanSystemdUnits(() => installed.flatMap((id) => (id === 'observer'
+    ? ['openclaw-observer.service static', 'openclaw-observer.timer enabled']
+    : [`openclaw-${id}.service ${leftOff.has(id) ? 'disabled' : 'enabled'}`])).join('\n'));
+  const ids = (units) => [...new Set(units.map((u) => u.id))].sort();
+
+  for (const [platform, scan] of [['darwin', macUnits], ['linux', linuxUnits]]) {
+    it(`${platform}: autostart:true units plus the single bus when no cohort is declared`, () => {
+      assert.deepEqual(ids(selectUnitsToStart(scan(), manifest, null)),
+        ['memory-daemon', 'mission-control', 'nats', 'node-watch', 'observer']);
+    });
+    it(`${platform}: a three-copy cohort starts nats-1..3 and not the single bus`, () => {
+      const cohort = ['ai.openclaw.nats-1', 'ai.openclaw.nats-2', 'ai.openclaw.nats-3'];
+      assert.deepEqual(ids(selectUnitsToStart(scan(), manifest, cohort)),
+        ['memory-daemon', 'mission-control', 'nats-1', 'nats-2', 'nats-3', 'node-watch', 'observer']);
+    });
+  }
+
+  it('readNatsCohort returns the declared labels, or null when the file is absent', () => {
+    assert.equal(readNatsCohort(tmp), null);
+    fs.mkdirSync(path.join(tmp, 'config'));
+    fs.writeFileSync(path.join(tmp, 'config', 'nats-writer-cohort.json'),
+      JSON.stringify({ schema: 1, activeLabels: ['ai.openclaw.nats'] }));
+    assert.deepEqual(readNatsCohort(tmp), ['ai.openclaw.nats']);
+  });
+
+  it('summarize does not list units left off on purpose as not running', () => {
+    const rows = [
+      { id: 'nats', status: 'LIVE' },
+      { id: 'memory-daemon', status: 'OFF' },
+      { id: 'gateway', status: 'OFF', manual: true },
+      { id: 'nats-1', status: 'OFF', manual: true },
+      { id: 'mesh-agent', status: 'LIVE', manual: true },
+    ];
+    assert.deepEqual(summarize(rows), { live: 2, total: 3, bad: ['memory-daemon'] });
+  });
+});
+
+// down never needs the bus layout: a hand-edited or corrupt cohort file must not keep it from stopping units.
+describe('openclaw-stack with an unreadable nats-writer-cohort.json', { skip: process.platform !== 'linux' && 'systemd path' }, () => {
+  const STACK = fileURLToPath(new URL('../bin/openclaw-stack.mjs', import.meta.url));
+  const run = (cohort, cmd) => {
+    const home = path.join(tmp, 'home');
+    const stub = path.join(tmp, 'stub');
+    fs.mkdirSync(path.join(home, '.openclaw', 'config'), { recursive: true });
+    fs.mkdirSync(stub, { recursive: true });
+    fs.writeFileSync(path.join(home, '.openclaw', 'config', 'nats-writer-cohort.json'), cohort);
+    fs.writeFileSync(path.join(stub, 'systemctl'), [
+      '#!/bin/sh',
+      'echo "$*" >> "$HOME/systemctl.log"',
+      'if [ "$2" = list-unit-files ]; then printf "openclaw-memory-daemon.service enabled\\nopenclaw-nats.service enabled\\n"; fi',
+      'exit 0',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    fs.writeFileSync(path.join(stub, 'lsof'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const r = spawnSync(process.execPath, [STACK, cmd], {
+      encoding: 'utf8',
+      env: { HOME: home, OPENCLAW_HOME: path.join(home, '.openclaw'), PATH: `${stub}:/usr/bin:/bin` },
+      timeout: 20000,
+    });
+    const log = fs.existsSync(path.join(home, 'systemctl.log')) ? fs.readFileSync(path.join(home, 'systemctl.log'), 'utf8') : '';
+    return { ...r, log };
+  };
+
+  for (const cohort of ['{"schema":1}\n', 'not json\n']) {
+    it(`down still stops every unit (${cohort.trim()})`, () => {
+      const r = run(cohort, 'down');
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.log, /^--user stop openclaw-memory-daemon\.service$/m);
+      assert.match(r.log, /^--user stop openclaw-nats\.service$/m);
+    });
+
+    it(`status reports the bad file and exits 1 without a stack trace (${cohort.trim()})`, () => {
+      const r = run(cohort, 'status');
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /nats-writer-cohort\.json/);
+      assert.doesNotMatch(r.stderr, /^\s+at /m);
+    });
+  }
 });

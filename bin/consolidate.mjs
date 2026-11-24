@@ -3,7 +3,7 @@
 /**
  * consolidate.mjs — CLI orchestrator for one full consolidation cycle.
  *
- * Runs all 6 consolidation jobs in sequence:
+ * Runs the consolidation jobs in sequence:
  *   1. Init tables (consolidation columns + the archive tables)
  *   2. Decay weights (salience half-life 14d + lossless archival), then prune
  *      (decayed-out decisions archived; idle themes deleted behind a backup).
@@ -15,14 +15,17 @@
  *   7. Evaluate promotion candidates
  *
  * Usage:
- *   node bin/consolidate.mjs [--db <path>] [--vault-path <path>] [--dry-run]
+ *   node bin/consolidate.mjs [--db <path>] [--vault-path <path>] [--no-events]
+ *   node bin/consolidate.mjs --backfill-digests [--vault-path <path>]
+ *     one-time: the daily digest of every session-note date in the vault and
+ *     the weekly digest of every ended week among them; no cycle runs.
  */
 
 import { openStore } from '../lib/sqlite-store.mjs';
-import path from 'path';
-import os from 'os';
 import { createHash } from 'crypto';
 import { createRequire } from 'node:module';
+import { resolveNodeId } from '../lib/node-id.js';
+import { memoryDaemonPaths } from '../lib/memory-daemon-paths.mjs';
 import {
   initConsolidationTables,
   decayWeights,
@@ -37,14 +40,13 @@ import {
   summarizeRemovals,
 } from '../lib/consolidation.mjs';
 import { buildMemoryEvent } from '../lib/local-event-log.mjs';
+import { loadPromotionPolicy } from '../lib/promotion-policy.mjs';
 import { backfillSessionNotes } from '../lib/obsidian-session-notes.mjs';
 import { generateDecisionNotes } from '../lib/obsidian-decision-notes.mjs';
 import { generateThemeNotes } from '../lib/obsidian-theme-notes.mjs';
-import { generateDailyDigest } from '../lib/obsidian-digest.mjs';
+import { backfillDigests, previousIsoWeekEnd, refreshDigests } from '../lib/obsidian-digest.mjs';
 
 const require = createRequire(import.meta.url);
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), '.openclaw/state.db');
 
 const REMOVED_SAMPLE = 50;
 
@@ -88,26 +90,31 @@ function decayedEventData(decay, prune, durationMs) {
  * threads the signal down to per-concept granularity.
  *
  * @param {object} [opts]
- * @param {string} [opts.dbPath] — path to extraction store DB
- * @param {string} [opts.vaultPath] — Obsidian vault path
- * @param {boolean} [opts.dryRun] — skip writes, just report what would happen
+ * @param {string} [opts.dbPath] — path to extraction store DB (default: the node root's state.db, memoryDaemonPaths)
+ * @param {string} [opts.vaultPath] — Obsidian vault path (default: a spawned node root's vault, else getVaultPath)
+ * @param {boolean} [opts.dryRun] — skip only the vault-surface writers (session/decision/theme notes, daily/weekly digest); decay, prune, reinforce, concept summaries, events and the promotion fingerprint still write
  * @param {object} [opts.db] — pre-opened database (for testing)
+ * @param {boolean|'quick'} [opts.integrityCheck] — openStore's open-time check (default full)
  * @param {object} [opts.client] — LLM client for summary generation
  * @param {AbortSignal} [opts.signal] — F-N100: hard-cap cancellation
  * @param {number} [opts.maxConcepts] — F-N101: cap per-cycle summary count
  * @param {object} [opts.eventLog] — local event log instance (publishLocal method)
  * @param {string} [opts.nodeId] — node identifier for event emission
+ * @param {string} [opts.promotionPolicyPath] — promotion policy YAML (default: resolvePromotionPolicyPath — $PROMOTION_POLICY, ~/.openclaw/config, then config/ beside lib/)
+ * @param {number} [opts.now] — clock for the digests' today and ended weeks (testing)
  * @returns {Promise<object>} cycle results, including `aborted: true` and
  *   `abortedAt: '<step name>'` when the cycle stopped short.
  */
 export async function runConsolidationCycle(opts = {}) {
   const startMs = Date.now();
-  const dbPath = opts.dbPath || DEFAULT_DB_PATH;
-  const db = opts.db || openStore(dbPath);
+  const nodePaths = memoryDaemonPaths();
+  const dbPath = opts.dbPath || nodePaths.stateDb;
+  const vaultPath = opts.vaultPath || nodePaths.vault;
+  const db = opts.db || openStore(dbPath, { integrityCheck: opts.integrityCheck });
   const ownDb = !opts.db;
   const signal = opts.signal || null;
   const eventLog = opts.eventLog || null;
-  const nodeId = opts.nodeId || process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = opts.nodeId || resolveNodeId();
 
   // Helper: returns true if the cycle should stop. We check this between
   // every step so a hard-cap fires deterministically rather than racing
@@ -124,14 +131,25 @@ export async function runConsolidationCycle(opts = {}) {
   let summaryResult = { regenerated: 0 };
   let contradictionResult, promotionResult, vaultSurfaceResult;
 
+  // Wall time per phase that ran: the evidence for which stage spends the hard
+  // cap (profile first; raising the cap is not a fix).
+  const phaseMs = {};
+  let lapStart = Date.now();
+  const lap = (phase) => {
+    const now = Date.now();
+    phaseMs[phase] = now - lapStart;
+    lapStart = now;
+  };
+
   try {
     // 1. Init tables
     initConsolidationTables(db);
+    lap('init');
 
     // 2. Decay weights
     abortInfo = checkpoint('decay');
     const decayStart = Date.now();
-    if (!abortInfo) decayResult = decayWeights(db, { backupDir: opts.backupDir });
+    if (!abortInfo) { decayResult = decayWeights(db, { backupDir: opts.backupDir }); lap('decay'); }
 
     // 2b. Prune what decay made irrelevant (P5-2): decayed-out decisions move
     // to the archive, idle themes are deleted once a backup exists.
@@ -143,20 +161,22 @@ export async function runConsolidationCycle(opts = {}) {
       pruneResult = pruneOn
         ? pruneStale(db, { backupDir: opts.backupDir })
         : { skipped: 'CONSOLIDATE_PRUNE=0', archivedDecisions: 0, prunedThemes: 0, themesSkipped: null, backup: null, removed: [] };
+      lap('prune');
     }
     if (decayResult && eventLog) {
       const evt = buildMemoryEvent('memory.decayed', 'consolidation', 'memory',
         decayedEventData(decayResult, pruneResult, Date.now() - decayStart), nodeId);
       await eventLog.publishLocal(evt).catch(() => {});
+      lap('decay-event');
     }
 
     // 3. Reinforce co-occurrence
     if (!abortInfo) abortInfo = checkpoint('reinforce');
-    if (!abortInfo) reinforceResult = reinforceCoOccurrence(db);
+    if (!abortInfo) { reinforceResult = reinforceCoOccurrence(db); lap('reinforce'); }
 
     // 4. Detect clusters
     if (!abortInfo) abortInfo = checkpoint('clusters');
-    if (!abortInfo) clusterResult = detectClusters(db);
+    if (!abortInfo) { clusterResult = detectClusters(db, { pairs: reinforceResult?.candidatePairs }); lap('clusters'); }
 
     // 4b. Vault surfaces beyond concepts (BEFORE concept regeneration: the
     // concept writer links session notes via the resolver, so sessions must
@@ -168,12 +188,14 @@ export async function runConsolidationCycle(opts = {}) {
     // one writer failing never kills the cycle.
     if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
     if (!abortInfo && !opts.dryRun) {
-      const vp = opts.vaultPath ? { vaultPath: opts.vaultPath } : {};
+      const vp = vaultPath ? { vaultPath } : {};
       vaultSurfaceResult = {};
+      let sessionNoteDates = [];
       try {
         const r = await backfillSessionNotes({ db, ...vp, limit: opts.sessionNoteLimit ?? 20 });
         vaultSurfaceResult.sessionNotes = r.generated;
         vaultSurfaceResult.sessionNotesRemaining = r.remaining;
+        sessionNoteDates = r.dates;
       } catch (e) { vaultSurfaceResult.sessionNotesError = e.message; }
       if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
       if (!abortInfo) try {
@@ -185,12 +207,31 @@ export async function runConsolidationCycle(opts = {}) {
         const r = await generateThemeNotes({ db, ...vp });
         vaultSurfaceResult.themeNotes = r.notes.length;
       } catch (e) { vaultSurfaceResult.themeNotesError = e.message; }
-      // Daily digest reads vault state — must run after the writers above.
+      // Digests read vault state — must run after the writers above. A session
+      // note is filed under its session's start date, so besides today the
+      // cycle refreshes yesterday (a session that crossed UTC midnight) and the
+      // day of every note it backfilled, with their ended ISO weeks. The first
+      // cycle of each ISO week also writes the week that just ended
+      // (daily/<its Sunday>-weekly.md).
       if (!abortInfo) abortInfo = checkpoint('vault-surfaces');
       if (!abortInfo) try {
-        const r = await generateDailyDigest({ ...vp });
-        vaultSurfaceResult.dailyDigest = r.generated ? 1 : 0;
-      } catch (e) { vaultSurfaceResult.dailyDigestError = e.message; }
+        const nowMs = opts.now ?? Date.now();
+        const endDate = previousIsoWeekEnd(nowMs);
+        const last = db.prepare(`SELECT value FROM consolidation_meta WHERE key = 'last_weekly_digest'`).get()?.value;
+        const r = await refreshDigests({
+          ...vp,
+          dates: [new Date(nowMs).toISOString().slice(0, 10), new Date(nowMs - 86400000).toISOString().slice(0, 10), ...sessionNoteDates],
+          weekEnds: last !== endDate ? [endDate] : [],
+          now: nowMs,
+        });
+        if (last !== endDate) {
+          db.prepare(`INSERT INTO consolidation_meta (key, value) VALUES ('last_weekly_digest', ?)
+                      ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(endDate);
+        }
+        vaultSurfaceResult.dailyDigest = r.daily;
+        vaultSurfaceResult.weeklyDigest = r.weekly;
+      } catch (e) { vaultSurfaceResult.digestError = e.message; }
+      lap('vault-surfaces');
     }
 
     // 5. Regenerate summaries (async — uses LLM). Signal flows in so the
@@ -199,11 +240,12 @@ export async function runConsolidationCycle(opts = {}) {
     if (!abortInfo) {
       summaryResult = await regenerateSummaries({
         db,
-        vaultPath: opts.vaultPath,
+        vaultPath,
         client: opts.client,
         signal,
         maxConcepts: opts.maxConcepts,
       });
+      lap('summaries');
       // F-P208 fix: regenerateSummaries' per-concept loop checks the signal
       // and returns { aborted: true } when interrupted mid-loop. Before this
       // fix, the cycle continued running detectContradictions and
@@ -216,13 +258,24 @@ export async function runConsolidationCycle(opts = {}) {
 
     // 6. Detect contradictions
     if (!abortInfo) abortInfo = checkpoint('contradictions');
-    if (!abortInfo) contradictionResult = detectContradictions(db);
+    if (!abortInfo) { contradictionResult = detectContradictions(db); lap('contradictions'); }
 
     // 7. Evaluate promotion candidates
     if (!abortInfo) abortInfo = checkpoint('promotion');
     if (!abortInfo) {
       const promoStart = Date.now();
-      promotionResult = evaluatePromotionCandidates(db);
+      // The policy file is the only source of the thresholds; a missing or
+      // invalid file fails the cycle loudly instead of promoting on guesses.
+      let threshold;
+      try {
+        ({ threshold } = await loadPromotionPolicy(opts.promotionPolicyPath));
+      } catch (err) {
+        throw new Error(`promotion step: cannot load promotion policy: ${err.message}`);
+      }
+      promotionResult = evaluatePromotionCandidates(db, {
+        mentionThreshold: threshold.concept_mention_count,
+        confidenceThreshold: threshold.decision_confidence,
+      });
       if (eventLog) {
         const names = promotionResult.entityCandidates.map((e) => e.name).filter(Boolean);
         // R20 fix (repair 5.3): emit-on-change. The same ~100 candidates were
@@ -240,7 +293,8 @@ export async function runConsolidationCycle(opts = {}) {
         } else {
           const evt = buildMemoryEvent('memory.promoted', 'consolidation', 'memory', {
             entities_promoted: promotionResult.entityCandidates.length + promotionResult.decisionCandidates.length,
-            // Capped sample of WHICH entities were promoted (highest-salience kept).
+            // Capped sample of WHICH entities were promoted: the first 20 by
+            // mention_count + reinforcement_count.
             promoted_names: names.slice(0, 20).map((n) => String(n).slice(0, 200)),
             promoted_more: Math.max(0, names.length - 20),
             duration_ms: Date.now() - promoStart,
@@ -250,6 +304,7 @@ export async function runConsolidationCycle(opts = {}) {
                       ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(fingerprint);
         }
       }
+      lap('promotion');
     }
 
     const durationMs = Date.now() - startMs;
@@ -264,6 +319,7 @@ export async function runConsolidationCycle(opts = {}) {
       contradictions: contradictionResult,
       promotionCandidates: promotionResult,
       durationMs,
+      phaseMs,
       ...(abortInfo || { aborted: false }),
     };
   } finally {
@@ -274,18 +330,26 @@ export async function runConsolidationCycle(opts = {}) {
 // ── CLI Entry ────────────────────────────────
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/consolidate.mjs')) {
   const args = process.argv.slice(2);
+  if (args.includes('--dry-run')) {
+    console.error('consolidate: --dry-run is not implemented (decay, prune and summaries would still write state.db and the vault); refusing.');
+    process.exit(2);
+  }
   const dbIdx = args.indexOf('--db');
   const vaultIdx = args.indexOf('--vault-path');
-  const dryRun = args.includes('--dry-run');
   const noEvents = args.includes('--no-events');
+  if (args.includes('--backfill-digests')) {
+    const vaultPath = (vaultIdx !== -1 && args[vaultIdx + 1]) || memoryDaemonPaths().vault;
+    const r = await backfillDigests(vaultPath ? { vaultPath } : {});
+    console.log(`Digests backfilled: ${r.daily} daily, ${r.weekly} weekly.`);
+    process.exit(0);
+  }
 
   const natsUrl = process.env.NATS_URL || undefined; // URL override only; resolver supplies URL + credentials
-  const nodeId = process.env.OPENCLAW_NODE_ID || os.hostname();
+  const nodeId = resolveNodeId();
 
   const opts = { nodeId };
   if (dbIdx !== -1 && args[dbIdx + 1]) opts.dbPath = args[dbIdx + 1];
   if (vaultIdx !== -1 && args[vaultIdx + 1]) opts.vaultPath = args[vaultIdx + 1];
-  if (dryRun) opts.dryRun = true;
 
   let nc = null;
 
@@ -295,9 +359,10 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
       const { connect } = await import('nats');
       const { createLocalEventLog } = await import('../lib/local-event-log.mjs');
       const { natsConnectOpts } = require('../lib/nats-resolve.js');
-      nc = await connect(natsConnectOpts({ servers: natsUrl, name: 'consolidate-cli', timeout: 5000 }));
+      const connectOpts = natsConnectOpts({ servers: natsUrl, name: 'consolidate-cli', timeout: 5000 });
+      nc = await connect(connectOpts);
       opts.eventLog = await createLocalEventLog(nc, nodeId);
-      console.log(`NATS connected (${natsUrl}), events will be emitted.`);
+      console.log(`NATS connected (${connectOpts.servers}), events will be emitted.`);
     } catch (err) {
       console.warn(`NATS unavailable (${err.message}); running without event emission.`);
     }

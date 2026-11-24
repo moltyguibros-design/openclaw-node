@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import type { NodeObject } from "react-force-graph-2d";
+import { forceGraphData } from "@/lib/graph-data";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -32,6 +33,7 @@ export function LocalGraph({
 }: LocalGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ width: 300, height: 200 });
+  const data = useMemo(() => forceGraphData(graph, true), [graph]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -93,7 +95,7 @@ export function LocalGraph({
         <ForceGraph2D
           width={dims.width}
           height={dims.height}
-          graphData={graph}
+          graphData={data}
           nodeId="id"
           nodeCanvasObject={paintNode}
           nodePointerAreaPaint={pointerAreaPaint}

@@ -6,7 +6,8 @@ Moves non-spec fields under metadata.openclaw namespace.
 Generates compatibility field from os/requires/config.
 
 Spec-allowed top-level fields: name, description, license, compatibility, metadata, allowed-tools
-Everything else → metadata.openclaw.*
+MIGRATE_FIELDS → metadata.openclaw.*. triggers and negative_triggers stay at the
+top level, where skill-audit, skill-routing-eval and Mission Control read them.
 
 Usage:
     bin/migrate-skill-frontmatter                    # Dry run (default)
@@ -41,7 +42,7 @@ SPEC_FIELDS = {"name", "description", "license", "compatibility", "metadata", "a
 
 # Fields to move under metadata.openclaw
 MIGRATE_FIELDS = {
-    "triggers", "negative_triggers", "displayName", "emoji", "summary",
+    "displayName", "emoji", "summary",
     "primaryEnv", "os", "requires", "install", "config", "version", "homepage",
 }
 
@@ -93,8 +94,11 @@ def serialize_frontmatter(fm: dict) -> str:
     """Serialize dict to YAML frontmatter string."""
     if HAS_YAML:
         # Custom representer to handle multiline strings nicely
+        # Indented sequences and unfolded scalars keep the output inside what
+        # lib/frontmatter.py (skill-audit's parser) reads.
         class CustomDumper(yaml.SafeDumper):
-            pass
+            def increase_indent(self, flow=False, indentless=False):
+                return super().increase_indent(flow, False)
 
         def str_representer(dumper, data):
             if "\n" in data:
@@ -115,7 +119,7 @@ def serialize_frontmatter(fm: dict) -> str:
                 ordered[key] = fm[key]
 
         return yaml.dump(ordered, Dumper=CustomDumper, default_flow_style=False,
-                         allow_unicode=True, sort_keys=False, width=120)
+                         allow_unicode=True, sort_keys=False, width=float("inf"))
     else:
         # Fallback: JSON-ish
         lines = []
@@ -259,6 +263,9 @@ def main():
         sys.exit(1)
 
     if not HAS_YAML:
+        if args.apply:
+            print("Error: --apply needs PyYAML; the basic parser drops lists, nested metadata and folded scalars. Install with: pip3 install pyyaml", file=sys.stderr)
+            sys.exit(1)
         print(f"{C.YELLOW}Warning: PyYAML not installed. Using basic parser (less reliable).{C.RESET}")
         print(f"Install with: pip3 install pyyaml\n")
 

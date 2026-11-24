@@ -7,7 +7,7 @@ incremental_indexing). Work the tree top-down; each step's evidence decides the 
 ```bash
 node bin/node-watch.mjs --deep --axis memory        # the honest grades
 sqlite3 ~/.openclaw/state.db "SELECT COUNT(*), MAX(first_seen) FROM entities"   # facts frozen?
-tail -5 ~/.openclaw/workspace/.tmp/memory-daemon.err                            # loud failures
+tail -5 ~/.openclaw/workspace/.tmp/memory-daemon.err ~/.openclaw/workspace/.tmp/openclaw-memory-daemon.err 2>/dev/null   # loud failures (launchd · systemd stderr)
 grep -E "flush \[|synthesis \[" ~/.openclaw/workspace/.tmp/memory-daemon.log | tail -5
 ```
 Key discriminator in the flush lines: `[llm]: 0 facts` repeatedly = SILENT semantic failure

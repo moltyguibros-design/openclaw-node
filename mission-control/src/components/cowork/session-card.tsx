@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { CollabSession, CollabArtifact, Task } from "@/lib/hooks";
 import { interveneSession } from "@/lib/hooks";
-import { RoleBadge } from "./role-picker";
+import { RoleBadge } from "./role-badge";
 
 // Worker artifacts are stored as { summary, artifacts } objects (or bare strings
 // on simpler paths). Render the human summary — never a raw "[object Object]".
@@ -55,11 +55,11 @@ function NodeChip({
 
   const handleRemove = async () => {
     if (!confirm(`Remove ${node.node_id} from session?`)) return;
-    await interveneSession({
-      action: "remove_node",
-      sessionId,
-      nodeId: node.node_id,
-    });
+    try {
+      await interveneSession({ action: "remove_node", sessionId, nodeId: node.node_id });
+    } catch (err) {
+      alert(`Remove failed: ${(err as Error).message}`);
+    }
   };
 
   return (
@@ -117,7 +117,11 @@ export function SessionCard({ session, linkedTask }: { session: CollabSession; l
   const handleAbort = async () => {
     if (!confirm("Abort this session? The parent task will be cancelled."))
       return;
-    await interveneSession({ action: "abort", sessionId: session.session_id });
+    try {
+      await interveneSession({ action: "abort", sessionId: session.session_id });
+    } catch (err) {
+      alert(`Abort failed: ${(err as Error).message}`);
+    }
   };
 
   const handleForceConverge = async () => {
@@ -127,10 +131,11 @@ export function SessionCard({ session, linkedTask }: { session: CollabSession; l
       )
     )
       return;
-    await interveneSession({
-      action: "force_converge",
-      sessionId: session.session_id,
-    });
+    try {
+      await interveneSession({ action: "force_converge", sessionId: session.session_id });
+    } catch (err) {
+      alert(`Force converge failed: ${(err as Error).message}`);
+    }
   };
 
   return (

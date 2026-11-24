@@ -14,6 +14,18 @@ if [ -z "$CAMPAIGN_NAME" ]; then
   exit 1
 fi
 
+case "$CAMPAIGN_NAME" in
+  */*|.|..|*\"*|*\\*)
+    echo "Error: campaign name must not contain '/', '\"' or '\\', or be '.' or '..'"
+    exit 1 ;;
+esac
+
+case "$PLATFORM" in
+  *\"*|*\\*|*[[:cntrl:]]*)
+    echo "Error: platform must not contain '\"', '\\' or control characters"
+    exit 1 ;;
+esac
+
 CAMPAIGN_DIR="$(pwd)/campaigns/${CAMPAIGN_NAME}"
 
 if [ -d "$CAMPAIGN_DIR" ]; then

@@ -4,15 +4,17 @@
  * bin/health-watch.mjs — Long-running health watcher daemon for OpenClaw memory infrastructure.
  *
  * Runs runHealthCheck() at a configurable interval (default 60s) and routes alerts to
- * three destinations: file (.daemon-health.md), NATS (mesh.health.alerts), and macOS
- * banner (via memory-plan-notify.sh). Alerts fire on state transitions only (not every poll),
+ * three destinations: file (.daemon-health.md), NATS (mesh.health.alerts), and desktop
+ * banner (via bin/openclaw-notify.mjs). Alerts fire on state transitions only (not every poll),
  * with a repeat alert every 5 minutes while unhealthy.
  *
  * Env vars:
  *   HEALTH_WATCH_INTERVAL_SEC — poll interval in seconds (default: 60)
  *   HEALTH_ALERT_TARGETS — CSV of: file, nats, banner (default: file,nats,banner)
  *   OPENCLAW_WORKSPACE — workspace root (default: ~/.openclaw/workspace)
- *   NATS_URL — NATS server URL for alert publishing (default: nats://localhost:4222)
+ *   NATS_URL — URL override for alert publishing (default: OPENCLAW_NATS via lib/nats-resolve.js)
+ *   OPENCLAW_SKIP_LLM — 1 when install.sh ran with --skip-llm/--sandbox: the ollama component
+ *     stays in the report but no longer counts toward the status
  */
 
 import {
@@ -28,6 +30,8 @@ import { isIP } from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { resolveNodeId } from '../lib/node-id.js';
 
 // URL + credentials (token or nkey) from the one resolver; NATS_URL is a URL override only.
 const { natsConnectOpts } = createRequire(import.meta.url)('../lib/nats-resolve.js');
@@ -41,9 +45,7 @@ const WORKSPACE_PATH = process.env.OPENCLAW_WORKSPACE
 const HEALTH_FILE = path.join(WORKSPACE_PATH, '.daemon-health.md');
 const NATS_ALERT_SUBJECT = 'mesh.health.alerts';
 const REPEAT_ALERT_SEC = 300; // re-alert every 5 min while unhealthy
-const NOTIFY_CLI = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname), 'openclaw-notify.mjs',
-);
+const NOTIFY_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'openclaw-notify.mjs');
 const MC_DIAGNOSTICS_URL = `${process.env.OPENCLAW_MC_URL || 'http://127.0.0.1:3000'}/diagnostics`;
 
 // ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ async function alertNats(status, result) {
     const sc = StringCodec();
     const payload = JSON.stringify({
       status,
-      node_id: process.env.OPENCLAW_NODE_ID || os.hostname(),
+      node_id: resolveNodeId(),
       timestamp: new Date().toISOString(),
       components: result,
     });
@@ -131,6 +133,7 @@ export async function getQueueHealth(snapshotPath) {
 const RESTART_WINDOW_MS = 15 * 60 * 1000;
 const RESTART_MAX = 3;
 let _localRestarts = [];
+let _lastUnloadEvidence = null;
 
 /**
  * Detect a stuck daemon-side Ollama (>=3 consecutive extraction timeouts in
@@ -167,6 +170,11 @@ export async function maybeAutoRestartOllama(snapshotPath) {
   }
 
   _localRestarts = _localRestarts.filter(ts => Date.now() - ts < RESTART_WINDOW_MS);
+  // The daemon's streak only resets on its next successful extraction, so the
+  // snapshot still reads stuck right after an unload; act again only once new
+  // timeouts have been counted.
+  const evidence = Number.isFinite(snapshot.totals?.timeouts) ? `${snapshot.pid}:${snapshot.totals.timeouts}` : null;
+  if (evidence && evidence === _lastUnloadEvidence) return false;
   if (_localRestarts.length >= RESTART_MAX) {
     console.warn(`[health-watch] Ollama stuck but restart rate-limited (${_localRestarts.length} restarts in last 15min) — abstaining`);
     return false;
@@ -183,6 +191,7 @@ export async function maybeAutoRestartOllama(snapshotPath) {
     });
     if (!res.ok) throw new Error(`unload returned ${res.status}`);
     _localRestarts.push(Date.now());
+    _lastUnloadEvidence = evidence;
     return true;
   } catch (err) {
     console.error(`[health-watch] ollama unload failed: ${err.message}`);
@@ -193,15 +202,21 @@ export async function maybeAutoRestartOllama(snapshotPath) {
 /**
  * Format the queue-state section appended to the health report.
  */
-export function formatQueueSection(qs) {
+export function formatQueueSection(qs, restarts = _localRestarts) {
   if (!qs) return '';
   const lines = ['', '## Queue State', ''];
+  // Flush/import extraction runs in daemon worker threads; the snapshot lists
+  // them as external_jobs, not as current_job.
+  const external = Array.isArray(qs.external_jobs) ? qs.external_jobs : [];
   if (qs.current_job) {
     const ela = (qs.current_job.elapsed_ms / 1000).toFixed(1);
     const eta = qs.current_job.eta_ms ? `, ETA ~${Math.round(qs.current_job.eta_ms / 60000)}min` : '';
     lines.push(`- **In flight:** ${qs.current_job.type} (${ela}s elapsed${eta}, model=${qs.current_job.model || 'unknown'})`);
-  } else {
+  } else if (!external.length) {
     lines.push('- **In flight:** none (queue idle)');
+  }
+  for (const j of external) {
+    lines.push(`- **In flight (worker):** ${j.type}${j.detail ? ` ${j.detail}` : ''} (${(j.elapsed_ms / 1000).toFixed(1)}s elapsed)`);
   }
   lines.push(`- **Queue depth:** ${qs.queue_depth} pending`);
   lines.push(`- **History (rolling 10):** extraction avg=${qs.history.extraction.avg_ms}ms (n=${qs.history.extraction.count}); analysis avg=${qs.history.analysis.avg_ms}ms (n=${qs.history.analysis.count})`);
@@ -215,25 +230,27 @@ export function formatQueueSection(qs) {
     const f = qs.recent_fallbacks[qs.recent_fallbacks.length - 1];
     lines.push(`- **Last fallback:** ${f.reason} at ${new Date(f.ts).toISOString()}`);
   }
-  if (qs.recent_restarts.length > 0) {
-    const r = qs.recent_restarts[qs.recent_restarts.length - 1];
-    lines.push(`- **Last auto-restart:** ${r.reason} at ${new Date(r.ts).toISOString()}`);
+  // The daemon never records restarts (health-watch performs them), so this
+  // process's own unload log is the only source.
+  if (restarts.length > 0) {
+    const inWindow = restarts.filter(ts => Date.now() - ts < RESTART_WINDOW_MS).length;
+    lines.push(`- **Last auto-unload:** stuck extraction at ${new Date(restarts[restarts.length - 1]).toISOString()} (${inWindow} in last 15min)`);
   }
   return lines.join('\n');
 }
 
 /**
  * Derive a queue-level status for the watcher's overall alerting.
- *   stuck      — auto-restart was attempted; warn loudly
- *   degraded   — recent fallbacks or slow alarms
+ *   stuck      — >=3 consecutive extraction timeouts (the queue's F-H17 rule; auto-restart is attempted)
+ *   degraded   — >=3 consecutive analysis timeouts, or recent fallbacks or slow alarms
  *   healthy    — no recent issues
  */
 export function deriveQueueStatus(qs) {
   if (!qs) return 'healthy';
-  if (qs.consecutive_timeouts.extraction >= 3 || qs.consecutive_timeouts.analysis >= 3) return 'stuck';
+  if (qs.consecutive_timeouts.extraction >= 3) return 'stuck';
   const recentFallback = qs.recent_fallbacks.find(f => Date.now() - f.ts < 5 * 60 * 1000);
   const recentSlow = qs.recent_slow_alarms.find(a => Date.now() - a.ts < 5 * 60 * 1000);
-  if (recentFallback || recentSlow) return 'degraded';
+  if (qs.consecutive_timeouts.analysis >= 3 || recentFallback || recentSlow) return 'degraded';
   return 'healthy';
 }
 
@@ -248,8 +265,11 @@ export function deriveQueueStatus(qs) {
  * @param {number} [opts.intervalSec] — poll interval in seconds
  * @param {string[]} [opts.targets] — alert destinations
  * @param {Function} [opts.healthCheckFn] — override for testing
- * @param {Function} [opts.onTick] — callback after each poll: (status, result) => void
- * @returns {{ start: Function, stop: Function }}
+ * @param {boolean} [opts.skipLlm] — leave ollama out of the status (default: OPENCLAW_SKIP_LLM=1)
+ * @param {{nats: Function, banner: Function}} [opts.alerters] — override for testing
+ * @param {Function} [opts.onTick] — callback after each poll: (status, result, queueState) => void
+ * @param {string} [opts.queueSnapshotPath] — daemon queue snapshot (default: ollama-queue QUEUE_STATE_PATH)
+ * @returns {{ start: Function, stop: Function, tick: Function }}
  */
 export function createHealthWatch(opts = {}) {
   const envInterval = parseFloat(process.env.HEALTH_WATCH_INTERVAL_SEC);
@@ -258,6 +278,8 @@ export function createHealthWatch(opts = {}) {
   const targets = opts.targets || parseAlertTargets(process.env.HEALTH_ALERT_TARGETS);
   const checkFn = opts.healthCheckFn || runHealthCheck;
   const onTick = opts.onTick || null;
+  const skipLlm = opts.skipLlm ?? process.env.OPENCLAW_SKIP_LLM === '1';
+  const alerters = opts.alerters || { nats: alertNats, banner: alertBanner };
 
   let timer = null;
   let previousStatus = null;
@@ -266,15 +288,20 @@ export function createHealthWatch(opts = {}) {
 
   async function tick() {
     const result = await checkFn(opts.checkOpts || {});
-    const componentStatus = deriveStatus(result);
+    // A node installed with --skip-llm has no local model on purpose; counting it made the
+    // node 'degraded' forever and re-alerted every REPEAT_ALERT_SEC.
+    const counted = skipLlm
+      ? Object.fromEntries(Object.entries(result).filter(([name]) => name !== 'ollama'))
+      : result;
+    const componentStatus = deriveStatus(counted);
 
     // Augment with queue health
-    const queueState = await getQueueHealth();
+    const queueState = await getQueueHealth(opts.queueSnapshotPath);
     const queueStatus = deriveQueueStatus(queueState);
 
     // Stuck queue → attempt auto-restart of Ollama (best-effort)
     if (queueStatus === 'stuck') {
-      await maybeAutoRestartOllama();
+      await maybeAutoRestartOllama(opts.queueSnapshotPath);
     }
 
     // Compose overall status: stuck queue > unhealthy component > degraded queue > healthy
@@ -293,15 +320,13 @@ export function createHealthWatch(opts = {}) {
     // reads its mtime for freshness, so it must be written every tick — a
     // healthy-once-then-silent file is indistinguishable from a dead monitor.
     if (targets.includes('file')) {
-      await alertFile(formatHealthReport(result) + formatQueueSection(queueState));
+      await alertFile(formatHealthReport(result, componentStatus) + formatQueueSection(queueState));
     }
 
     if (statusChanged || repeatDue) {
       const alertPromises = [];
-      if (targets.includes('nats')) alertPromises.push(alertNats(status, result));
-      if (targets.includes('banner') && (statusChanged || repeatDue)) {
-        alertPromises.push(alertBanner(status));
-      }
+      if (targets.includes('nats')) alertPromises.push(alerters.nats(status, result));
+      if (targets.includes('banner')) alertPromises.push(alerters.banner(status));
       await Promise.allSettled(alertPromises);
       lastAlertTime = now;
     }
@@ -333,7 +358,7 @@ export function createHealthWatch(opts = {}) {
     }
   }
 
-  return { start, stop };
+  return { start, stop, tick };
 }
 
 // ---------------------------------------------------------------------------

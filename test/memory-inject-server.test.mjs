@@ -2,11 +2,12 @@
  * memory-inject-server.test.mjs — Unit tests for lib/memory-inject-server.mjs
  *
  * Covers: getOrCreateToken (generate + reuse), startInjectionServer lifecycle,
- * /health endpoint, /memory/inject auth (401), missing-prompt (400),
+ * /health endpoint, /memory/inject auth (401), missing-prompt (200 noop),
  * body-size cap (400), happy path (200), @memory directives (off/none/deep/only:X),
  * graceful close.
  *
- * Uses a mock injector (no DB / no embedder / no LLM) for fast, hermetic tests.
+ * The server runs a real injector with no DB, no embedder and no LLM client
+ * (llmClient: null), so requests return empty results fast and hermetically.
  *
  * Run: node --test test/memory-inject-server.test.mjs
  */
@@ -14,12 +15,13 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Point the token file to a temp location BEFORE importing
 const TMP_HOME = mkdtempSync(join(tmpdir(), 'mis-test-home-'));
 process.env.HOME = TMP_HOME;
+process.env.OPENCLAW_HOME = join(TMP_HOME, '.openclaw');
 process.env.MEMORY_INJECT_PORT = '0';  // OS-assigned random port
 // Every /memory/inject request fires an unawaited injection-log write into
 // $HOME/.openclaw; one still landing during after()'s rmSync failed the hook
@@ -28,32 +30,16 @@ process.env.INJECTION_LOG_DISABLED = '1';
 
 const { startInjectionServer, getOrCreateToken } = await import('../lib/memory-inject-server.mjs');
 
-// ─── Mock injector ──────────────────────────────────────────────────────────
-
-function createMockInjector(overrides = {}) {
-  return {
-    retrieve: overrides.retrieve || (async (prompt, opts) => ({
-      concepts: [{ name: 'X' }],
-      decisions: [],
-      snippets: [],
-      tokenCount: 42,
-      analysis: { mode: 'llm', themes: ['t1'] },
-      _calledWith: { prompt, opts },
-    })),
-  };
-}
-
 // ─── Server lifecycle ──────────────────────────────────────────────────────
 
 let serverHandle = null;
 let token = null;
-let injectorRef = null;
 
 before(async () => {
-  // Server creates its own injector internally; we pass null deps so it
-  // degrades gracefully (empty results, but happy path / error handling
+  // Server creates its own injector internally; with no DBs and no LLM client
+  // it degrades gracefully (empty results, but happy path / error handling
   // still exercised). Port 0 = OS-assigned.
-  serverHandle = await startInjectionServer({}, { port: 0, host: '127.0.0.1', log: () => {} });
+  serverHandle = await startInjectionServer({ llmClient: null }, { port: 0, host: '127.0.0.1', log: () => {} });
   token = serverHandle.token;
 });
 
@@ -254,6 +240,65 @@ describe('POST /memory/inject — happy path (degraded mode w/ null DBs)', () =>
     assert.ok('items' in r.json);
     assert.ok(typeof r.json.tokens === 'number');
     assert.ok(typeof r.json.elapsed_ms === 'number');
+  });
+});
+
+describe('POST /memory/inject — emitted events', () => {
+  const events = [];
+  let handle;
+  let MemoryEventSchema;
+  let toWatcherRecord;
+
+  before(async () => {
+    ({ MemoryEventSchema } = await import('../packages/event-schemas/dist/index.js'));
+    ({ toWatcherRecord } = await import('../lib/memory-watcher.mjs'));
+    // publishLocal validates with MemoryEventSchema and publishes the parsed
+    // result, so capture exactly that.
+    handle = await startInjectionServer(
+      { llmClient: null, eventLog: { publishLocal: async (e) => { events.push(MemoryEventSchema.parse(e)); } }, nodeId: 'test-node' },
+      { port: 0, host: '127.0.0.1', log: () => {} },
+    );
+  });
+
+  after(async () => { if (handle) await handle.close(); });
+
+  async function inject(body) {
+    events.length = 0;
+    const res = await fetch(`http://127.0.0.1:${handle.port}/memory/inject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${handle.token}` },
+      body: JSON.stringify(body),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+  }
+
+  it('memory.injected and memory.retrieved carry the frontend and session_id', async () => {
+    await inject({ prompt: 'what did we decide about nats', frontend: 'openclaw-context-engine', session_id: 'agent:main:s1' });
+    const injected = events.find((e) => e.event_type === 'memory.injected');
+    const retrieved = events.find((e) => e.event_type === 'memory.retrieved');
+    assert.ok(injected, 'memory.injected emitted');
+    assert.ok(retrieved, 'memory.retrieved emitted');
+    assert.equal(injected.data.frontend, 'openclaw-context-engine');
+    assert.equal(injected.data.session_id, 'agent:main:s1');
+    assert.equal(toWatcherRecord(injected).session, 'agent:main:s1');
+    assert.equal(retrieved.data.frontend, 'openclaw-context-engine');
+    assert.equal(retrieved.data.session_id, 'agent:main:s1');
+  });
+
+  it('caps an over-long frontend instead of dropping the event', async () => {
+    await inject({ prompt: 'what did we decide about nats', frontend: 'f'.repeat(500) });
+    const injected = events.find((e) => e.event_type === 'memory.injected');
+    assert.ok(injected, 'memory.injected emitted');
+    assert.equal(injected.data.frontend.length, 100);
+    assert.equal('session_id' in injected.data, false);
+  });
+
+  it('a prompt over 200 chars still yields a valid memory.retrieved', async () => {
+    await inject({ prompt: 'word '.repeat(80) });
+    const retrieved = events.find((e) => e.event_type === 'memory.retrieved');
+    assert.ok(retrieved, 'memory.retrieved emitted');
+    assert.ok(retrieved.data.query.length <= 200, `query is ${retrieved.data.query.length} chars`);
   });
 });
 

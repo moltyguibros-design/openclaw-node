@@ -1,0 +1,3 @@
+4d430e419001355287cb133ea7c8462253aa3f80e740832a51fc5f3458642f6f  stopped-journal-reader-corrections-on-e74d610b.patch
+a65ccce611ddba1c030671863b267d71ddc2aa5f848094b49c77fa43a7995746  mutants_reader.py
+476ddd144b9a8a44f3333442617e2f09c1f3ee6710e862dd3d44e6537dd274aa  repro_reader_claims.py

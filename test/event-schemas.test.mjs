@@ -223,10 +223,28 @@ describe('Boundary event schemas (Block 1 vocabulary)', () => {
       token_count: 1200,
       blocks_count: 3,
       duration_ms: 45,
+      frontend: 'openclaw-context-engine',
+      session_id: 'agent:main:s1',
     });
     const result = MemoryInjectedSchema.parse(event);
     assert.equal(result.data.token_count, 1200);
     assert.equal(result.data.blocks_count, 3);
+    assert.equal(result.data.frontend, 'openclaw-context-engine');
+    assert.equal(result.data.session_id, 'agent:main:s1');
+  });
+
+  it('keeps frontend and session_id on memory.retrieved', () => {
+    const event = makeMemEvent('memory.retrieved', {
+      query_hash: 'h',
+      channels_hit: 0,
+      results_count: 0,
+      duration_ms: 1,
+      frontend: 'openclaw-context-engine',
+      session_id: 'agent:main:s1',
+    });
+    const result = MemoryRetrievedSchema.parse(event);
+    assert.equal(result.data.frontend, 'openclaw-context-engine');
+    assert.equal(result.data.session_id, 'agent:main:s1');
   });
 
   it('validates memory.synthesized', () => {
@@ -487,11 +505,32 @@ describe('MemoryEventSchema discriminated union', () => {
   });
 });
 
+// zod-to-json-schema does not understand Zod 4 schemas and returned an empty
+// MemoryEvent definition; the old assertion (definitions exists) passed on it.
 describe('toJsonSchema', () => {
-  it('generates a JSON Schema object with definitions', () => {
+  it('describes every memory event variant', () => {
     const schema = toJsonSchema();
-    assert.equal(typeof schema, 'object');
-    assert.ok(schema.$schema || schema.definitions || schema.$defs,
-      'should have $schema, definitions, or $defs');
+    assert.ok(schema.$schema, 'should declare its JSON Schema dialect');
+    const variants = schema.oneOf ?? schema.anyOf;
+    assert.ok(Array.isArray(variants), `expected a union, got ${JSON.stringify(schema).slice(0, 200)}`);
+    const types = variants.map((v) => v.properties?.event_type?.const).filter(Boolean);
+    for (const t of ['memory.session_started', 'memory.fact_extracted', 'memory.error']) {
+      assert.ok(types.includes(t), `missing ${t} in ${types}`);
+    }
+    assert.ok(variants.every((v) => v.required?.includes('data')), 'each variant requires data');
+  });
+});
+
+describe('memory.error boundaries the daemon emits', () => {
+  it('every emitErrorEvent boundary in memory-daemon.mjs passes the schema', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { buildMemoryEvent } = await import('../lib/local-event-log.mjs');
+    const src = readFileSync(new URL('../workspace-bin/memory-daemon.mjs', import.meta.url), 'utf8');
+    const boundaries = [...new Set([...src.matchAll(/emitErrorEvent\('([a-z_]+)'/g)].map((m) => m[1]))];
+    for (const b of ['ingest', 'extract', 'knowledge_index', 'graph_cache_refresh']) assert.ok(boundaries.includes(b), `missing ${b}`);
+    for (const boundary of boundaries) {
+      const event = buildMemoryEvent('memory.error', 'x', 'memory', { boundary, error_code: 'E', error_message: 'm' }, 'node-a');
+      assert.equal(MemoryEventSchema.safeParse(event).success, true, `boundary ${boundary} is rejected`);
+    }
   });
 });

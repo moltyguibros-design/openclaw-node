@@ -38,6 +38,12 @@ while [ $# -gt 0 ]; do
 done
 [ "${OPENCLAW_LLM_AUTO:-0}" = "1" ] && [ "$MODE" = ask ] && MODE=yes
 
+# For set_env_key. Run standalone DRY_RUN is unset, and run() reads empty as true.
+DRY_RUN="${DRY_RUN:-false}"
+. "$(dirname "$0")/helpers.sh"
+. "$(dirname "$0")/root-guard.sh"
+refuse_custom_openclaw_root
+
 if ! declare -f ok >/dev/null 2>&1; then
   _G='\033[0;32m'; _Y='\033[1;33m'; _R='\033[0;31m'; _B='\033[1m'; _N='\033[0m'
   ok()   { echo -e "${_G}[+]${_N} $*"; }
@@ -48,7 +54,7 @@ fi
 declare -f info >/dev/null 2>&1 || info() { echo -e "\033[0;32m[+]\033[0m $*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
+OPENCLAW_ROOT="$HOME/.openclaw"
 ENV_FILE="${ENV_FILE:-$OPENCLAW_ROOT/openclaw.env}"
 WORKSPACE="${WORKSPACE:-$OPENCLAW_ROOT/workspace}"
 NODE_BIN="${NODE_BIN:-$(command -v node)}"
@@ -80,23 +86,23 @@ if [ "$MODE" != embedder ] && [ -z "$ENDPOINT" ]; then
 fi
 
 # ---------- what does this machine warrant? ----------
-# Tiers mirror bin/check-llm-baseline.mjs: >=48GB qwen3:32b, >=32GB qwen3:14b,
-# >=16GB qwen3:8b, below that no local tier is viable.
-if [ "$(uname -s)" = Darwin ]; then
-  RAM_GB=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
-else
-  RAM_GB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))
-fi
-
-if   [ "$RAM_GB" -ge 48 ]; then REC=qwen3:32b; REC_GB=18
-elif [ "$RAM_GB" -ge 32 ]; then REC=qwen3:14b; REC_GB=9
-elif [ "$RAM_GB" -ge 16 ]; then REC=qwen3:8b;  REC_GB=5
-else                            REC="";        REC_GB=0
-fi
+# bin/check-llm-baseline.mjs owns the tier policy; it exits 2 below the floor, with
+# the JSON still printed.
+read -r RAM_GB REC REC_GB < <("$NODE_BIN" "$REPO_DIR/bin/check-llm-baseline.mjs" --json 2>/dev/null | "$NODE_BIN" -e '
+  let s = "";
+  process.stdin.on("data", (d) => s += d).on("end", () => {
+    const { system, recommendation: r } = JSON.parse(s);
+    console.log(system.total_ram_gb.toFixed(1), r.model || "-", r.size_gb || 0);
+  });
+')
+[ "$REC" = "-" ] && REC=""
 
 CURRENT=$(grep -m1 '^LLM_MODEL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+# transformers.js caches beside its package (core.mjs sets no cacheDir), reached through the
+# workspace link. Presence only sizes the download: a half-written cache file also exists, so
+# the warm-up below runs regardless.
 EMBEDDER_NEEDED=true
-[ -d "$HOME/.cache/huggingface" ] && grep -qri 'bge-m3' "$HOME/.cache/huggingface" 2>/dev/null && EMBEDDER_NEEDED=false
+[ -n "$(find "$WORKSPACE/node_modules/@huggingface/transformers/.cache/Xenova/bge-m3" -name '*.onnx*' -print -quit 2>/dev/null)" ] && EMBEDDER_NEEDED=false
 
 echo ""
 echo "  Detected RAM   : ${RAM_GB} GB"
@@ -129,9 +135,8 @@ fi
 record_endpoint() {
   # $1 = base URL, $2 = model tag. No download: the model lives on the server.
   if [ -f "$ENV_FILE" ]; then
-    if grep -q '^LLM_BASE_URL=' "$ENV_FILE"; then sed -i.bak "s|^LLM_BASE_URL=.*|LLM_BASE_URL=$1|" "$ENV_FILE"; else echo "LLM_BASE_URL=$1" >> "$ENV_FILE"; fi
-    if grep -q '^LLM_MODEL=' "$ENV_FILE"; then sed -i.bak "s|^LLM_MODEL=.*|LLM_MODEL=$2|" "$ENV_FILE"; else echo "LLM_MODEL=$2" >> "$ENV_FILE"; fi
-    rm -f "$ENV_FILE.bak"
+    set_env_key LLM_BASE_URL "$1"
+    set_env_key LLM_MODEL "$2"
     ok "LLM_BASE_URL=$1 LLM_MODEL=$2 recorded in $ENV_FILE"
   else
     warn "$ENV_FILE not found — endpoint not recorded"
@@ -227,9 +232,9 @@ elif $TTY_OK; then
       esac
       # Undersized picks are allowed but named for what they are: the model will
       # swap or refuse to load rather than fail cleanly at pull time.
-      case "$CHOICE" in
-        qwen3:32b) [ "$RAM_GB" -lt 48 ] && warn "$CHOICE on ${RAM_GB} GB will swap badly" ;;
-        qwen3:14b) [ "$RAM_GB" -lt 32 ] && warn "$CHOICE on ${RAM_GB} GB will swap badly" ;;
+      case "$CHOICE:$REC" in
+        qwen3:32b:qwen3:32b|qwen3:14b:qwen3:32b|qwen3:14b:qwen3:14b) ;;
+        qwen3:32b:*|qwen3:14b:*) warn "$CHOICE on ${RAM_GB} GB will swap badly" ;;
       esac
       ;;
     *) CHOICE="" ;;
@@ -289,11 +294,7 @@ fi
 
 # ---------- record the choice ----------
 if [ -f "$ENV_FILE" ]; then
-  if grep -q '^LLM_MODEL=' "$ENV_FILE"; then
-    sed -i.bak "s|^LLM_MODEL=.*$|LLM_MODEL=$CHOICE|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-  else
-    echo "LLM_MODEL=$CHOICE" >> "$ENV_FILE"
-  fi
+  set_env_key LLM_MODEL "$CHOICE"
   ok "LLM_MODEL=$CHOICE recorded in $ENV_FILE"
 else
   warn "$ENV_FILE not found — LLM_MODEL not recorded"
@@ -301,7 +302,7 @@ fi
 fi  # SKIP_PULL
 
 # ---------- embedder ----------
-if $EMBEDDER_NEEDED && [ -d "$WORKSPACE/node_modules/@huggingface/transformers" ]; then
+if [ -d "$WORKSPACE/node_modules/@huggingface/transformers" ]; then
   step "Prefetching embedder Xenova/bge-m3 (~2 GB, one-time)"
   # Keep the reason. core.mjs raises a precise error (403, offline, no disk,
   # missing dep) and the old `else warn ...` threw it away, so a failed prefetch
@@ -327,7 +328,10 @@ elif $EMBEDDER_NEEDED; then
 fi
 
 echo ""
-ok "Wave 2 complete — model: ${CHOICE:-${ENDPOINT:+endpoint $ENDPOINT ($ENDPOINT_MODEL)}}${CHOICE:-${ENDPOINT:-unchanged}}"
+if [ -n "$CHOICE" ]; then MODEL_SUMMARY="$CHOICE"
+elif [ -n "$ENDPOINT" ]; then MODEL_SUMMARY="endpoint $ENDPOINT ($ENDPOINT_MODEL)"
+else MODEL_SUMMARY=unchanged; fi
+ok "Wave 2 complete — model: $MODEL_SUMMARY"
 info "Restart the services so they pick it up:"
 echo "    bash $REPO_DIR/install.sh --update --enable-services"
 echo ""

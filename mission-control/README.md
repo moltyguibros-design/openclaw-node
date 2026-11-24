@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mission Control
 
-## Getting Started
+Next.js dashboard for an OpenClaw node. The app lives under `src/app`. `npm run dev` and
+`npm start` bind to 127.0.0.1 only, on port 3000.
 
-First, run the development server:
+## Access
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Every page and every `/api` request needs the session token stored in
+`~/.openclaw/config/mc-session-token` (created with mode 0600 on the first request the server
+handles). Bootstrap once per browser by opening
+`http://127.0.0.1:3000/?token=$(cat ~/.openclaw/config/mc-session-token)`: the `mc_session`
+cookie is set and the token is stripped from the URL. API clients send
+`Authorization: Bearer <token>`. Requests whose Host is not `127.0.0.1` or `localhost` get 403.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The node's own tools (`mc-api`, `mc-health`, memory maintenance, node-watch, the scheduler
+heartbeat, `compile-boot`) send that token to `OPENCLAW_MC_API_URL`, default
+`http://127.0.0.1:3000`, and refuse any value that is not loopback HTTP without credentials.
+`OPENCLAW_MC_URL` only sets the base of the links in notifications, so it may name a tailnet
+address without the token ever leaving the machine.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The installer writes `.env.local`:
 
-## Learn More
+- `WORKSPACE_ROOT`: the OpenClaw workspace. Set it; the code default is a single-operator path.
+- `DB_PATH`: the Mission Control SQLite database (default
+  `$WORKSPACE_ROOT/projects/mission-control/data/mission-control.db`).
+- `OPENCLAW_HOME`: the OpenClaw home (default `~/.openclaw`).
 
-To learn more about Next.js, take a look at the following resources:
+Mesh connectivity (`OPENCLAW_NATS`, `OPENCLAW_NATS_TOKEN`, `OPENCLAW_NATS_AUTH`) and the voice key
+(`GOOGLE_API_KEY`) are read from `$OPENCLAW_HOME/openclaw.env`, not from `.env.local`: edit them
+there and restart Mission Control. `install.sh --update` removes the copies older installs wrote
+into `.env.local`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The service (launchd `ai.openclaw.mission-control`, systemd `openclaw-mission-control`) runs
+from `$WORKSPACE_ROOT/projects/mission-control/`, not from this repo. Follow
+`workspace-docs/RUNBOOK_MC_DEPLOY.md`.
 
-## Deploy on Vercel
+## Tests
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`npm test` runs vitest over `src/lib/__tests__/`.
