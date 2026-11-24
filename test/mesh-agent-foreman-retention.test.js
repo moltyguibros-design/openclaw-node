@@ -2,7 +2,9 @@
 /**
  * mesh-agent-foreman-retention.test.js — agent startup prunes Foreman timelines
  * older than MESH_FOREMAN_RETENTION_DAYS (default 30; 0 keeps them all), as it
- * ages out kept task branches; nothing else in the directory is touched.
+ * ages out kept task branches; nothing else in the directory is touched. The
+ * window comes from the environment, else ~/.openclaw/openclaw.env, since the
+ * agent's service units do not pass it.
  *
  * Run: node --test test/mesh-agent-foreman-retention.test.js
  */
@@ -65,6 +67,32 @@ describe('Foreman timeline retention', () => {
     const ancient = file('T-ancient.jsonl', 400);
     await agent.__test.pruneForemanTimelines();
     assert.equal(fs.existsSync(ancient), true);
+  });
+
+  it('reads MESH_FOREMAN_RETENTION_DAYS from ~/.openclaw/openclaw.env, the environment still first', async () => {
+    const envDir = path.join(TMP, '.openclaw');
+    const envFile = path.join(envDir, 'openclaw.env');
+    fs.mkdirSync(envDir, { recursive: true });
+    try {
+      fs.writeFileSync(envFile, 'MESH_FOREMAN_RETENTION_DAYS=0\n');
+      const ancient = file('T-ancient.jsonl', 400);
+      await agent.__test.pruneForemanTimelines();
+      assert.equal(fs.existsSync(ancient), true, 'openclaw.env 0 keeps every timeline');
+
+      fs.writeFileSync(envFile, 'MESH_FOREMAN_RETENTION_DAYS=5\n');
+      const week = file('T-week.jsonl', 7);
+      const day = file('T-day.jsonl', 1);
+      await agent.__test.pruneForemanTimelines();
+      assert.equal(fs.existsSync(week), false, 'openclaw.env 5 prunes a 7-day-old timeline');
+      assert.equal(fs.existsSync(day), true);
+
+      process.env.MESH_FOREMAN_RETENTION_DAYS = '0';
+      const old = file('T-old.jsonl', 400);
+      await agent.__test.pruneForemanTimelines();
+      assert.equal(fs.existsSync(old), true, 'the environment wins over openclaw.env');
+    } finally {
+      fs.rmSync(envDir, { recursive: true, force: true });
+    }
   });
 
   it('a missing directory is nothing to prune', async () => {
