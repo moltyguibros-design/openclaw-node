@@ -8,7 +8,9 @@
  * deploy (`mesh-deploy.js --local --from <deployed> --to <sha>`). A failure
  * checks the previous sha back out and runs the same pinned deploy in reverse
  * — never a fetching deploy, which would fast-forward onto the failed commit
- * again. No SSH needed.
+ * again. Both that rollback and a trigger to a sha the tree is not behind (the
+ * lead's --rollback) are refused when the older code cannot open this node's
+ * memory store (lib/store-schema-guard.js). No SSH needed.
  *
  * NATS subjects:
  *   mesh.deploy.trigger    — deploy command from lead
@@ -43,6 +45,7 @@ const REPO_REMOTE_URL = process.env.OPENCLAW_REPO_URL ||
 const DEPLOY_SCRIPT = path.join(REPO_DIR, 'bin', 'mesh-deploy.js');
 // mesh-deploy's record of the sha this node last deployed in full.
 const DEPLOY_STATE = path.join(os.homedir(), '.openclaw', '.deploy-state.json');
+const STATE_DB = path.join(os.homedir(), '.openclaw', 'state.db');
 // npm install + `next build` + rolling restarts; each step inside the deploy
 // script has its own shorter timeout.
 const DEPLOY_TIMEOUT_MS = 20 * 60 * 1000;
@@ -205,6 +208,35 @@ async function runDeployScript(args) {
 }
 
 /**
+ * Why this node must not move back to toSha (a lead's --rollback, or any
+ * trigger to a sha its tree is not behind), or null. The lead cannot read this
+ * node's memory store, so the check is made here. A store that cannot be read
+ * refuses, as mesh-deploy --rollback refuses it: unlike the failed-deploy
+ * rollback, no failed `npm ci` took this tree's better-sqlite3, and the node
+ * stays on the tree it deployed. Only a schemaOverride covered by a verified
+ * signature (mesh-deploy --rollback --force) goes past it.
+ */
+async function backwardMoveRefusal(trigger, toSha, warnings) {
+  let refusal;
+  try {
+    refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({ repoDir: REPO_DIR, toSha, dbPath: STATE_DB });
+  } catch (err) {
+    refusal = err.message;
+  }
+  if (!refusal) return null;
+  if (trigger.schemaOverride !== true) return `${refusal} (or roll back anyway: mesh-deploy.js --rollback --force on the lead)`;
+  // Strict mode verified the signature, which covers every trigger field, before the trigger was queued.
+  const { requireSignedDeploy } = await import('../lib/deploy-trigger-auth.mjs');
+  if (!requireSignedDeploy()) {
+    return `${refusal} (schemaOverride ignored: OPENCLAW_REQUIRE_SIGNED_DEPLOY=0, so no verified signature covers it)`;
+  }
+  const warning = `${refusal} — rolling back anyway (signed schemaOverride from ${trigger.initiator || 'unknown'})`;
+  console.warn(`[deploy-listener] ${warning}`);
+  warnings.push(warning);
+  return null;
+}
+
+/**
  * Deploy exactly `trigger.sha` on this node and, if that fails, put the
  * previous deployed sha back. Returns the result record (status success |
  * skipped | failed); never throws.
@@ -274,6 +306,13 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
       if (dirty) {
         throw new Error(`tracked files differ from the commit (${dirty.split('\n').slice(0, 5).map(l => l.trim()).join(', ')}) — refusing to deploy over them`);
       }
+      if (!isAncestor(head, targetSha)) {
+        const refusal = await backwardMoveRefusal(trigger, targetSha, result.warnings);
+        if (refusal) {
+          result.rolledBack = false;
+          throw new Error(`rollback refused: ${refusal}`);
+        }
+      }
       if (head !== targetSha) {
         console.log(`[deploy-listener] Checking out ${targetSha.slice(0, 7)} (was ${head.slice(0, 7)})`);
         touched = true;
@@ -314,7 +353,7 @@ async function runDeploy(trigger, { forwardOnly = false } = {}) {
         let refusal = null;
         try {
           refusal = require('../lib/store-schema-guard').schemaRollbackRefusal({
-            repoDir: REPO_DIR, toSha: preSha, dbPath: path.join(os.homedir(), '.openclaw', 'state.db'),
+            repoDir: REPO_DIR, toSha: preSha, dbPath: STATE_DB,
           });
         } catch (guardErr) {
           console.warn(`[deploy-listener] ${guardErr.message.replace(/^cannot/, 'could not')} — rolling back without the check`);

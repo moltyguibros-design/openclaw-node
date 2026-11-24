@@ -103,6 +103,30 @@ describe('mesh-deploy fleet trigger sha', () => {
     assert.equal(git(lead, 'rev-parse', 'HEAD'), shaA, 'a remote-only deploy moved the lead checkout');
   });
 
+  // Each remote listener checks its own memory store before it moves back; only
+  // --force tells it to go below that store's schema, and only inside the signature.
+  it('a rollback --force carries the schema override inside the signed trigger, a plain one does not', async () => {
+    fs.mkdirSync(path.join(tmp, 'home', '.openclaw'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'home', '.openclaw', '.deploy-state.json'),
+      JSON.stringify({ lastSha: shaA, deployedSha: shaA, components: {} }));
+    const plain = deploy('--rollback', '--node', 'worker-7');
+    assert.equal(plain.status, 0, plain.stdout + plain.stderr);
+    assert.equal(plain.triggers.length, 1, plain.stdout);
+    assert.equal(plain.triggers[0].sha, short(shaA));
+    assert.equal('schemaOverride' in plain.triggers[0], false);
+
+    const forced = deploy('--rollback', '--node', 'worker-7', '--force');
+    assert.equal(forced.status, 0, forced.stdout + forced.stderr);
+    const [t] = forced.triggers;
+    assert.equal(t.schemaOverride, true);
+    const { verifyDeployTrigger } = await import('../lib/deploy-trigger-auth.mjs');
+    const opts = { requireSigned: true, trustedKeys: [t.signer_pubkey], seenIds: null };
+    assert.equal(verifyDeployTrigger(t, opts).ok, true);
+    assert.equal(verifyDeployTrigger({ ...plain.triggers[0], schemaOverride: true }, {
+      ...opts, trustedKeys: [plain.triggers[0].signer_pubkey],
+    }).ok, false, 'an override added after signing fails verification');
+  });
+
   it('fleetDeploy refuses to guess the sha', async () => {
     process.env.OPENCLAW_OBS_DB = path.join(tmp, 'obs-inproc.db');
     const { fleetDeploy } = require('../bin/fleet-deploy.js');

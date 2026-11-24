@@ -46,8 +46,9 @@
  *                                         are refused
  *   mesh deploy --rollback              — revert the last deploy (one that failed partway
  *                                         on this node first: back to the sha before it);
- *                                         refused below the memory store's schema unless
- *                                         --force
+ *                                         refused below the memory store's schema (each
+ *                                         remote listener checks its own) unless --force,
+ *                                         which the signed fleet trigger carries
  *   mesh deploy --status                — show what's deployed vs what's in git
  *
  * ENVIRONMENT:
@@ -1386,9 +1387,11 @@ async function main() {
 
     if (deployRemote) {
       header('Rolling back remote nodes');
-      // Listeners check out the rollback sha exactly.
+      // Listeners check out the rollback sha exactly, after checking it against
+      // their own memory store: this node cannot read theirs.
       const remote = await triggerFleet('deploy-rollback', {
         components: null, targetNodes, sha: toSha.slice(0, 7), branch: DEPLOY_BRANCH, dryRun, force: true,
+        schemaOverride: forceAll,
       });
       if (remote.error?.code === 'MODULE_NOT_FOUND') warn('Fleet deploy not available — remote rollback skipped');
       else if (remote.error) fail(`Remote rollback failed: ${remote.error.message}`);

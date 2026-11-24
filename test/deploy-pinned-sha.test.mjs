@@ -1303,3 +1303,87 @@ describe('a rollback whose memory-store schema cannot be read', () => {
     assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
   });
 });
+
+// mesh-deploy --rollback reaches the other nodes as a trigger to the older sha,
+// and the lead cannot read their stores: each listener checked that sha out
+// through its normal deploy path, with no schema check at all.
+describe('a rollback the lead sends is checked against this node\'s memory store', () => {
+  const env = { DEPLOY_TEST_PLATFORM: 'linux', DEPLOY_TEST_UNITS: 'openclaw-mesh-agent', OPENCLAW_REQUIRE_SIGNED_DEPLOY: '1' };
+  const backupName = 'state.db-v8-20261101T000000000Z.db';
+  let fx, S1;
+  // What mesh-deploy --rollback publishes: the older sha, every component reinstalled.
+  const leadRollback = extra => ({ sha: fx.S0.slice(0, 7), branch: 'main', components: ['all'], initiator: 'lead-test', force: true, ...extra });
+  const listen = (trigger, extraEnv = {}) => {
+    const script = `require(${JSON.stringify(path.join(REPO, 'bin', 'mesh-deploy-listener.js'))})
+      .runDeploy(${JSON.stringify(trigger)})
+      .then(r => console.log('RESULT ' + JSON.stringify(r)));`;
+    const run = spawnSync(process.execPath, ['-e', script], {
+      encoding: 'utf8', cwd: fx.node,
+      env: { ...process.env, ...env, HOME: fx.home, OPENCLAW_REPO_DIR: fx.node, DEPLOY_TEST_CALLS: fx.callLog, ...extraEnv },
+    });
+    const line = run.stdout.split('\n').find(l => l.startsWith('RESULT '));
+    assert.ok(line, run.stdout + run.stderr);
+    return { run, result: JSON.parse(line.slice('RESULT '.length)) };
+  };
+  before(() => {
+    fx = makeNode('lead-rollback', {
+      'bin/mesh-agent.js': '// agent v0\n',
+      'lib/extraction-store.mjs': 'if (getVersion(db) < 8) setVersion(db, 8);\n',
+    });
+    ranOk(fx.deploy(['--force'], env));
+    S1 = fx.commit('v1: schema v9', {
+      'bin/mesh-agent.js': '// agent v1\n',
+      'lib/extraction-store.mjs': 'export const EXTRACTION_SCHEMA_VERSION = 9;\n',
+    });
+    fs.mkdirSync(fx.rt('.openclaw/state.db'), { recursive: true });
+  });
+
+  it('a forward deploy is not checked, even against a store it cannot read', () => {
+    const { result } = listen(leadRollback({ sha: S1.slice(0, 7), force: false }));
+    assert.equal(result.status, 'success', result.errors.join('\n'));
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
+  });
+
+  it('refuses a rollback onto a store it cannot read, as mesh-deploy --rollback does', () => {
+    const { result } = listen(leadRollback());
+    assert.equal(result.status, 'failed');
+    assert.equal(result.rolledBack, false);
+    assert.match(result.errors.join('\n'), /rollback refused: cannot read the memory-store schema of .*state\.db/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1, 'the node stays on the tree it deployed');
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
+  });
+
+  it('refuses a rollback below the store\'s schema, points to the backup, and stays put', () => {
+    fs.rmSync(fx.rt('.openclaw/state.db'), { recursive: true });
+    const Database = createRequire(import.meta.url)('better-sqlite3');
+    write(fx.home, `.openclaw/backups/migration/${backupName}`, '');
+    const db = new Database(fx.rt('.openclaw/state.db'));
+    db.pragma('user_version = 9');
+    db.close();
+
+    const { result } = listen(leadRollback());
+    assert.equal(result.status, 'failed');
+    assert.equal(result.rolledBack, false);
+    const errors = result.errors.join('\n');
+    assert.match(errors, /rollback refused: .*state\.db is at memory-store schema v9, but .* code expects v8 or older/);
+    assert.ok(errors.includes(backupName), errors);
+    assert.match(errors, /mesh-deploy\.js --rollback --force/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v1\n');
+  });
+
+  it('ignores an override no verified signature covers', () => {
+    const { result } = listen(leadRollback({ schemaOverride: true }), { OPENCLAW_REQUIRE_SIGNED_DEPLOY: '0' });
+    assert.equal(result.status, 'failed');
+    assert.match(result.errors.join('\n'), /rollback refused: .*schema v9.*schemaOverride ignored/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), S1);
+  });
+
+  it('a signed override (mesh-deploy --rollback --force) rolls back anyway and says so', () => {
+    const { result } = listen(leadRollback({ schemaOverride: true }));
+    assert.equal(result.status, 'success', result.errors.join('\n'));
+    assert.match(result.warnings.join('\n'), /schema v9.* rolling back anyway/);
+    assert.equal(git(fx.node, 'rev-parse', 'HEAD'), fx.S0);
+    assert.equal(read(fx.rt('openclaw/bin/mesh-agent.js')), '// agent v0\n');
+  });
+});

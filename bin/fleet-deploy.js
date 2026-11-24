@@ -235,7 +235,7 @@ const START_WAIT_MS = 120000;
 // The caller names the sha and branch it resolved (mesh-deploy: origin's tip),
 // never the lead checkout's HEAD, which a remote-only deploy leaves stale.
 async function fleetDeploy(nc, opts) {
-  const { components, targetNodes, dryRun, force, timeoutMs, sha, branch, startWaitMs = START_WAIT_MS } = opts;
+  const { components, targetNodes, dryRun, force, schemaOverride, timeoutMs, sha, branch, startWaitMs = START_WAIT_MS } = opts;
   const timeout = timeoutMs || 120000; // 2 min default
   if (!sha) throw new Error('fleetDeploy needs the sha to deploy (opts.sha)');
   if (!/^[a-zA-Z0-9._/-]+$/.test(branch || '')) throw new Error(`Unsafe branch name: ${branch}`);
@@ -277,6 +277,8 @@ async function fleetDeploy(nc, opts) {
     timestamp: new Date().toISOString(),
     nodes: targetNodes || ['all'],
     force: !!force,
+    // Lets a listener roll back below its memory store's schema: signed with the rest.
+    ...(schemaOverride ? { schemaOverride: true } : {}),
   };
 
   // Every listener is strict by default and rejects an unsigned trigger, so the
